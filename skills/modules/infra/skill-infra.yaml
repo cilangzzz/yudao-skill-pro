@@ -1,0 +1,662 @@
+# Skill 文件 - yudao-module-infra 模块
+# 基础设施模块知识提取
+
+skill:
+  id: "skill-infra"
+  name: "Infrastructure Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-infra"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    infra 模块是整个系统的"基础设施层"，提供跨业务模块的通用能力支撑：
+    1. 文件存储服务 - 统一的文件上传、下载、管理能力，支持多存储渠道（本地/S3/OSS/FTP等）
+    2. 代码生成器 - 基于数据库表结构自动生成 CRUD 代码，提升开发效率
+    3. 定时任务管理 - 基于 Quartz 的任务调度管理，支持动态配置和监控
+    4. API 日志审计 - 记录 API 访问日志和异常日志，支持问题追踪和分析
+    5. 系统配置管理 - 键值对形式的系统参数配置
+    6. 数据源管理 - 多数据源配置和管理，支持代码生成器连接不同数据库
+
+    定位：作为底层基础设施模块，不直接面向终端用户业务，而是为其他业务模块提供技术能力支撑。
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - principle: "策略模式 + 工厂模式"
+      description: "文件存储采用策略模式，通过 FileClientFactory 创建不同的 FileClient 实现，支持本地、S3、FTP、SFTP、数据库等多种存储方式"
+    - principle: "模板方法模式"
+      description: "AbstractFileClient 抽象类定义文件客户端的通用流程，子类实现具体的初始化和操作逻辑"
+    - principle: "多态配置"
+      description: "FileClientConfig 使用 Jackson @JsonTypeInfo 实现多态序列化，配置类与存储类型一一对应"
+    - principle: "Builder 模式"
+      description: "CodegenBuilder 负责构建代码生成的表和列定义对象，CodegenEngine 负责执行代码生成"
+    - principle: "模板引擎"
+      description: "代码生成使用 Velocity 模板引擎，支持多前端框架（Vue2/Vue3/Vben/UniApp）"
+    - principle: "缓存优化"
+      description: "FileClient 使用 Guava LoadingCache 实现10秒异步刷新，避免频繁查询数据库"
+    - principle: "租户隔离忽略"
+      description: "infra 模块大部分表使用 @TenantIgnore 注解，基础设施不参与租户隔离"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "文件存储聚合"
+        type: "聚合根"
+        entities: ["FileDO", "FileConfigDO", "FileContentDO"]
+        description: "FileConfigDO 是配置聚合根，FileDO 是文件记录，FileContentDO 是数据库存储的文件内容"
+      - name: "代码生成聚合"
+        type: "聚合根"
+        entities: ["CodegenTableDO", "CodegenColumnDO"]
+        description: "CodegenTableDO 是表定义聚合根，CodegenColumnDO 是列定义，两者是一对多关系"
+      - name: "定时任务聚合"
+        type: "聚合根"
+        entities: ["JobDO", "JobLogDO"]
+        description: "JobDO 是任务定义聚合根，JobLogDO 是执行日志，两者是一对多关系"
+      - name: "API日志聚合"
+        type: "聚合根"
+        entities: ["ApiAccessLogDO", "ApiErrorLogDO"]
+        description: "独立的日志实体，无关联关系"
+
+    value_objects:
+      - name: "FileClientConfig"
+        description: "文件客户端配置接口，有多种实现（LocalFileClientConfig, S3FileClientConfig 等）"
+      - name: "FileStorageEnum"
+        description: "文件存储类型枚举，定义存储类型与配置类、客户端类的映射关系"
+
+    services:
+      - name: "FileService"
+        description: "文件管理服务，提供文件上传、下载、删除等功能"
+      - name: "FileConfigService"
+        description: "文件配置服务，管理存储渠道配置"
+      - name: "CodegenService"
+        description: "代码生成服务，提供表导入、代码生成等功能"
+      - name: "JobService"
+        description: "定时任务服务，与 Quartz 集成管理任务调度"
+      - name: "ConfigService"
+        description: "系统配置服务，管理键值对配置"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间 API 接口，供其他模块 RPC 调用"
+      components:
+        - "FileApi - 文件上传接口"
+        - "ConfigApi - 配置获取接口"
+        - "WebSocketSenderApi - WebSocket 消息发送接口"
+
+    - name: "controller"
+      purpose: "HTTP 接口层，提供 RESTful API"
+      components:
+        - "admin/codegen - 代码生成器接口"
+        - "admin/file - 文件管理接口"
+        - "admin/job - 定时任务管理接口"
+        - "admin/logger - API 日志管理接口"
+        - "admin/config - 系统配置接口"
+        - "admin/db - 数据源管理接口"
+        - "admin/redis - Redis 监控接口"
+        - "app/file - App 端文件上传接口"
+        - "admin/demo - 代码生成示例（Demo01/Demo02/Demo03）"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "codegen - 代码生成服务（CodegenService, CodegenBuilder, CodegenEngine）"
+        - "file - 文件服务（FileService, FileConfigService）"
+        - "job - 定时任务服务（JobService, JobLogService）"
+        - "logger - 日志服务（ApiAccessLogService, ApiErrorLogService）"
+        - "config - 配置服务（ConfigService）"
+        - "db - 数据源服务（DataSourceConfigService, DatabaseTableService）"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject - DO 实体类定义"
+        - "mysql - MyBatis Mapper 接口"
+
+    - name: "framework"
+      purpose: "框架层，模块内部基础设施"
+      components:
+        - "file/core/client - 文件客户端抽象和实现"
+        - "file/core/enums - 文件存储枚举"
+        - "codegen/config - 代码生成配置"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "策略模式 (Strategy Pattern)"
+      location: "framework/file/core/client/"
+      purpose: "FileClient 接口定义统一操作，不同存储实现（LocalFileClient, S3FileClient, FtpFileClient 等）"
+    - pattern: "工厂模式 (Factory Pattern)"
+      location: "framework/file/core/client/FileClientFactoryImpl.java"
+      purpose: "根据存储类型动态创建对应的 FileClient 实例"
+    - pattern: "模板方法模式 (Template Method Pattern)"
+      location: "framework/file/core/client/AbstractFileClient.java"
+      purpose: "定义文件客户端的初始化和刷新模板流程，子类实现 doInit()"
+    - pattern: "Builder 模式"
+      location: "service/codegen/inner/CodegenBuilder.java"
+      purpose: "构建 CodegenTableDO 和 CodegenColumnDO 对象"
+    - pattern: "模板引擎模式"
+      location: "service/codegen/inner/CodegenEngine.java"
+      purpose: "使用 Velocity 模板生成代码，支持多前端框架"
+    - pattern: "缓存模式"
+      location: "service/file/FileConfigServiceImpl.java"
+      purpose: "使用 Guava LoadingCache 缓存 FileClient，10秒异步刷新"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "FileApi"
+        method: "createFile()"
+        description: "其他模块调用上传文件，返回文件 URL"
+      - name: "FileApi"
+        method: "presignGetUrl()"
+        description: "获取文件预签名访问地址"
+      - name: "ConfigApi"
+        method: "getConfigValueByKey()"
+        description: "其他模块获取系统配置值"
+      - name: "WebSocketSenderApi"
+        method: "send()"
+        description: "发送 WebSocket 消息"
+    consumers:
+      - module: "yudao-module-system"
+        api: "FileApi"
+        purpose: "用户头像上传"
+      - module: "yudao-module-member"
+        api: "FileApi"
+        purpose: "会员头像上传"
+      - module: "所有模块"
+        api: "ConfigApi"
+        purpose: "获取系统配置"
+    mq: []
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有 DO 继承 BaseDO，包含 creator, createTime, updater, updateTime, deleted 字段。大部分表使用 @TenantIgnore 忽略租户隔离。"
+
+  # 核心数据表
+  tables:
+    # ========== 文件存储相关 ==========
+    - name: "infra_file_config"
+      comment: "文件配置表"
+      entity: "FileConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "配置编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "配置名称" }
+        - { name: "storage", type: "TINYINT", comment: "存储器类型，枚举 FileStorageEnum" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+        - { name: "master", type: "BIT", comment: "是否主配置" }
+        - { name: "config", type: "JSON", comment: "存储配置，JSON 格式" }
+      indexes:
+        - { name: "idx_master", columns: ["master"] }
+
+    - name: "infra_file"
+      comment: "文件表"
+      entity: "FileDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "文件编号，主键" }
+        - { name: "config_id", type: "BIGINT", comment: "配置编号，关联 FileConfigDO" }
+        - { name: "name", type: "VARCHAR", comment: "原文件名" }
+        - { name: "path", type: "VARCHAR", comment: "文件路径" }
+        - { name: "url", type: "VARCHAR", comment: "访问地址" }
+        - { name: "type", type: "VARCHAR", comment: "MIME 类型" }
+        - { name: "size", type: "BIGINT", comment: "文件大小（字节）" }
+      indexes:
+        - { name: "idx_config_id", columns: ["config_id"] }
+
+    - name: "infra_file_content"
+      comment: "文件内容表（数据库存储方式）"
+      entity: "FileContentDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号，主键" }
+        - { name: "config_id", type: "BIGINT", comment: "配置编号" }
+        - { name: "path", type: "VARCHAR", comment: "文件路径" }
+        - { name: "content", type: "LONGBLOB", comment: "文件内容" }
+
+    # ========== 代码生成相关 ==========
+    - name: "infra_codegen_table"
+      comment: "代码生成表定义"
+      entity: "CodegenTableDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号，主键" }
+        - { name: "data_source_config_id", type: "BIGINT", comment: "数据源编号" }
+        - { name: "scene", type: "TINYINT", comment: "生成场景" }
+        - { name: "table_name", type: "VARCHAR", comment: "表名称" }
+        - { name: "table_comment", type: "VARCHAR", comment: "表描述" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+        - { name: "module_name", type: "VARCHAR", comment: "模块名" }
+        - { name: "business_name", type: "VARCHAR", comment: "业务名" }
+        - { name: "class_name", type: "VARCHAR", comment: "类名称" }
+        - { name: "class_comment", type: "VARCHAR", comment: "类描述" }
+        - { name: "author", type: "VARCHAR", comment: "作者" }
+        - { name: "template_type", type: "TINYINT", comment: "模板类型" }
+        - { name: "front_type", type: "TINYINT", comment: "前端类型" }
+        - { name: "parent_menu_id", type: "BIGINT", comment: "父菜单编号" }
+        - { name: "master_table_id", type: "BIGINT", comment: "主表编号（子表时使用）" }
+        - { name: "sub_join_column_id", type: "BIGINT", comment: "子表关联字段编号" }
+        - { name: "sub_join_many", type: "BIT", comment: "是否一对多" }
+        - { name: "tree_parent_column_id", type: "BIGINT", comment: "树表父字段编号" }
+        - { name: "tree_name_column_id", type: "BIGINT", comment: "树表名称字段编号" }
+
+    - name: "infra_codegen_column"
+      comment: "代码生成列定义"
+      entity: "CodegenColumnDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号，主键" }
+        - { name: "table_id", type: "BIGINT", comment: "表编号，关联 CodegenTableDO" }
+        - { name: "column_name", type: "VARCHAR", comment: "字段名" }
+        - { name: "data_type", type: "VARCHAR", comment: "数据库类型" }
+        - { name: "column_comment", type: "VARCHAR", comment: "字段描述" }
+        - { name: "nullable", type: "BIT", comment: "是否允许空" }
+        - { name: "primary_key", type: "BIT", comment: "是否主键" }
+        - { name: "ordinal_position", type: "INT", comment: "排序" }
+        - { name: "java_type", type: "VARCHAR", comment: "Java 类型" }
+        - { name: "java_field", type: "VARCHAR", comment: "Java 属性名" }
+        - { name: "dict_type", type: "VARCHAR", comment: "字典类型" }
+        - { name: "example", type: "VARCHAR", comment: "数据示例" }
+        - { name: "create_operation", type: "BIT", comment: "是否 Create 操作字段" }
+        - { name: "update_operation", type: "BIT", comment: "是否 Update 操作字段" }
+        - { name: "list_operation", type: "BIT", comment: "是否 List 查询字段" }
+        - { name: "list_operation_condition", type: "VARCHAR", comment: "List 查询条件" }
+        - { name: "list_operation_result", type: "BIT", comment: "是否 List 返回字段" }
+        - { name: "html_type", type: "VARCHAR", comment: "显示类型" }
+
+    # ========== 定时任务相关 ==========
+    - name: "infra_job"
+      comment: "定时任务表"
+      entity: "JobDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "任务编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "任务名称" }
+        - { name: "status", type: "TINYINT", comment: "任务状态" }
+        - { name: "handler_name", type: "VARCHAR", comment: "处理器名称" }
+        - { name: "handler_param", type: "VARCHAR", comment: "处理器参数" }
+        - { name: "cron_expression", type: "VARCHAR", comment: "CRON 表达式" }
+        - { name: "retry_count", type: "INT", comment: "重试次数" }
+        - { name: "retry_interval", type: "INT", comment: "重试间隔（毫秒）" }
+        - { name: "monitor_timeout", type: "INT", comment: "监控超时时间（毫秒）" }
+
+    - name: "infra_job_log"
+      comment: "定时任务日志表"
+      entity: "JobLogDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "日志编号，主键" }
+        - { name: "job_id", type: "BIGINT", comment: "任务编号，关联 JobDO" }
+        - { name: "handler_name", type: "VARCHAR", comment: "处理器名称" }
+        - { name: "handler_param", type: "VARCHAR", comment: "处理器参数" }
+        - { name: "execute_index", type: "INT", comment: "第几次执行" }
+        - { name: "begin_time", type: "DATETIME", comment: "开始时间" }
+        - { name: "end_time", type: "DATETIME", comment: "结束时间" }
+        - { name: "duration", type: "INT", comment: "执行时长（毫秒）" }
+        - { name: "status", type: "TINYINT", comment: "执行状态" }
+        - { name: "result", type: "VARCHAR", comment: "执行结果" }
+
+    # ========== API 日志相关 ==========
+    - name: "infra_api_access_log"
+      comment: "API 访问日志表"
+      entity: "ApiAccessLogDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号，主键" }
+        - { name: "trace_id", type: "VARCHAR", comment: "链路追踪编号" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "user_type", type: "TINYINT", comment: "用户类型" }
+        - { name: "application_name", type: "VARCHAR", comment: "应用名" }
+        - { name: "request_method", type: "VARCHAR", comment: "请求方法" }
+        - { name: "request_url", type: "VARCHAR", comment: "请求地址" }
+        - { name: "request_params", type: "VARCHAR", comment: "请求参数" }
+        - { name: "response_body", type: "VARCHAR", comment: "响应结果" }
+        - { name: "user_ip", type: "VARCHAR", comment: "用户 IP" }
+        - { name: "user_agent", type: "VARCHAR", comment: "浏览器 UA" }
+        - { name: "operate_module", type: "VARCHAR", comment: "操作模块" }
+        - { name: "operate_name", type: "VARCHAR", comment: "操作名" }
+        - { name: "operate_type", type: "TINYINT", comment: "操作分类" }
+        - { name: "begin_time", type: "DATETIME", comment: "开始时间" }
+        - { name: "end_time", type: "DATETIME", comment: "结束时间" }
+        - { name: "duration", type: "INT", comment: "执行时长（毫秒）" }
+        - { name: "result_code", type: "INT", comment: "结果码" }
+        - { name: "result_msg", type: "VARCHAR", comment: "结果提示" }
+
+    - name: "infra_api_error_log"
+      comment: "API 异常日志表"
+      entity: "ApiErrorLogDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号，主键" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "trace_id", type: "VARCHAR", comment: "链路追踪编号" }
+        - { name: "user_type", type: "TINYINT", comment: "用户类型" }
+        - { name: "application_name", type: "VARCHAR", comment: "应用名" }
+        - { name: "request_method", type: "VARCHAR", comment: "请求方法" }
+        - { name: "request_url", type: "VARCHAR", comment: "请求地址" }
+        - { name: "request_params", type: "VARCHAR", comment: "请求参数" }
+        - { name: "user_ip", type: "VARCHAR", comment: "用户 IP" }
+        - { name: "user_agent", type: "VARCHAR", comment: "浏览器 UA" }
+        - { name: "exception_time", type: "DATETIME", comment: "异常时间" }
+        - { name: "exception_name", type: "VARCHAR", comment: "异常名" }
+        - { name: "exception_message", type: "VARCHAR", comment: "异常消息" }
+        - { name: "exception_root_cause_message", type: "VARCHAR", comment: "异常根消息" }
+        - { name: "exception_stack_trace", type: "VARCHAR", comment: "异常栈轨迹" }
+        - { name: "exception_class_name", type: "VARCHAR", comment: "异常类名" }
+        - { name: "exception_file_name", type: "VARCHAR", comment: "异常文件名" }
+        - { name: "exception_method_name", type: "VARCHAR", comment: "异常方法名" }
+        - { name: "exception_line_number", type: "INT", comment: "异常行号" }
+        - { name: "process_status", type: "TINYINT", comment: "处理状态" }
+        - { name: "process_time", type: "DATETIME", comment: "处理时间" }
+        - { name: "process_user_id", type: "BIGINT", comment: "处理用户编号" }
+
+    # ========== 系统配置相关 ==========
+    - name: "infra_config"
+      comment: "参数配置表"
+      entity: "ConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "参数主键" }
+        - { name: "category", type: "VARCHAR", comment: "参数分类" }
+        - { name: "name", type: "VARCHAR", comment: "参数名称" }
+        - { name: "config_key", type: "VARCHAR", comment: "参数键名" }
+        - { name: "value", type: "VARCHAR", comment: "参数键值" }
+        - { name: "type", type: "TINYINT", comment: "参数类型" }
+        - { name: "visible", type: "BIT", comment: "是否可见" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    # ========== 数据源配置相关 ==========
+    - name: "infra_data_source_config"
+      comment: "数据源配置表"
+      entity: "DataSourceConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键编号，0 表示 Master 数据源" }
+        - { name: "name", type: "VARCHAR", comment: "连接名" }
+        - { name: "url", type: "VARCHAR", comment: "数据源连接" }
+        - { name: "username", type: "VARCHAR", comment: "用户名" }
+        - { name: "password", type: "VARCHAR", comment: "密码（加密存储）" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "infra_file"
+      to: "infra_file_config"
+      type: "N:1"
+      foreign_key: "config_id"
+    - from: "infra_codegen_column"
+      to: "infra_codegen_table"
+      type: "N:1"
+      foreign_key: "table_id"
+    - from: "infra_job_log"
+      to: "infra_job"
+      type: "N:1"
+      foreign_key: "job_id"
+    - from: "infra_codegen_table"
+      to: "infra_codegen_table"
+      type: "N:1"
+      foreign_key: "master_table_id"
+      comment: "主子表关联"
+    - from: "infra_codegen_table"
+      to: "infra_data_source_config"
+      type: "N:1"
+      foreign_key: "data_source_config_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - xxx') - Swagger 文档标签"
+      - "@RestController - REST 控制器"
+      - "@RequestMapping('/infra/xxx') - 请求路径前缀"
+      - "@Validated - 参数校验"
+      - "@PreAuthorize('@ss.hasPermission('infra:xxx:action')') - 权限控制"
+    example: |
+      @Tag(name = "管理后台 - 文件存储")
+      @RestController
+      @RequestMapping("/infra/file")
+      @Validated
+      public class FileController {
+          @Resource
+          private FileService fileService;
+
+          @PostMapping("/upload")
+          @Operation(summary = "上传文件")
+          public CommonResult<String> uploadFile(@Valid FileUploadReqVO uploadReqVO) throws Exception {
+              MultipartFile file = uploadReqVO.getFile();
+              byte[] content = IoUtil.readBytes(file.getInputStream());
+              return success(fileService.createFile(content, file.getOriginalFilename(),
+                      uploadReqVO.getDirectory(), file.getContentType()));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "XxxService 接口定义业务方法，XxxServiceImpl 实现类"
+    impl_pattern: |
+      @Service
+      @Validated
+      public class XxxServiceImpl implements XxxService {
+          @Resource
+          private XxxMapper xxxMapper;
+
+          // 使用 static final 定义常量
+          // 使用 @Transactional 注解控制事务
+          // 使用 validateXxxExists 方法校验存在性
+          // 使用 exception(ErrorCode) 抛出业务异常
+      }
+    example: |
+      @Service
+      public class FileServiceImpl implements FileService {
+          @Resource
+          private FileConfigService fileConfigService;
+          @Resource
+          private FileMapper fileMapper;
+
+          @Override
+          public String createFile(byte[] content, String name, String directory, String type) {
+              // 1. 处理参数
+              // 2. 生成上传路径
+              String path = generateUploadPath(name, directory);
+              // 3. 上传到文件存储器
+              FileClient client = fileConfigService.getMasterFileClient();
+              String url = client.upload(content, path, type);
+              // 4. 保存到数据库
+              fileMapper.insert(new FileDO()...);
+              return url;
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      public interface XxxMapper extends BaseMapperX<XxxDO> {
+          // 继承 BaseMapperX 获得通用 CRUD 方法
+          // 自定义查询方法使用 @Select 注解或 XML
+          // 分页查询返回 PageResult<XxxDO>
+      }
+    example: |
+      public interface FileMapper extends BaseMapperX<FileDO> {
+          default PageResult<FileDO> selectPage(FilePageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<FileDO>()
+                      .likeIfPresent(FileDO::getPath, reqVO.getPath())
+                      .likeIfPresent(FileDO::getName, reqVO.getName())
+                      .betweenIfPresent(FileDO::getCreateTime, reqVO.getCreateTime())
+                      .orderByDesc(FileDO::getId));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-001-xxx-xxx"
+    examples:
+      - code: "1_001_000_001"
+        message: "参数配置不存在"
+      - code: "1_001_001_000"
+        message: "定时任务不存在"
+      - code: "1_001_003_001"
+        message: "文件不存在"
+      - code: "1_001_004_002"
+        message: "表定义已经存在"
+      - code: "1_001_006_000"
+        message: "文件配置不存在"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ErrorCode)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增文件存储类型
+  new_channel:
+    title: "新增文件存储类型"
+    steps:
+      - step: "1. 创建配置类"
+        description: "在 framework/file/core/client/ 下创建 XxxFileClientConfig 实现 FileClientConfig"
+        code: |
+          @Data
+          public class XxxFileClientConfig implements FileClientConfig {
+              private String endpoint;
+              private String accessKey;
+              private String secretKey;
+          }
+      - step: "2. 创建客户端类"
+        description: "创建 XxxFileClient 继承 AbstractFileClient<XxxFileClientConfig>"
+        code: |
+          public class XxxFileClient extends AbstractFileClient<XxxFileClientConfig> {
+              public XxxFileClient(Long id, XxxFileClientConfig config) {
+                  super(id, config);
+              }
+
+              @Override
+              protected void doInit() {
+                  // 初始化客户端
+              }
+
+              @Override
+              public String upload(byte[] content, String path, String type) {
+                  // 实现上传逻辑
+              }
+
+              @Override
+              public void delete(String path) {
+                  // 实现删除逻辑
+              }
+
+              @Override
+              public byte[] getContent(String path) {
+                  // 实现获取内容逻辑
+              }
+          }
+      - step: "3. 注册枚举"
+        description: "在 FileStorageEnum 中添加新存储类型"
+        code: |
+          XXX(30, XxxFileClientConfig.class, XxxFileClient.class);
+      - step: "4. 测试验证"
+        description: "编写单元测试验证功能正确性"
+
+  # 新增代码生成模板
+  new_feature:
+    title: "自定义代码生成模板"
+    steps:
+      - step: "1. 创建模板文件"
+        description: "在 resources/codegen/ 下创建 .vm 模板文件"
+      - step: "2. 注册模板路径"
+        description: "在 CodegenEngine 的 SERVER_TEMPLATES 或 FRONT_TEMPLATES 中添加映射"
+        code: |
+          .put(javaTemplatePath("custom/template"), javaModuleImplMainFilePath("custom/${table.className}Custom"))
+      - step: "3. 添加模板变量"
+        description: "在 initBindingMap() 方法中添加模板需要的全局变量"
+      - step: "4. 测试生成结果"
+        description: "使用预览接口验证生成代码"
+
+  # 最佳实践
+  best_practices:
+    - practice: "文件上传路径规范"
+      description: "使用 generateUploadPath() 方法生成唯一路径，包含日期前缀和时间戳后缀，避免文件名冲突"
+    - practice: "文件配置缓存"
+      description: "使用 Guava LoadingCache 缓存 FileClient，避免频繁查询数据库，支持异步刷新"
+    - practice: "代码生成同步"
+      description: "使用 syncCodegenFromDB() 同步数据库表结构变更，保持代码生成定义与数据库一致"
+    - practice: "定时任务幂等"
+      description: "JobHandler.execute() 应实现幂等性，避免重复执行产生副作用"
+    - practice: "错误日志追踪"
+      description: "通过 traceId 关联 API 访问日志和错误日志，便于问题排查"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-framework-common"
+      purpose: "通用工具类、CommonResult、PageResult 等"
+    - module: "yudao-framework-mybatis"
+      purpose: "MyBatis-Plus 封装、BaseMapperX、BaseDO"
+    - module: "yudao-framework-quartz"
+      purpose: "Quartz 封装、JobHandler、SchedulerManager"
+    - module: "yudao-framework-tenant"
+      purpose: "租户支持、@TenantIgnore"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      purpose: "ORM 框架，提供 CRUD 封装"
+    - name: "Quartz"
+      purpose: "定时任务调度框架"
+    - name: "Velocity"
+      purpose: "模板引擎，用于代码生成"
+    - name: "Hutool"
+      purpose: "Java 工具类库"
+    - name: "Guava"
+      purpose: "Google 工具库，使用 Cache、Table 等"
+    - name: "MinIO/S3 SDK"
+      purpose: "对象存储客户端"
+    - name: "Swagger/OpenAPI"
+      purpose: "API 文档注解"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/file/FileServiceImpl.java"
+    purpose: "文件服务实现，核心上传下载逻辑"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/file/FileConfigServiceImpl.java"
+    purpose: "文件配置服务，FileClient 缓存管理"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/framework/file/core/client/FileClient.java"
+    purpose: "文件客户端接口定义"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/framework/file/core/client/AbstractFileClient.java"
+    purpose: "文件客户端抽象类，模板方法模式"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/framework/file/core/enums/FileStorageEnum.java"
+    purpose: "文件存储类型枚举，配置类与客户端类映射"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/codegen/CodegenServiceImpl.java"
+    purpose: "代码生成服务实现"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/codegen/inner/CodegenEngine.java"
+    purpose: "代码生成引擎，模板渲染核心"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/codegen/inner/CodegenBuilder.java"
+    purpose: "代码生成对象构建器"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/job/JobServiceImpl.java"
+    purpose: "定时任务服务实现，Quartz 集成"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/api/file/FileApi.java"
+    purpose: "文件 API 接口，供其他模块调用"
+  - path: "yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义"

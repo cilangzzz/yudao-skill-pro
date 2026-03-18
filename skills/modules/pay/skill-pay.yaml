@@ -1,0 +1,654 @@
+# Skill 文档 - 支付模块 (yudao-module-pay)
+# 支付中台核心模块，支持多渠道支付、退款、转账等功能
+
+skill:
+  id: "skill-pay"
+  name: "Pay Module Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-pay"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    支付中台模块，为整个系统提供统一的支付能力支持。
+    核心功能包括：
+    1. 多渠道支付：支持微信支付（JSAPI/小程序/App/Native/H5/付款码）、支付宝（PC/WAP/App/扫码/条码）、钱包支付、模拟支付
+    2. 统一退款：支持全额退款和部分退款，自动处理退款状态同步
+    3. 转账功能：支持企业付款到零钱、转账到银行卡
+    4. 钱包系统：用户余额充值、消费、提现
+    5. 异步通知：统一处理各渠道的支付/退款回调
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "策略模式：各支付渠道实现 PayClient 接口，统一调用方式，隔离渠道差异"
+    - "模板方法模式：AbstractPayClient 定义统一流程，子类实现具体细节"
+    - "工厂模式：PayClientFactory 管理客户端创建和缓存，支持动态刷新配置"
+    - "开闭原则：新增支付渠道只需创建新的 PayClient 实现类，无需修改现有代码"
+    - "依赖倒置：Service 层依赖 PayClient 接口而非具体实现"
+    - "单一职责：每个 PayClient 只负责对应渠道的支付逻辑"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "PayOrder"
+        type: "聚合根"
+        description: "支付订单聚合根，管理订单生命周期"
+        entities: ["PayOrderExtension"]
+        invariants:
+          - "订单状态：WAITING -> SUCCESS/REFUND/CLOSED"
+          - "退款金额不能超过支付金额"
+
+      - name: "PayRefund"
+        type: "聚合根"
+        description: "退款单聚合根，管理退款流程"
+        entities: []
+        invariants:
+          - "退款状态：WAITING -> SUCCESS/FAILURE"
+          - "一个支付订单可以有多个退款单"
+
+      - name: "PayChannel"
+        type: "实体"
+        description: "支付渠道配置，关联支付客户端"
+        entities: []
+
+      - name: "PayApp"
+        type: "实体"
+        description: "支付应用，业务系统的支付入口"
+        entities: []
+
+    value_objects:
+      - name: "PayClientConfig"
+        description: "支付客户端配置，不同渠道有不同的配置类型"
+        implementations: ["AlipayPayClientConfig", "WxPayClientConfig"]
+
+    services:
+      - name: "PayOrderService"
+        description: "支付订单领域服务，负责订单创建、提交、回调处理"
+      - name: "PayRefundService"
+        description: "退款领域服务，负责退款发起、回调处理"
+      - name: "PayChannelService"
+        description: "渠道管理服务，负责渠道配置和客户端获取"
+      - name: "PayNotifyService"
+        description: "通知服务，负责异步通知的处理和重试"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口，供其他模块调用"
+      components:
+        - "PayOrderApi: 支付订单API"
+        - "PayRefundApi: 退款API"
+        - "PayTransferApi: 转账API"
+        - "PayWalletApi: 钱包API"
+
+    - name: "controller"
+      purpose: "HTTP接口，暴露给前端调用"
+      components:
+        - "PayOrderController: 支付订单管理"
+        - "PayRefundController: 退款管理"
+        - "PayChannelController: 渠道配置管理"
+        - "PayAppController: 应用管理"
+        - "PayNotifyController: 通知回调"
+
+    - name: "service"
+      purpose: "业务逻辑层，核心领域服务"
+      components:
+        - "PayOrderServiceImpl: 订单创建、提交、回调"
+        - "PayRefundServiceImpl: 退款创建、回调"
+        - "PayChannelServiceImpl: 渠道管理"
+        - "PayNotifyServiceImpl: 通知处理"
+
+    - name: "framework/pay/core/client"
+      purpose: "支付客户端抽象层，对接各支付渠道SDK"
+      components:
+        - "PayClient: 客户端接口"
+        - "AbstractPayClient: 抽象基类"
+        - "PayClientFactory: 客户端工厂"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "PayOrderMapper: 订单数据访问"
+        - "PayRefundMapper: 退款数据访问"
+        - "PayChannelMapper: 渠道数据访问"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "Factory Pattern"
+      location: "yudao-module-pay/framework/pay/core/client/impl/PayClientFactoryImpl.java"
+      purpose: "根据渠道编码创建对应的支付客户端，缓存已创建的客户端，支持配置热刷新"
+      implementation: |
+        // 注册渠道与客户端类的映射
+        clientClass.put(WX_PUB, WxPubPayClient.class);
+        clientClass.put(ALIPAY_WAP, AlipayWapPayClient.class);
+
+        // 反射创建客户端实例
+        ReflectUtil.newInstance(payClientClass, channelId, config);
+
+    - pattern: "Template Method Pattern"
+      location: "yudao-module-pay/framework/pay/core/client/impl/AbstractPayClient.java"
+      purpose: "定义支付/退款/转账的统一流程，包括参数校验、异常处理、日志记录"
+      implementation: |
+        // 模板方法：统一下单
+        public final PayOrderRespDTO unifiedOrder(PayOrderUnifiedReqDTO reqDTO) {
+            ValidationUtils.validate(reqDTO);  // 参数校验
+            try {
+                return doUnifiedOrder(reqDTO);   // 子类实现
+            } catch (Throwable ex) {
+                throw buildPayException(ex);     // 统一异常处理
+            }
+        }
+
+    - pattern: "Strategy Pattern"
+      location: "yudao-module-pay/framework/pay/core/client/impl/*"
+      purpose: "不同支付渠道实现不同的支付策略，但暴露统一接口"
+      implementations:
+        - "AbstractAlipayPayClient: 支付宝支付策略"
+        - "AbstractWxPayClient: 微信支付策略"
+        - "WalletPayClient: 钱包支付策略"
+        - "MockPayClient: 模拟支付策略"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "PayOrderApi"
+        methods: ["createOrder", "getOrder"]
+        consumers: ["订单模块", "会员模块"]
+      - name: "PayRefundApi"
+        methods: ["createRefund", "getRefund"]
+        consumers: ["订单模块"]
+      - name: "PayWalletApi"
+        methods: ["addBalance", "getWallet"]
+        consumers: ["会员模块", "订单模块"]
+
+    consumers: []
+
+    mq:
+      - type: "Job"
+        name: "PayOrderSyncJob"
+        purpose: "定时同步待支付订单状态"
+      - type: "Job"
+        name: "PayOrderExpireJob"
+        purpose: "定时关闭过期订单"
+      - type: "Job"
+        name: "PayNotifyJob"
+        purpose: "异步通知重试"
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO | TenantBaseDO"
+    description: "支付渠道 PayChannelDO 继承 TenantBaseDO 支持多租户，其他实体继承 BaseDO"
+
+  # 核心数据表
+  tables:
+    - name: "pay_app"
+      comment: "支付应用表"
+      entity: "PayAppDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "应用编号" }
+        - { name: "name", type: "String", comment: "应用名称" }
+        - { name: "status", type: "Integer", comment: "开启状态" }
+        - { name: "order_notify_url", type: "String", comment: "订单回调地址" }
+        - { name: "refund_notify_url", type: "String", comment: "退款回调地址" }
+
+    - name: "pay_channel"
+      comment: "支付渠道表"
+      entity: "PayChannelDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "渠道编号" }
+        - { name: "code", type: "String", comment: "渠道编码，如 wx_pub, alipay_wap" }
+        - { name: "status", type: "Integer", comment: "开启状态" }
+        - { name: "fee_rate", type: "Double", comment: "渠道费率" }
+        - { name: "app_id", type: "Long", comment: "应用编号" }
+        - { name: "config", type: "PayClientConfig", comment: "支付配置JSON" }
+
+    - name: "pay_order"
+      comment: "支付订单表"
+      entity: "PayOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "订单编号" }
+        - { name: "app_id", type: "Long", comment: "应用编号" }
+        - { name: "channel_id", type: "Long", comment: "渠道编号" }
+        - { name: "channel_code", type: "String", comment: "渠道编码" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "merchant_order_id", type: "String", comment: "商户订单号" }
+        - { name: "subject", type: "String", comment: "商品标题" }
+        - { name: "body", type: "String", comment: "商品描述" }
+        - { name: "price", type: "Integer", comment: "支付金额(分)" }
+        - { name: "status", type: "Integer", comment: "支付状态: 0待支付/10成功/20退款/30关闭" }
+        - { name: "refund_price", type: "Integer", comment: "已退款金额(分)" }
+        - { name: "channel_order_no", type: "String", comment: "渠道订单号" }
+        - { name: "expire_time", type: "LocalDateTime", comment: "过期时间" }
+        - { name: "success_time", type: "LocalDateTime", comment: "支付成功时间" }
+      indexes:
+        - { name: "idx_app_merchant", columns: ["app_id", "merchant_order_id"] }
+
+    - name: "pay_order_extension"
+      comment: "支付订单扩展表"
+      entity: "PayOrderExtensionDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "扩展编号" }
+        - { name: "order_id", type: "Long", comment: "订单编号" }
+        - { name: "no", type: "String", comment: "外部订单号" }
+        - { name: "channel_id", type: "Long", comment: "渠道编号" }
+        - { name: "channel_code", type: "String", comment: "渠道编码" }
+        - { name: "status", type: "Integer", comment: "支付状态" }
+        - { name: "channel_notify_data", type: "String", comment: "渠道回调数据" }
+
+    - name: "pay_refund"
+      comment: "退款订单表"
+      entity: "PayRefundDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "退款编号" }
+        - { name: "no", type: "String", comment: "外部退款号" }
+        - { name: "app_id", type: "Long", comment: "应用编号" }
+        - { name: "channel_id", type: "Long", comment: "渠道编号" }
+        - { name: "order_id", type: "Long", comment: "支付订单编号" }
+        - { name: "order_no", type: "String", comment: "支付订单号" }
+        - { name: "merchant_order_id", type: "String", comment: "商户订单号" }
+        - { name: "merchant_refund_id", type: "String", comment: "商户退款号" }
+        - { name: "pay_price", type: "Integer", comment: "原支付金额(分)" }
+        - { name: "refund_price", type: "Integer", comment: "退款金额(分)" }
+        - { name: "status", type: "Integer", comment: "退款状态: 0待退款/1成功/2失败" }
+        - { name: "reason", type: "String", comment: "退款原因" }
+        - { name: "channel_refund_no", type: "String", comment: "渠道退款单号" }
+        - { name: "success_time", type: "LocalDateTime", comment: "退款成功时间" }
+
+    - name: "pay_wallet"
+      comment: "钱包表"
+      entity: "PayWalletDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "钱包编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "balance", type: "Integer", comment: "余额(分)" }
+        - { name: "freeze_price", type: "Integer", comment: "冻结金额(分)" }
+
+    - name: "pay_wallet_transaction"
+      comment: "钱包交易表"
+      entity: "PayWalletTransactionDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "交易编号" }
+        - { name: "wallet_id", type: "Long", comment: "钱包编号" }
+        - { name: "biz_type", type: "Integer", comment: "业务类型" }
+        - { name: "biz_id", type: "String", comment: "业务编号" }
+        - { name: "amount", type: "Integer", comment: "交易金额(分)" }
+        - { name: "balance", type: "Integer", comment: "交易后余额(分)" }
+
+    - name: "pay_transfer"
+      comment: "转账表"
+      entity: "PayTransferDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "转账编号" }
+        - { name: "no", type: "String", comment: "外部转账号" }
+        - { name: "app_id", type: "Long", comment: "应用编号" }
+        - { name: "channel_id", type: "Long", comment: "渠道编号" }
+        - { name: "type", type: "Integer", comment: "转账类型" }
+        - { name: "price", type: "Integer", comment: "转账金额(分)" }
+        - { name: "status", type: "Integer", comment: "转账状态" }
+        - { name: "user_name", type: "String", comment: "收款人姓名" }
+        - { name: "user_account", type: "String", comment: "收款人账号" }
+
+    - name: "pay_notify_task"
+      comment: "通知任务表"
+      entity: "PayNotifyTaskDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "任务编号" }
+        - { name: "app_id", type: "Long", comment: "应用编号" }
+        - { name: "type", type: "Integer", comment: "通知类型: 1订单/2退款" }
+        - { name: "data_id", type: "Long", comment: "数据编号" }
+        - { name: "status", type: "Integer", comment: "通知状态" }
+        - { name: "notify_times", type: "Integer", comment: "通知次数" }
+        - { name: "max_notify_times", type: "Integer", comment: "最大通知次数" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "pay_app"
+      to: "pay_channel"
+      type: "1:N"
+      foreign_key: "app_id"
+      description: "一个应用可以有多个支付渠道"
+
+    - from: "pay_app"
+      to: "pay_order"
+      type: "1:N"
+      foreign_key: "app_id"
+      description: "一个应用可以有多个支付订单"
+
+    - from: "pay_order"
+      to: "pay_order_extension"
+      type: "1:N"
+      foreign_key: "order_id"
+      description: "一个订单可以有多个扩展单（多次支付尝试）"
+
+    - from: "pay_order"
+      to: "pay_refund"
+      type: "1:N"
+      foreign_key: "order_id"
+      description: "一个订单可以有多个退款单"
+
+    - from: "pay_channel"
+      to: "pay_order"
+      type: "1:N"
+      foreign_key: "channel_id"
+      description: "一个渠道可以有多个订单"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@RestController"
+      - "@RequestMapping"
+      - "@PreAuthorize('@ss.hasPermission')")
+      - "@Operation(summary = ...)"
+    example: |
+      @RestController
+      @RequestMapping("/pay/order")
+      @Tag(name = "管理后台 - 支付订单")
+      public class PayOrderController {
+          @PostMapping("/submit")
+          @Operation(summary = "提交支付订单")
+          @PermitAll  // 支付提交允许匿名访问
+          public CommonResult<PayOrderSubmitRespVO> submitOrder(
+                  @RequestBody @Valid PayOrderSubmitReqVO reqVO,
+                  HttpServletRequest request) {
+              return success(orderService.submitOrder(reqVO, getClientIP(request)));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "接口定义业务方法，使用 @Valid 注解校验参数"
+    impl_pattern: "实现类使用 @Service 和 @Validated 注解，事务使用 @Transactional"
+    example: |
+      @Service
+      @Validated
+      @Slf4j
+      public class PayOrderServiceImpl implements PayOrderService {
+
+          @Override
+          public Long createOrder(PayOrderCreateReqDTO reqDTO) {
+              // 1. 校验 App
+              PayAppDO app = appService.validPayApp(reqDTO.getAppKey());
+
+              // 2. 查询是否已存在
+              PayOrderDO order = orderMapper.selectByAppIdAndMerchantOrderId(
+                      app.getId(), reqDTO.getMerchantOrderId());
+              if (order != null) {
+                  return order.getId();
+              }
+
+              // 3. 创建订单
+              order = PayOrderConvert.INSTANCE.convert(reqDTO)
+                      .setAppId(app.getId())
+                      .setStatus(PayOrderStatusEnum.WAITING.getStatus());
+              orderMapper.insert(order);
+              return order.getId();
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: "继承 BaseMapperX，使用 MyBatis-Plus 的 LambdaQueryWrapper"
+    example: |
+      @Mapper
+      public interface PayOrderMapper extends BaseMapperX<PayOrderDO> {
+
+          default PayOrderDO selectByAppIdAndMerchantOrderId(Long appId, String merchantOrderId) {
+              return selectOne(PayOrderDO::getAppId, appId,
+                               PayOrderDO::getMerchantOrderId, merchantOrderId);
+          }
+
+          default int updateByIdAndStatus(Long id, Integer status, PayOrderDO updateObj) {
+              return update(updateObj, new LambdaUpdateWrapper<PayOrderDO>()
+                      .eq(PayOrderDO::getId, id)
+                      .eq(PayOrderDO::getStatus, status));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-007-XXX-XXX"
+    examples:
+      - code: "1_007_000_000"
+        message: "App 不存在"
+      - code: "1_007_001_000"
+        message: "支付渠道的配置不存在"
+      - code: "1_007_002_000"
+        message: "支付订单不存在"
+      - code: "1_007_002_003"
+        message: "支付订单已经过期"
+      - code: "1_007_006_000"
+        message: "退款金额超过订单可退款金额"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE, args...)"
+
+  # 支付客户端使用示例
+  pay_client_usage:
+    create_order: |
+      // 1. 获取支付客户端
+      PayClient client = channelService.getPayClient(channelId);
+
+      // 2. 构建统一下单请求
+      PayOrderUnifiedReqDTO reqDTO = new PayOrderUnifiedReqDTO()
+              .setOutTradeNo(orderExtension.getNo())
+              .setSubject(order.getSubject())
+              .setPrice(order.getPrice())
+              .setExpireTime(order.getExpireTime())
+              .setNotifyUrl(notifyUrl);
+
+      // 3. 调用支付渠道
+      PayOrderRespDTO respDTO = client.unifiedOrder(reqDTO);
+
+    create_refund: |
+      // 1. 获取支付客户端
+      PayClient client = channelService.getPayClient(channelId);
+
+      // 2. 构建退款请求
+      PayRefundUnifiedReqDTO reqDTO = new PayRefundUnifiedReqDTO()
+              .setOutTradeNo(order.getNo())
+              .setOutRefundNo(refund.getNo())
+              .setRefundPrice(refund.getRefundPrice())
+              .setReason(refund.getReason());
+
+      // 3. 调用退款接口
+      PayRefundRespDTO respDTO = client.unifiedRefund(reqDTO);
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增支付渠道步骤
+  new_channel:
+    title: "新增支付渠道（如添加银联支付）"
+    steps:
+      - step: 1
+        title: "创建支付渠道枚举"
+        file: "PayChannelEnum.java"
+        action: "添加新的渠道编码，如 UNION_PAY(\"union_pay\", \"银联支付\")"
+
+      - step: 2
+        title: "创建配置类"
+        file: "UnionPayClientConfig.java"
+        action: |
+          实现 PayClientConfig 接口，定义银联支付所需的配置字段：
+          @Data
+          public class UnionPayClientConfig implements PayClientConfig {
+              private String merchantId;      // 商户号
+              private String apiKey;          // API密钥
+              private String certPath;        // 证书路径
+              // ...
+          }
+
+      - step: 3
+        title: "创建抽象客户端类（可选）"
+        file: "AbstractUnionPayClient.java"
+        action: |
+          如果有多种支付方式（如扫码、APP），可以创建抽象类：
+          public abstract class AbstractUnionPayClient
+              extends AbstractPayClient<UnionPayClientConfig> {
+              // 实现公共逻辑
+          }
+
+      - step: 4
+        title: "创建具体客户端实现类"
+        file: "UnionPayQrPayClient.java"
+        action: |
+          继承 AbstractPayClient 或抽象类，实现具体支付逻辑：
+          public class UnionPayQrPayClient extends AbstractPayClient<UnionPayClientConfig> {
+
+              public UnionPayQrPayClient(Long channelId, UnionPayClientConfig config) {
+                  super(channelId, PayChannelEnum.UNION_PAY.getCode(), config);
+              }
+
+              @Override
+              protected void doInit() {
+                  // 初始化银联SDK
+              }
+
+              @Override
+              protected PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO) {
+                  // 调用银联下单接口
+              }
+
+              @Override
+              protected PayOrderRespDTO doParseOrderNotify(...) {
+                  // 解析银联回调
+              }
+
+              // 实现其他抽象方法...
+          }
+
+      - step: 5
+        title: "注册到工厂"
+        file: "PayClientFactoryImpl.java"
+        action: |
+          在构造函数中注册新的客户端：
+          public PayClientFactoryImpl() {
+              // ...
+              clientClass.put(UNION_PAY, UnionPayQrPayClient.class);
+          }
+
+      - step: 6
+        title: "添加单元测试"
+        file: "UnionPayQrPayClientTest.java"
+        action: "编写测试用例验证支付流程"
+
+  # 新增功能步骤
+  new_feature:
+    title: "新增业务功能"
+    steps:
+      - step: 1
+        title: "创建DO实体"
+        action: "在 dal/dataobject 下创建实体类"
+      - step: 2
+        title: "创建Mapper"
+        action: "在 dal/mysql 下创建Mapper接口"
+      - step: 3
+        title: "创建Service接口和实现"
+        action: "在 service 下创建服务层"
+      - step: 4
+        title: "创建Controller"
+        action: "在 controller 下创建HTTP接口"
+      - step: 5
+        title: "创建API（如需模块间调用）"
+        action: "在 api 下创建对外API接口"
+
+  # 最佳实践
+  best_practices:
+    - "支付金额统一使用 Integer 类型，单位为分，避免浮点精度问题"
+    - "订单状态变更使用乐观锁，通过 updateByIdAndStatus 方法保证并发安全"
+    - "支付回调需要验签，使用渠道提供的验签方法"
+    - "异步通知需要支持重试机制，使用 PayNotifyTask 记录通知状态"
+    - "支付订单需要设置过期时间，定时任务关闭过期订单"
+    - "退款金额累计不能超过支付金额，在 Service 层进行校验"
+    - "客户端配置支持热刷新，通过 refresh 方法更新配置"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      api: "TenantApi"
+      purpose: "获取租户信息"
+    - module: "yudao-module-member"
+      api: "MemberUserApi"
+      purpose: "获取用户信息（钱包支付）"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "alipay-sdk-java"
+      version: "4.x"
+      purpose: "支付宝支付SDK"
+    - name: "weixin-java-pay"
+      version: "4.x"
+      purpose: "微信支付SDK（WxJava）"
+    - name: "hutool-all"
+      version: "5.x"
+      purpose: "Java工具库"
+    - name: "mybatis-plus"
+      version: "3.x"
+      purpose: "ORM框架"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/PayClient.java"
+    purpose: "支付客户端接口，定义统一的支付/退款/转账方法"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/impl/AbstractPayClient.java"
+    purpose: "支付客户端抽象基类，实现模板方法模式"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/impl/PayClientFactoryImpl.java"
+    purpose: "支付客户端工厂，管理客户端创建和缓存"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/impl/alipay/AbstractAlipayPayClient.java"
+    purpose: "支付宝支付抽象类，实现支付宝统一的接口"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/impl/weixin/AbstractWxPayClient.java"
+    purpose: "微信支付抽象类，实现微信统一的接口"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/service/order/PayOrderServiceImpl.java"
+    purpose: "支付订单服务实现，核心业务逻辑"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/service/refund/PayRefundServiceImpl.java"
+    purpose: "退款服务实现"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/dal/dataobject/order/PayOrderDO.java"
+    purpose: "支付订单实体"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/enums/PayChannelEnum.java"
+    purpose: "支付渠道枚举"
+
+  - path: "yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/enums/ErrorCodeConstants.java"
+    purpose: "错误码定义"

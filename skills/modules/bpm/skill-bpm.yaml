@@ -1,0 +1,719 @@
+# Skill 文件 - BPM 工作流模块
+# 用于提取模块知识的标准格式
+
+skill:
+  id: "skill-bpm"
+  name: "BPM 工作流 Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-bpm"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    BPM (Business Process Management) 模块是工作流引擎核心模块，基于 Flowable 6 实现完整的业务流程管理功能。
+    主要解决企业内部审批流程、业务流程自动化等问题。
+
+    核心功能包括：
+    1. 流程定义管理 - 支持 BPMN 2.0 标准设计器和仿钉钉/飞书的 Simple 设计器
+    2. 流程表单管理 - 动态表单配置，支持与流程绑定
+    3. 流程实例管理 - 发起、取消、查询流程实例
+    4. 任务审批管理 - 待办、已办、审批通过/拒绝、退回、委派、转办、加签/减签
+    5. 流程抄送 - 支持流程抄送功能
+    6. 流程监听器 - 支持执行监听器和任务监听器扩展
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "领域驱动设计 (DDD): 按流程定义(Definition)、流程实例(Instance)、任务(Task)划分限界上下文"
+    - "策略模式: 审批人策略(BpmTaskCandidateStrategy)使用策略模式，支持多种审批人分配方式"
+    - "事件驱动: 流程状态变更通过 Spring ApplicationEvent 发布事件，实现解耦"
+    - "模板方法模式: BpmTaskCandidateStrategy 接口定义审批人计算模板"
+    - "适配器模式: 封装 Flowable API，隔离底层工作流引擎实现"
+    - "监听器模式: 通过 Flowable Listener 扩展流程行为"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "流程定义 (ProcessDefinition)"
+        type: "聚合根"
+        entities:
+          - "BpmFormDO - 流程表单"
+          - "BpmCategoryDO - 流程分类"
+          - "BpmUserGroupDO - 审批用户组"
+          - "BpmProcessDefinitionInfoDO - 流程定义扩展信息"
+          - "BpmProcessListenerDO - 流程监听器"
+          - "BpmProcessExpressionDO - 流程表达式"
+        description: "流程定义是流程的模板，包含流程结构、表单配置、审批规则等元数据"
+
+      - name: "流程实例 (ProcessInstance)"
+        type: "聚合根"
+        entities:
+          - "BpmProcessInstanceCopyDO - 流程抄送记录"
+        description: "流程实例是流程定义的一次执行，由 Flowable 原生表管理，扩展信息存储在 DO 中"
+
+      - name: "流程任务 (Task)"
+        type: "实体"
+        entities: []
+        description: "流程任务是流程实例中的审批节点，由 Flowable 原生表管理"
+
+    value_objects:
+      - "BpmProcessInstanceCreateReqDTO - 流程实例创建请求"
+      - "BpmModelMetaInfoVO - 流程模型元信息"
+      - "BpmSimpleModelNodeVO - Simple 设计器节点定义"
+
+    services:
+      - "BpmModelService - 流程模型管理服务"
+      - "BpmProcessDefinitionService - 流程定义管理服务"
+      - "BpmProcessInstanceService - 流程实例管理服务"
+      - "BpmTaskService - 流程任务管理服务"
+      - "BpmFormService - 表单管理服务"
+      - "BpmMessageService - 流程消息服务"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口，供其他模块调用"
+      components:
+        - "BpmProcessInstanceApi - 流程实例创建接口"
+        - "BpmProcessTaskApi - 流程任务操作接口"
+        - "BpmProcessInstanceStatusEvent - 流程状态变更事件"
+
+    - name: "controller"
+      purpose: "HTTP接口，供前端调用"
+      components:
+        - "BpmModelController - 流程模型管理"
+        - "BpmProcessDefinitionController - 流程定义管理"
+        - "BpmProcessInstanceController - 流程实例管理"
+        - "BpmTaskController - 流程任务管理"
+        - "BpmFormController - 表单管理"
+        - "BpmCategoryController - 分类管理"
+        - "BpmUserGroupController - 用户组管理"
+        - "BpmOALeaveController - 请假申请示例"
+
+    - name: "service"
+      purpose: "业务逻辑层，封装核心业务"
+      components:
+        - "definition/ - 流程定义相关服务"
+        - "task/ - 流程任务相关服务"
+        - "message/ - 消息通知服务"
+        - "oa/ - OA 业务示例（请假）"
+
+    - name: "dal"
+      purpose: "数据访问层，与数据库交互"
+      components:
+        - "dataobject/definition/ - 定义相关 DO"
+        - "dataobject/task/ - 任务相关 DO"
+        - "dataobject/oa/ - OA 相关 DO"
+        - "mysql/ - MyBatis Mapper"
+        - "redis/ - Redis 缓存"
+
+    - name: "framework/flowable"
+      purpose: "Flowable 框架集成层"
+      components:
+        - "config/BpmFlowableConfiguration - Flowable 配置"
+        - "core/candidate/ - 审批人策略实现"
+        - "core/listener/ - 流程监听器"
+        - "core/behavior/ - 自定义行为"
+        - "core/util/ - 工具类"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "策略模式 (Strategy Pattern)"
+      location: "framework/flowable/core/candidate/BpmTaskCandidateStrategy.java"
+      purpose: "审批人分配策略，支持角色、部门、用户、表达式等多种分配方式"
+
+    - pattern: "事件驱动 (Event-Driven)"
+      location: "api/event/BpmProcessInstanceStatusEvent.java"
+      purpose: "流程状态变更事件，通知其他模块流程结果"
+
+    - pattern: "监听器模式 (Listener Pattern)"
+      location: "framework/flowable/core/listener/BpmTaskEventListener.java"
+      purpose: "监听 Flowable 任务事件，执行自定义逻辑"
+
+    - pattern: "工厂模式 (Factory Pattern)"
+      location: "framework/flowable/core/behavior/BpmActivityBehaviorFactory.java"
+      purpose: "创建自定义 ActivityBehavior，扩展 Flowable 行为"
+
+    - pattern: "模板方法模式 (Template Method)"
+      location: "service/task/trigger/BpmTrigger.java"
+      purpose: "流程触发器抽象，支持 HTTP 请求、表单操作等触发类型"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "BpmProcessInstanceApi"
+        method: "createProcessInstance"
+        purpose: "供其他模块发起流程实例"
+      - name: "BpmProcessTaskApi"
+        method: "triggerTask"
+        purpose: "触发流程任务执行"
+      - name: "BpmProcessInstanceStatusEvent"
+        purpose: "流程状态变更事件，供其他模块监听"
+
+    consumers:
+      - module: "system"
+        api: "AdminUserApi"
+        purpose: "获取用户信息"
+      - module: "system"
+        api: "DeptApi"
+        purpose: "获取部门信息"
+      - module: "system"
+        api: "PermissionApi"
+        purpose: "获取用户角色、权限"
+
+    mq: []
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有 DO 继承 BaseDO，包含 creator、createTime、updater、updateTime、deleted 字段"
+
+  # 核心数据表
+  tables:
+    - name: "bpm_category"
+      comment: "流程分类表"
+      entity: "BpmCategoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "分类编号" }
+        - { name: "name", type: "String", comment: "分类名" }
+        - { name: "code", type: "String", comment: "分类标志" }
+        - { name: "description", type: "String", comment: "分类描述" }
+        - { name: "status", type: "Integer", comment: "分类状态" }
+        - { name: "sort", type: "Integer", comment: "分类排序" }
+
+    - name: "bpm_form"
+      comment: "流程表单表"
+      entity: "BpmFormDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "表单名" }
+        - { name: "status", type: "Integer", comment: "状态" }
+        - { name: "conf", type: "String", comment: "表单配置 JSON" }
+        - { name: "fields", type: "List<String>", comment: "表单项数组" }
+        - { name: "remark", type: "String", comment: "备注" }
+
+    - name: "bpm_user_group"
+      comment: "审批用户组表"
+      entity: "BpmUserGroupDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "组名" }
+        - { name: "description", type: "String", comment: "描述" }
+        - { name: "status", type: "Integer", comment: "状态" }
+        - { name: "user_ids", type: "Set<Long>", comment: "成员用户编号数组" }
+
+    - name: "bpm_process_definition_info"
+      comment: "流程定义扩展信息表"
+      entity: "BpmProcessDefinitionInfoDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "process_definition_id", type: "String", comment: "流程定义编号" }
+        - { name: "model_id", type: "String", comment: "流程模型编号" }
+        - { name: "model_type", type: "Integer", comment: "模型类型(10:BPMN, 20:Simple)" }
+        - { name: "category", type: "String", comment: "流程分类编码" }
+        - { name: "form_type", type: "Integer", comment: "表单类型" }
+        - { name: "form_id", type: "Long", comment: "动态表单编号" }
+        - { name: "form_conf", type: "String", comment: "表单配置" }
+        - { name: "form_fields", type: "List<String>", comment: "表单字段" }
+        - { name: "start_user_ids", type: "List<Long>", comment: "可发起用户" }
+        - { name: "manager_user_ids", type: "List<Long>", comment: "可管理用户" }
+        - { name: "simple_model", type: "String", comment: "Simple设计器模型数据" }
+
+    - name: "bpm_process_listener"
+      comment: "流程监听器表"
+      entity: "BpmProcessListenerDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "name", type: "String", comment: "监听器名字" }
+        - { name: "status", type: "Integer", comment: "状态" }
+        - { name: "type", type: "String", comment: "监听类型(execution/task)" }
+        - { name: "event", type: "String", comment: "监听事件" }
+        - { name: "value_type", type: "String", comment: "值类型(class/delegateExpression/expression)" }
+        - { name: "value", type: "String", comment: "值" }
+
+    - name: "bpm_process_expression"
+      comment: "流程表达式表"
+      entity: "BpmProcessExpressionDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "表达式名字" }
+        - { name: "status", type: "Integer", comment: "状态" }
+        - { name: "expression", type: "String", comment: "表达式" }
+
+    - name: "bpm_process_instance_copy"
+      comment: "流程抄送表"
+      entity: "BpmProcessInstanceCopyDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "start_user_id", type: "Long", comment: "发起人ID" }
+        - { name: "process_instance_id", type: "String", comment: "流程实例编号" }
+        - { name: "process_definition_id", type: "String", comment: "流程定义编号" }
+        - { name: "activity_id", type: "String", comment: "流程活动编号" }
+        - { name: "task_id", type: "String", comment: "任务编号" }
+        - { name: "user_id", type: "Long", comment: "被抄送用户编号" }
+        - { name: "reason", type: "String", comment: "抄送意见" }
+
+    - name: "bpm_oa_leave"
+      comment: "OA请假申请表（示例业务表）"
+      entity: "BpmOALeaveDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "请假表单主键" }
+        - { name: "user_id", type: "Long", comment: "申请人用户编号" }
+        - { name: "type", type: "String", comment: "请假类型" }
+        - { name: "reason", type: "String", comment: "原因" }
+        - { name: "start_time", type: "LocalDateTime", comment: "开始时间" }
+        - { name: "end_time", type: "LocalDateTime", comment: "结束时间" }
+        - { name: "day", type: "Long", comment: "请假天数" }
+        - { name: "status", type: "Integer", comment: "审批结果" }
+        - { name: "process_instance_id", type: "String", comment: "流程编号" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "bpm_process_definition_info"
+      to: "bpm_category"
+      type: "N:1"
+      foreign_key: "category -> code"
+    - from: "bpm_process_definition_info"
+      to: "bpm_form"
+      type: "N:1"
+      foreign_key: "form_id -> id"
+    - from: "bpm_process_instance_copy"
+      to: "Flowable ProcessInstance"
+      type: "N:1"
+      foreign_key: "process_instance_id -> id"
+    - from: "bpm_oa_leave"
+      to: "Flowable ProcessInstance"
+      type: "1:1"
+      foreign_key: "process_instance_id -> id"
+
+  # Flowable 原生表说明
+  flowable_tables:
+    - name: "ACT_RE_DEPLOYMENT"
+      comment: "部署信息表"
+    - name: "ACT_RE_PROCDEF"
+      comment: "流程定义表"
+    - name: "ACT_RE_MODEL"
+      comment: "流程模型表"
+    - name: "ACT_RU_EXECUTION"
+      comment: "运行时执行实例表"
+    - name: "ACT_RU_TASK"
+      comment: "运行时任务表"
+    - name: "ACT_HI_PROCINST"
+      comment: "历史流程实例表"
+    - name: "ACT_HI_TASKINST"
+      comment: "历史任务实例表"
+    - name: "ACT_HI_VARINST"
+      comment: "历史变量表"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - XXX')"
+      - "@RestController"
+      - "@RequestMapping('/bpm/xxx')"
+      - "@Validated"
+      - "@PreAuthorize('@ss.hasPermission(xxx)')"
+    example: |
+      @Tag(name = "管理后台 - 流程任务实例")
+      @RestController
+      @RequestMapping("/bpm/task")
+      @Validated
+      public class BpmTaskController {
+
+          @Resource
+          private BpmTaskService taskService;
+
+          @PutMapping("/approve")
+          @Operation(summary = "通过任务")
+          @PreAuthorize("@ss.hasPermission('bpm:task:update')")
+          public CommonResult<Boolean> approveTask(@Valid @RequestBody BpmTaskApproveReqVO reqVO) {
+              taskService.approveTask(getLoginUserId(), reqVO);
+              return success(true);
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: |
+      接口定义在 service/ 目录下，命名规则：Bpm{Entity}Service
+
+      核心服务接口：
+      - BpmModelService: 流程模型管理
+      - BpmProcessDefinitionService: 流程定义管理
+      - BpmProcessInstanceService: 流程实例管理
+      - BpmTaskService: 流程任务管理
+
+      方法分类：
+      1. Query 查询相关方法 - 查询操作
+      2. Update 写入相关方法 - 修改操作
+      3. Event 事件相关方法 - 事件处理
+
+    impl_pattern: |
+      实现类放在同目录下，命名规则：Bpm{Entity}ServiceImpl
+      使用 @Service 和 @Validated 注解
+
+      注意事项：
+      1. 循环依赖使用 @Lazy 注解
+      2. 事务操作使用 @Transactional
+      3. 数据权限使用 @DataPermission
+
+    example: |
+      @Service
+      @Validated
+      @Slf4j
+      public class BpmProcessInstanceServiceImpl implements BpmProcessInstanceService {
+
+          @Resource
+          private RuntimeService runtimeService;  // Flowable 运行时服务
+          @Resource
+          private HistoryService historyService;  // Flowable 历史服务
+
+          @Override
+          public String createProcessInstance(Long userId, BpmProcessInstanceCreateReqDTO createReqDTO) {
+              // 1. 获取流程定义
+              ProcessDefinition processDefinition = processDefinitionService.getProcessDefinition(
+                  createReqDTO.getProcessDefinitionKey());
+              // 2. 构建流程实例
+              ProcessInstanceBuilder builder = runtimeService.createProcessInstanceBuilder()
+                  .processDefinitionKey(createReqDTO.getProcessDefinitionKey())
+                  .businessKey(createReqDTO.getBusinessKey())
+                  .variables(createReqDTO.getVariables());
+              // 3. 启动流程实例
+              return builder.start().getId();
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      Mapper 继承 BaseMapperX，提供基础 CRUD 操作
+      使用 @Mapper 注解
+
+      特殊查询：
+      - 使用 MyBatis-Plus 的 LambdaQueryWrapper
+      - 复杂查询使用自定义 XML 或 @Select 注解
+
+    example: |
+      @Mapper
+      public interface BpmFormMapper extends BaseMapperX<BpmFormDO> {
+
+          default PageResult<BpmFormDO> selectPage(BpmFormPageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<BpmFormDO>()
+                  .likeIfPresent(BpmFormDO::getName, reqVO.getName())
+                  .orderByDesc(BpmFormDO::getId));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-009-XXX-XXX"
+    examples:
+      - code: "1_009_002_000"
+        message: "已经存在流程标识为【{}】的流程"
+      - code: "1_009_003_002"
+        message: "流程定义不存在"
+      - code: "1_009_004_000"
+        message: "流程实例不存在"
+      - code: "1_009_005_001"
+        message: "操作失败，原因：该任务的审批人不是你"
+      - code: "1_009_005_002"
+        message: "流程任务不存在"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE, params...)"
+
+  # 流程发起代码示例
+  process_start_example: |
+    // 方式一：通过 API 接口发起流程（推荐）
+    @Resource
+    private BpmProcessInstanceApi processInstanceApi;
+
+    public void submitLeave(LeaveCreateReqVO createReqVO) {
+        // 1. 创建业务数据
+        BpmOALeaveDO leave = new BpmOALeaveDO();
+        // ... 设置属性
+        leaveMapper.insert(leave);
+
+        // 2. 发起流程
+        BpmProcessInstanceCreateReqDTO reqDTO = new BpmProcessInstanceCreateReqDTO();
+        reqDTO.setProcessDefinitionKey("oa_leave"); // 流程定义 Key
+        reqDTO.setBusinessKey(leave.getId().toString()); // 业务主键
+        reqDTO.setVariables(BeanUtil.beanToMap(createReqVO)); // 流程变量
+        String processInstanceId = processInstanceApi.createProcessInstance(userId, reqDTO);
+
+        // 3. 关联流程实例
+        leave.setProcessInstanceId(processInstanceId);
+        leaveMapper.updateById(leave);
+    }
+
+    // 方式二：通过 Controller 接口发起流程（前端调用）
+    @PostMapping("/create")
+    public CommonResult<String> createProcessInstance(@Valid @RequestBody BpmProcessInstanceCreateReqVO createReqVO) {
+        return success(processInstanceService.createProcessInstance(getLoginUserId(), createReqVO));
+    }
+
+  # 任务审批代码示例
+  task_approve_example: |
+    // 审批通过
+    @PutMapping("/approve")
+    public CommonResult<Boolean> approveTask(@Valid @RequestBody BpmTaskApproveReqVO reqVO) {
+        taskService.approveTask(getLoginUserId(), reqVO);
+        return success(true);
+    }
+
+    // 审批拒绝
+    @PutMapping("/reject")
+    public CommonResult<Boolean> rejectTask(@Valid @RequestBody BpmTaskRejectReqVO reqVO) {
+        taskService.rejectTask(getLoginUserId(), reqVO);
+        return success(true);
+    }
+
+    // 任务退回
+    @PutMapping("/return")
+    public CommonResult<Boolean> returnTask(@Valid @RequestBody BpmTaskReturnReqVO reqVO) {
+        taskService.returnTask(getLoginUserId(), reqVO);
+        return success(true);
+    }
+
+    // 任务委派
+    @PutMapping("/delegate")
+    public CommonResult<Boolean> delegateTask(@Valid @RequestBody BpmTaskDelegateReqVO reqVO) {
+        taskService.delegateTask(getLoginUserId(), reqVO);
+        return success(true);
+    }
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增审批类型
+  new_approval_type:
+    title: "新增审批类型（如报销、采购等）"
+    steps:
+      - step: 1
+        action: "创建业务 DO 实体"
+        description: |
+          在 dal/dataobject/ 下创建业务实体类，如 BpmExpenseDO
+          需要包含 processInstanceId 字段关联流程实例
+
+      - step: 2
+        action: "创建业务表"
+        description: |
+          创建对应数据库表，包含业务字段和 process_instance_id 字段
+
+      - step: 3
+        action: "创建业务服务"
+        description: |
+          创建 Service 接口和实现类
+          实现业务逻辑，调用 BpmProcessInstanceApi 发起流程
+
+      - step: 4
+        action: "实现流程状态监听"
+        description: |
+          实现 BpmProcessInstanceStatusEventListener
+          监听流程状态变更，更新业务表状态
+
+          示例：
+          @Component
+          public class BpmExpenseStatusListener extends BpmProcessInstanceStatusEventListener {
+              @Override
+              protected void onEvent(BpmProcessInstanceStatusEvent event) {
+                  if ("expense".equals(event.getProcessDefinitionKey())) {
+                      // 更新报销单状态
+                      expenseMapper.updateStatus(event.getBusinessKey(), event.getStatus());
+                  }
+              }
+          }
+
+      - step: 5
+        action: "配置流程定义"
+        description: |
+          在管理后台配置流程定义
+          1. 创建流程分类
+          2. 创建流程表单
+          3. 设计流程图（BPMN 或 Simple）
+          4. 配置审批人策略
+
+  # 自定义审批人策略
+  new_candidate_strategy:
+    title: "自定义审批人策略"
+    steps:
+      - step: 1
+        action: "添加策略枚举"
+        description: |
+          在 BpmTaskCandidateStrategyEnum 中添加新的策略类型
+
+      - step: 2
+        action: "实现策略接口"
+        description: |
+          实现 BpmTaskCandidateStrategy 接口
+
+          示例：
+          @Component
+          public class BpmTaskCandidateCustomStrategy implements BpmTaskCandidateStrategy {
+
+              @Override
+              public BpmTaskCandidateStrategyEnum getStrategy() {
+                  return BpmTaskCandidateStrategyEnum.CUSTOM;
+              }
+
+              @Override
+              public void validateParam(String param) {
+                  // 校验参数
+              }
+
+              @Override
+              public Set<Long> calculateUsersByTask(DelegateExecution execution, String param) {
+                  // 计算审批人
+                  return calculateUsers(param);
+              }
+          }
+
+      - step: 3
+        action: "注册策略 Bean"
+        description: |
+          使用 @Component 注解，Spring 自动注册到策略工厂
+
+  # 自定义流程监听器
+  new_process_listener:
+    title: "自定义流程监听器"
+    steps:
+      - step: 1
+        action: "创建监听器类"
+        description: |
+          实现 ExecutionListener 或 TaskListener 接口
+
+          示例（执行监听器）：
+          @Component
+          public class CustomExecutionListener implements ExecutionListener {
+              @Override
+              public void notify(DelegateExecution execution) {
+                  // 监听逻辑
+              }
+          }
+
+          示例（任务监听器）：
+          @Component
+          public class CustomTaskListener implements TaskListener {
+              @Override
+              public void notify(DelegateTask delegateTask) {
+                  // 监听逻辑
+              }
+          }
+
+      - step: 2
+        action: "注册监听器"
+        description: |
+          方式一：通过数据库配置（推荐）
+          在 bpm_process_listener 表中添加监听器配置
+
+          方式二：在 BPMN XML 中配置
+          <extensionElements>
+              <flowable:executionListener event="start" delegateExpression="${customExecutionListener}"/>
+          </extensionElements>
+
+  # 最佳实践
+  best_practices:
+    - "流程设计原则：流程定义和业务数据分离，通过 businessKey 关联"
+    - "审批人策略：优先使用已有的审批人策略，如角色、部门负责人、用户组等"
+    - "流程变量：使用流程变量传递表单数据，避免过度依赖业务查询"
+    - "事件监听：通过监听流程状态变更事件更新业务状态，实现解耦"
+    - "Simple 设计器：对于简单审批流程，推荐使用 Simple 设计器，降低学习成本"
+    - "流程版本：同一流程定义可以部署多个版本，已运行的实例使用旧版本"
+    - "权限控制：通过 managerUserIds 配置流程管理员，实现流程管理权限分离"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      api: "AdminUserApi"
+      purpose: "获取用户信息，用于审批人计算和流程发起人信息"
+    - module: "yudao-module-system"
+      api: "DeptApi"
+      purpose: "获取部门信息，用于部门负责人审批策略"
+    - module: "yudao-module-system"
+      api: "PermissionApi"
+      purpose: "获取用户角色，用于角色审批策略"
+    - module: "yudao-module-system"
+      api: "PostApi"
+      purpose: "获取岗位信息，用于岗位审批策略"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "flowable-spring-boot-starter-process"
+      version: "6.x"
+      purpose: "Flowable 工作流引擎核心"
+    - name: "flowable-spring-boot-starter-actuator"
+      version: "6.x"
+      purpose: "Flowable 监控端点"
+    - name: "yudao-spring-boot-starter-mybatis"
+      version: "${revision}"
+      purpose: "MyBatis-Plus 数据访问"
+    - name: "yudao-spring-boot-starter-biz-tenant"
+      version: "${revision}"
+      purpose: "多租户支持"
+    - name: "yudao-spring-boot-starter-biz-data-permission"
+      version: "${revision}"
+      purpose: "数据权限控制"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/service/task/BpmProcessInstanceService.java"
+    purpose: "流程实例服务接口，定义流程实例的核心操作"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/service/task/BpmTaskService.java"
+    purpose: "流程任务服务接口，定义任务审批的核心操作"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/service/definition/BpmModelService.java"
+    purpose: "流程模型服务接口，定义流程模型管理操作"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/api/task/BpmProcessInstanceApi.java"
+    purpose: "流程实例 API 接口，供其他模块调用发起流程"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/api/event/BpmProcessInstanceStatusEvent.java"
+    purpose: "流程状态变更事件，实现模块间解耦"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/core/candidate/BpmTaskCandidateStrategy.java"
+    purpose: "审批人策略接口，定义审批人计算的标准"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/core/enums/BpmTaskCandidateStrategyEnum.java"
+    purpose: "审批人策略枚举，列出所有支持的审批人分配方式"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量，定义 BPM 模块所有错误码"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/enums/definition/BpmModelTypeEnum.java"
+    purpose: "流程模型类型枚举，区分 BPMN 和 Simple 设计器"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/enums/task/BpmProcessInstanceStatusEnum.java"
+    purpose: "流程实例状态枚举，定义流程的所有状态"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/controller/admin/task/BpmTaskController.java"
+    purpose: "任务管理 Controller，提供任务审批相关 API"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/controller/admin/task/BpmProcessInstanceController.java"
+    purpose: "流程实例 Controller，提供流程实例管理 API"
+  - path: "yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/service/oa/listener/BpmOALeaveStatusListener.java"
+    purpose: "请假流程状态监听示例，展示如何监听流程状态变更"
+  - path: "yudao-module-bpm/pom.xml"
+    purpose: "Maven 依赖配置，包含 Flowable 等核心依赖"

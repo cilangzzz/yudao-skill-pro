@@ -1,0 +1,638 @@
+# Skill 文档 - 微信公众号模块 (yudao-module-mp)
+# 提取时间: 2026-03-18
+
+skill:
+  id: "skill-mp"
+  name: "WeChat MP (Public Account) Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-mp"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：微信公众号全生命周期管理平台
+  # 解决问题：统一管理公众号账号、粉丝、消息、素材、菜单、自动回复、模板消息等核心功能
+  # 系统定位：作为企业与微信用户交互的关键渠道，支撑营销推送、客户服务等业务场景
+  business_position: |
+    微信公众号管理模块，提供完整的公众号运营能力：
+    - 多公众号管理：支持接入多个公众号账号，实现统一管理
+    - 粉丝管理：粉丝信息同步、标签分组、用户画像
+    - 消息管理：消息接收、客服消息、模板消息推送
+    - 素材管理：临时素材、永久素材、图文消息
+    - 菜单管理：自定义菜单创建与响应
+    - 自动回复：关注回复、关键词回复、消息回复
+    - 数据统计：用户分析、消息分析、接口分析
+
+  # 设计原则
+  design_principles:
+    - name: "消息路由模式"
+      description: "采用 WxMpMessageRouter 实现消息分发，通过责任链模式处理不同类型消息和事件"
+    - name: "多账号隔离"
+      description: "通过 MpServiceFactory 工厂模式管理多公众号 WxMpService 实例，实现账号级别的隔离"
+    - name: "事件驱动架构"
+      description: "微信回调事件通过 Handler 处理器链式处理，支持关注、取消关注、菜单点击、扫码等事件"
+    - name: "素材统一管理"
+      description: "临时素材和永久素材统一抽象，自动下载并存储到本地文件服务"
+    - name: "多租户支持"
+      description: "账号层支持租户隔离，通过 TenantBaseDO 实现数据隔离"
+
+  # 领域模型
+  domain_model:
+    aggregates:
+      - name: "MpAccount"
+        type: "聚合根"
+        description: "公众号账号聚合根，管理公众号配置信息"
+        entities: ["MpMenu", "MpTag", "MpStatistics"]
+      - name: "MpUser"
+        type: "聚合根"
+        description: "公众号粉丝聚合根，关联粉丝标签和消息记录"
+        entities: ["MpTag"]
+      - name: "MpMessage"
+        type: "聚合根"
+        description: "消息聚合根，包含自动回复配置和消息模板"
+        entities: ["MpAutoReply", "MpMessageTemplate"]
+      - name: "MpMaterial"
+        type: "聚合根"
+        description: "素材聚合根，管理临时素材和永久素材"
+        entities: []
+
+    value_objects:
+      - name: "MpMessageDO.Article"
+        description: "图文消息值对象，包含标题、描述、图片链接、跳转链接"
+      - name: "MpAutoReplyTypeEnum"
+        description: "自动回复类型枚举：关注回复、消息回复、关键词回复"
+      - name: "MpAutoReplyMatchEnum"
+        description: "关键词匹配模式枚举：完全匹配、半匹配"
+      - name: "MpMessageSendFromEnum"
+        description: "消息发送方向枚举：粉丝发给公众号、公众号发给粉丝"
+
+    services:
+      - name: "MpAccountService"
+        description: "公众号账号管理服务，提供账号CRUD和缓存能力"
+      - name: "MpUserService"
+        description: "粉丝管理服务，提供粉丝同步、更新、查询能力"
+      - name: "MpMessageService"
+        description: "消息服务，处理消息接收、发送、自动回复"
+      - name: "MpMaterialService"
+        description: "素材服务，处理素材上传、下载、管理"
+      - name: "MpMenuService"
+        description: "菜单服务，管理自定义菜单"
+      - name: "MpAutoReplyService"
+        description: "自动回复服务，处理关注回复、关键词回复、消息回复"
+      - name: "MpMessageTemplateService"
+        description: "模板消息服务，管理模板同步和发送"
+      - name: "MpStatisticsService"
+        description: "统计数据服务，获取用户分析、消息分析数据"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "controller"
+      purpose: "HTTP接口层，提供管理后台和微信回调接口"
+      components:
+        - "MpAccountController: 公众号账号管理接口"
+        - "MpUserController: 粉丝管理接口"
+        - "MpMessageController: 消息管理接口"
+        - "MpMessageTemplateController: 模板消息接口"
+        - "MpAutoReplyController: 自动回复管理接口"
+        - "MpMaterialController: 素材管理接口"
+        - "MpMenuController: 菜单管理接口"
+        - "MpTagController: 标签管理接口"
+        - "MpOpenController: 微信回调入口（签名校验、消息处理）"
+        - "MpStatisticsController: 数据统计接口"
+        - "MpDraftController: 草稿管理接口"
+        - "MpFreePublishController: 发布能力接口"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "MpAccountService: 账号管理核心服务"
+        - "MpUserService: 粉丝管理服务"
+        - "MpMessageService: 消息处理服务"
+        - "MpMaterialService: 素材管理服务"
+        - "MpMenuService: 菜单管理服务"
+        - "MpAutoReplyService: 自动回复服务"
+        - "MpMessageTemplateService: 模板消息服务"
+        - "MpTagService: 标签管理服务"
+        - "MpStatisticsService: 统计服务"
+
+    - name: "handler"
+      purpose: "微信消息事件处理器"
+      components:
+        - "SubscribeHandler: 关注事件处理器"
+        - "UnsubscribeHandler: 取消关注事件处理器"
+        - "MenuHandler: 菜单点击事件处理器"
+        - "MessageReceiveHandler: 消息接收处理器"
+        - "MessageAutoReplyHandler: 自动回复处理器"
+        - "LocationHandler: 地理位置处理器"
+        - "ScanHandler: 扫码事件处理器"
+        - "KfSessionHandler: 客服会话处理器"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "MpAccountMapper: 账号数据访问"
+        - "MpUserMapper: 粉丝数据访问"
+        - "MpMessageMapper: 消息数据访问"
+        - "MpMaterialMapper: 素材数据访问"
+        - "MpMenuMapper: 菜单数据访问"
+        - "MpAutoReplyMapper: 自动回复数据访问"
+        - "MpMessageTemplateMapper: 模板消息数据访问"
+        - "MpTagMapper: 标签数据访问"
+
+    - name: "framework/mp"
+      purpose: "微信公众号框架核心"
+      components:
+        - "MpServiceFactory: WxMpService 工厂接口"
+        - "DefaultMpServiceFactory: 默认工厂实现，管理多账号 WxMpService"
+        - "MpContextHolder: 公众号上下文持有者"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "Factory Pattern"
+      location: "framework/mp/core/MpServiceFactory.java"
+      purpose: "创建和管理 WxMpService 实例，支持多公众号场景"
+    - pattern: "Chain of Responsibility"
+      location: "DefaultMpServiceFactory.buildMpMessageRouter()"
+      purpose: "WxMpMessageRouter 实现消息处理链，按规则路由到不同 Handler"
+    - pattern: "Strategy Pattern"
+      location: "service/handler/*"
+      purpose: "不同类型消息/事件由不同 Handler 实现 WxMpMessageHandler 接口处理"
+    - pattern: "Convert Pattern"
+      location: "convert/*"
+      purpose: "MapStruct 转换器，VO/DO/微信对象之间转换"
+    - pattern: "Template Method"
+      location: "MpOpenController.handleMessage()"
+      purpose: "统一的微信回调处理流程：签名校验 -> 消息解析 -> 路由处理 -> 响应构建"
+
+  # 模块间通信
+  communication:
+    apis: []  # 无对外暴露的 API 模块
+
+    consumers:
+      - module: "yudao-module-system"
+        purpose: "依赖用户体系、权限体系"
+      - module: "yudao-module-infra"
+        purpose: "依赖文件服务存储素材"
+
+    mq: []  # 未使用消息队列
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "TenantBaseDO | BaseDO"
+    description: "MpAccountDO 使用 TenantBaseDO 支持多租户，其他实体使用 BaseDO"
+
+  # 核心数据表
+  tables:
+    - name: "mp_account"
+      comment: "公众号账号表"
+      entity: "MpAccountDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "name", type: "String", comment: "公众号名称" }
+        - { name: "account", type: "String", comment: "公众号账号" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+        - { name: "app_secret", type: "String", comment: "公众号密钥" }
+        - { name: "token", type: "String", comment: "公众号Token" }
+        - { name: "aes_key", type: "String", comment: "消息加解密密钥" }
+        - { name: "qr_code_url", type: "String", comment: "二维码图片URL" }
+        - { name: "remark", type: "String", comment: "备注" }
+      indexes:
+        - { name: "uk_app_id", columns: ["app_id"] }
+
+    - name: "mp_user"
+      comment: "公众号粉丝表"
+      entity: "MpUserDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "openid", type: "String", comment: "粉丝标识OpenId" }
+        - { name: "union_id", type: "String", comment: "微信生态唯一标识" }
+        - { name: "subscribe_status", type: "Integer", comment: "关注状态(1已关注/2取消关注)" }
+        - { name: "subscribe_time", type: "LocalDateTime", comment: "关注时间" }
+        - { name: "unsubscribe_time", type: "LocalDateTime", comment: "取消关注时间" }
+        - { name: "nickname", type: "String", comment: "昵称" }
+        - { name: "head_image_url", type: "String", comment: "头像地址" }
+        - { name: "language", type: "String", comment: "语言" }
+        - { name: "country", type: "String", comment: "国家" }
+        - { name: "province", type: "String", comment: "省份" }
+        - { name: "city", type: "String", comment: "城市" }
+        - { name: "remark", type: "String", comment: "备注" }
+        - { name: "tag_ids", type: "List<Long>", comment: "标签ID数组" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId(冗余)" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+        - { name: "uk_appid_openid", columns: ["app_id", "openid"] }
+
+    - name: "mp_message"
+      comment: "公众号消息表"
+      entity: "MpMessageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "msg_id", type: "Long", comment: "微信消息ID" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+        - { name: "user_id", type: "Long", comment: "粉丝编号" }
+        - { name: "openid", type: "String", comment: "粉丝OpenId" }
+        - { name: "type", type: "String", comment: "消息类型(text/image/voice/video等)" }
+        - { name: "send_from", type: "Integer", comment: "消息来源(1粉丝发给公众号/2公众号发给粉丝)" }
+        - { name: "content", type: "String", comment: "文本消息内容" }
+        - { name: "media_id", type: "String", comment: "媒体文件ID" }
+        - { name: "media_url", type: "String", comment: "媒体文件URL" }
+        - { name: "recognition", type: "String", comment: "语音识别文本" }
+        - { name: "format", type: "String", comment: "语音格式" }
+        - { name: "title", type: "String", comment: "标题" }
+        - { name: "description", type: "String", comment: "描述" }
+        - { name: "thumb_media_id", type: "String", comment: "缩略图媒体ID" }
+        - { name: "thumb_media_url", type: "String", comment: "缩略图URL" }
+        - { name: "url", type: "String", comment: "链接地址" }
+        - { name: "location_x", type: "Double", comment: "地理位置纬度" }
+        - { name: "location_y", type: "Double", comment: "地理位置经度" }
+        - { name: "scale", type: "Double", comment: "地图缩放级别" }
+        - { name: "label", type: "String", comment: "地理位置信息" }
+        - { name: "articles", type: "List<Article>", comment: "图文消息数组(JSON)" }
+        - { name: "music_url", type: "String", comment: "音乐链接" }
+        - { name: "hq_music_url", type: "String", comment: "高质量音乐链接" }
+        - { name: "event", type: "String", comment: "事件类型" }
+        - { name: "event_key", type: "String", comment: "事件Key值" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+        - { name: "idx_user_id", columns: ["user_id"] }
+
+    - name: "mp_material"
+      comment: "公众号素材表"
+      entity: "MpMaterialDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+        - { name: "media_id", type: "String", comment: "微信素材ID" }
+        - { name: "type", type: "String", comment: "文件类型(image/voice/video/thumb)" }
+        - { name: "permanent", type: "Boolean", comment: "是否永久素材" }
+        - { name: "url", type: "String", comment: "文件服务器URL" }
+        - { name: "name", type: "String", comment: "文件名称" }
+        - { name: "mp_url", type: "String", comment: "公众号文件URL(永久素材)" }
+        - { name: "title", type: "String", comment: "视频素材标题" }
+        - { name: "introduction", type: "String", comment: "视频素材描述" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+        - { name: "idx_media_id", columns: ["media_id"] }
+
+    - name: "mp_menu"
+      comment: "公众号菜单表"
+      entity: "MpMenuDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+        - { name: "name", type: "String", comment: "菜单名称" }
+        - { name: "menu_key", type: "String", comment: "菜单标识" }
+        - { name: "parent_id", type: "Long", comment: "父菜单ID" }
+        - { name: "type", type: "String", comment: "按钮类型(click/view/miniprogram等)" }
+        - { name: "url", type: "String", comment: "网页链接" }
+        - { name: "mini_program_app_id", type: "String", comment: "小程序AppId" }
+        - { name: "mini_program_page_path", type: "String", comment: "小程序页面路径" }
+        - { name: "article_id", type: "String", comment: "跳转图文媒体ID" }
+        - { name: "reply_message_type", type: "String", comment: "回复消息类型" }
+        - { name: "reply_content", type: "String", comment: "回复文本内容" }
+        - { name: "reply_media_id", type: "String", comment: "回复媒体ID" }
+        - { name: "reply_media_url", type: "String", comment: "回复媒体URL" }
+        - { name: "reply_articles", type: "List<Article>", comment: "回复图文消息(JSON)" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+
+    - name: "mp_auto_reply"
+      comment: "公众号自动回复表"
+      entity: "MpAutoReplyDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+        - { name: "type", type: "Integer", comment: "回复类型(1关注回复/2消息回复/3关键词回复)" }
+        - { name: "request_keyword", type: "String", comment: "请求关键词" }
+        - { name: "request_match", type: "Integer", comment: "关键词匹配模式(1完全匹配/2半匹配)" }
+        - { name: "request_message_type", type: "String", comment: "请求消息类型" }
+        - { name: "response_message_type", type: "String", comment: "响应消息类型" }
+        - { name: "response_content", type: "String", comment: "响应文本内容" }
+        - { name: "response_media_id", type: "String", comment: "响应媒体ID" }
+        - { name: "response_media_url", type: "String", comment: "响应媒体URL" }
+        - { name: "response_articles", type: "List<Article>", comment: "响应图文消息(JSON)" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+
+    - name: "mp_message_template"
+      comment: "公众号模板消息表"
+      entity: "MpMessageTemplateDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+        - { name: "template_id", type: "String", comment: "模板ID" }
+        - { name: "title", type: "String", comment: "模板标题" }
+        - { name: "content", type: "String", comment: "模板内容" }
+        - { name: "example", type: "String", comment: "模板示例" }
+        - { name: "primary_industry", type: "String", comment: "一级行业" }
+        - { name: "deputy_industry", type: "String", comment: "二级行业" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+        - { name: "idx_template_id", columns: ["template_id"] }
+
+    - name: "mp_tag"
+      comment: "公众号标签表"
+      entity: "MpTagDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "主键ID" }
+        - { name: "tag_id", type: "Long", comment: "微信标签ID" }
+        - { name: "name", type: "String", comment: "标签名称" }
+        - { name: "count", type: "Integer", comment: "标签下粉丝数" }
+        - { name: "account_id", type: "Long", comment: "公众号账号ID" }
+        - { name: "app_id", type: "String", comment: "公众号AppId" }
+      indexes:
+        - { name: "idx_account_id", columns: ["account_id"] }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "mp_user"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+    - from: "mp_message"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+    - from: "mp_message"
+      to: "mp_user"
+      type: "N:1"
+      foreign_key: "user_id"
+    - from: "mp_material"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+    - from: "mp_menu"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+    - from: "mp_auto_reply"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+    - from: "mp_message_template"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+    - from: "mp_tag"
+      to: "mp_account"
+      type: "N:1"
+      foreign_key: "account_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - XXX')"
+      - "@RestController"
+      - "@RequestMapping('/mp/xxx')"
+      - "@Validated"
+      - "@PreAuthorize('@ss.hasPermission(\"mp:xxx:action\")')"
+    example: |
+      @Tag(name = "管理后台 - 公众号模版消息")
+      @RestController
+      @RequestMapping("/mp/message-template")
+      @Validated
+      public class MpMessageTemplateController {
+          @Resource
+          private MpMessageTemplateService messageTemplateService;
+
+          @PostMapping("/send")
+          @Operation(summary = "给粉丝发送模版消息")
+          @PreAuthorize("@ss.hasPermission('mp:message-template:send')")
+          public CommonResult<Boolean> sendMessageTemplate(@Valid @RequestBody MpMessageTemplateSendReqVO sendReqVO) {
+              messageTemplateService.sendMessageTempalte(sendReqVO);
+              return success(true);
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "接口定义业务方法，参数使用VO或BO对象"
+    impl_pattern: "实现类注入MpServiceFactory获取WxMpService，处理微信API调用"
+    example: |
+      @Service
+      @Validated
+      @Slf4j
+      public class MpMessageTemplateServiceImpl implements MpMessageTemplateService {
+
+          @Resource
+          @Lazy // 延迟加载，解决循环依赖
+          private MpServiceFactory mpServiceFactory;
+
+          @Override
+          public void sendMessageTempalte(MpMessageTemplateSendReqVO sendReqVO) {
+              // 1. 获得关联信息
+              MpUserDO user = mpUserService.getRequiredUser(sendReqVO.getUserId());
+              MpMessageTemplateDO template = validateMsgTemplateExists(sendReqVO.getId());
+
+              // 2. 构建模板消息并发送
+              WxMpTemplateMessage templateMessage = buildTemplateMessage(template, user, sendReqVO);
+              try {
+                  mpServiceFactory.getRequiredMpService(template.getAppId())
+                          .getTemplateMsgService().sendTemplateMsg(templateMessage);
+              } catch (WxErrorException e) {
+                  throw exception(MESSAGE_TEMPLATE_SEND_FAIL, e.getError().getErrorMsg());
+              }
+          }
+      }
+
+  # 消息处理器规范
+  handler:
+    pattern: "实现 WxMpMessageHandler 接口，通过 @Component 注册为 Spring Bean"
+    example: |
+      @Component
+      @Slf4j
+      public class SubscribeHandler implements WxMpMessageHandler {
+
+          @Resource
+          private MpUserService mpUserService;
+          @Resource
+          private MpAutoReplyService mpAutoReplyService;
+
+          @Override
+          public WxMpXmlOutMessage handle(WxMpXmlMessage wxMessage, Map<String, Object> context,
+                                          WxMpService weixinService, WxSessionManager sessionManager) {
+              // 1. 获取粉丝信息
+              WxMpUser wxMpUser = weixinService.getUserService().userInfo(wxMessage.getFromUser());
+
+              // 2. 保存粉丝信息
+              mpUserService.saveUser(MpContextHolder.getAppId(), wxMpUser);
+
+              // 3. 回复关注欢迎语
+              return mpAutoReplyService.replyForSubscribe(MpContextHolder.getAppId(), wxMessage);
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: "继承 BaseMapperX，使用 LambdaQueryWrapperX 构建查询条件"
+    example: |
+      @Mapper
+      public interface MpMessageMapper extends BaseMapperX<MpMessageDO> {
+
+          default PageResult<MpMessageDO> selectPage(MpMessagePageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<MpMessageDO>()
+                      .eqIfPresent(MpMessageDO::getAccountId, reqVO.getAccountId())
+                      .eqIfPresent(MpMessageDO::getUserId, reqVO.getUserId())
+                      .orderByDesc(MpMessageDO::getId));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-006-XXX-XXX"
+    examples:
+      - code: "1_006_000_000"
+        message: "公众号账号不存在"
+      - code: "1_006_003_000"
+        message: "粉丝不存在"
+      - code: "1_006_005_000"
+        message: "发送消息失败，原因：{}"
+      - code: "1_006_009_000"
+        message: "自动回复不存在"
+      - code: "1_006_010_004"
+        message: "发送模版消息失败，原因：{}"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE, args...)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增消息类型处理
+  new_feature:
+    title: "新增消息类型处理器"
+    steps:
+      - step: 1
+        action: "创建Handler类"
+        description: "在 service/handler/ 目录下创建新的处理器类，实现 WxMpMessageHandler 接口"
+      - step: 2
+        action: "注册到消息路由"
+        description: "在 DefaultMpServiceFactory.buildMpMessageRouter() 中添加路由规则"
+        code: |
+          // 示例：添加新消息类型处理
+          router.rule().async(false)
+                  .msgType(WxConsts.XmlMsgType.XXX)
+                  .handler(newHandler).end();
+      - step: 3
+        action: "实现业务逻辑"
+        description: "在 handle() 方法中实现消息处理逻辑，返回 WxMpXmlOutMessage 响应"
+
+  # 新增自动回复类型
+  new_channel:
+    title: "新增自动回复类型"
+    steps:
+      - step: 1
+        action: "扩展枚举"
+        description: "在 MpAutoReplyTypeEnum 中添加新的类型"
+      - step: 2
+        action: "创建自动回复配置"
+        description: "通过 MpAutoReplyController 创建自动回复规则"
+      - step: 3
+        action: "实现回复逻辑"
+        description: "在 MpAutoReplyServiceImpl 中实现对应的回复逻辑"
+
+  # 最佳实践
+  best_practices:
+    - title: "多账号管理"
+      description: "使用 MpServiceFactory 获取指定账号的 WxMpService，避免账号混淆"
+      example: "WxMpService mpService = mpServiceFactory.getRequiredMpService(accountId);"
+    - title: "消息上下文"
+      description: "使用 MpContextHolder 在处理链中传递 appId 上下文"
+      example: "String appId = MpContextHolder.getAppId();"
+    - title: "异步处理"
+      description: "消息接收使用异步处理，避免阻塞微信回调响应"
+      example: "router.rule().handler(messageReceiveHandler).next(); // next() 表示继续执行后续规则"
+    - title: "素材下载"
+      description: "收到粉丝发送的媒体消息时，自动下载并存储到本地文件服务"
+      example: "mpMaterialService.downloadMaterialUrl(accountId, mediaId, type);"
+    - title: "错误处理"
+      description: "捕获 WxErrorException 并转换为业务异常"
+      example: |
+          try {
+              wxMpService.someOperation();
+          } catch (WxErrorException e) {
+              throw exception(ERROR_CODE, e.getError().getErrorMsg());
+          }
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      purpose: "依赖用户体系、权限验证"
+    - module: "yudao-module-infra"
+      purpose: "依赖文件服务存储素材"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "wx-java-mp-spring-boot-starter"
+      version: "继承自父POM"
+      purpose: "微信公众号Java SDK，提供WxMpService等核心API"
+    - name: "yudao-spring-boot-starter-mybatis"
+      version: "继承自父POM"
+      purpose: "MyBatis-Plus封装，提供BaseMapperX等"
+    - name: "yudao-spring-boot-starter-redis"
+      version: "继承自父POM"
+      purpose: "Redis封装，用于WxMpService配置存储"
+    - name: "yudao-spring-boot-starter-biz-tenant"
+      version: "继承自父POM"
+      purpose: "多租户支持"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/framework/mp/core/MpServiceFactory.java"
+    purpose: "WxMpService工厂接口，管理多公众号实例"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/framework/mp/core/DefaultMpServiceFactory.java"
+    purpose: "默认工厂实现，构建WxMpService和WxMpMessageRouter"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/controller/admin/open/MpOpenController.java"
+    purpose: "微信回调入口，处理签名校验和消息路由"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/service/handler/user/SubscribeHandler.java"
+    purpose: "关注事件处理器，保存粉丝信息并回复欢迎语"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/service/handler/message/MessageAutoReplyHandler.java"
+    purpose: "自动回复处理器，处理关键词和消息类型回复"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/service/message/MpMessageServiceImpl.java"
+    purpose: "消息服务实现，处理消息接收和发送"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/service/message/MpMessageTemplateServiceImpl.java"
+    purpose: "模板消息服务实现，同步和发送模板消息"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/dal/dataobject/account/MpAccountDO.java"
+    purpose: "公众号账号实体，支持多租户"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/dal/dataobject/message/MpMessageDO.java"
+    purpose: "消息实体，包含多种消息类型字段"
+  - path: "yudao-module-mp/src/main/java/cn/iocoder/yudao/module/mp/enums/ErrorCodeConstants.java"
+    purpose: "错误码定义"

@@ -1,0 +1,861 @@
+# Skill 文档 - yudao-module-crm 模块
+# 客户关系管理模块完整技术文档
+
+skill:
+  id: "skill-crm"
+  name: "CRM 客户关系管理 Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-crm"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    CRM（Customer Relationship Management）模块是客户关系管理系统的核心，解决企业销售过程中的客户管理、商机跟进、合同签订、回款管理等全流程业务问题。
+
+    核心业务场景：
+    1. 线索管理：潜在客户信息的录入与转化
+    2. 客户管理：客户信息维护、公海池机制、客户分配与转移
+    3. 联系人管理：客户关键联系人信息管理
+    4. 商机管理：销售机会的全生命周期管理（销售漏斗）
+    5. 合同管理：合同签订与审批流程
+    6. 回款管理：回款计划与实际回款跟踪
+    7. 产品管理：产品信息与分类管理
+    8. 数据统计：销售漏斗、业绩排名等统计分析
+
+    在整个系统中的定位：
+    - 作为独立的业务模块，提供完整的 CRM 业务功能
+    - 依赖 System 模块（用户、部门）和 BPM 模块（审批流程）
+    - 不对外暴露 API，通过 Controller 层提供 HTTP 接口
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - name: "领域驱动设计（DDD）"
+      description: "以客户为聚合根，商机、联系人、合同等为关联实体，形成清晰的领域模型边界"
+    - name: "数据权限控制"
+      description: "基于 CrmPermissionDO 实现细粒度的数据权限控制，支持负责人、只读、读写三级权限"
+    - name: "分层架构"
+      description: "严格的 Controller -> Service -> DAL 三层架构，职责清晰"
+    - name: "销售漏斗模型"
+      description: "商机状态组（CrmBusinessStatusTypeDO）+ 商机状态（CrmBusinessStatusDO）实现可配置的销售漏斗"
+    - name: "公海池机制"
+      description: "客户公海池配置（CrmCustomerPoolConfigDO）实现客户自动回收与分配机制"
+    - name: "AOP 权限校验"
+      description: "通过 @CrmPermission 注解实现声明式的数据权限校验"
+    - name: "操作日志记录"
+      description: "通过 @LogRecord 注解记录关键业务操作日志"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "客户（Customer）"
+        type: "聚合根"
+        description: "CRM 系统的核心聚合根，关联商机、联系人、合同、回款等所有业务对象"
+        entities:
+          - "CrmBusinessDO（商机）"
+          - "CrmContactDO（联系人）"
+          - "CrmContractDO（合同）"
+          - "CrmReceivableDO（回款）"
+          - "CrmReceivablePlanDO（回款计划）"
+          - "CrmFollowUpRecordDO（跟进记录）"
+
+      - name: "线索（Clue）"
+        type: "聚合根"
+        description: "潜在客户信息，可转化为正式客户"
+        entities: []
+
+      - name: "产品（Product）"
+        type: "聚合根"
+        description: "产品信息管理，被商机和合同引用"
+        entities:
+          - "CrmProductCategoryDO（产品分类）"
+
+    value_objects:
+      - name: "CrmPermissionDO"
+        description: "数据权限值对象，关联业务类型与权限级别"
+      - name: "CrmBusinessStatusDO"
+        description: "商机状态值对象，属于商机状态组"
+      - name: "CrmBusinessStatusTypeDO"
+        description: "商机状态组配置"
+      - name: "CrmCustomerPoolConfigDO"
+        description: "客户公海池配置"
+      - name: "CrmCustomerLimitConfigDO"
+        description: "客户限制配置（拥有上限、锁定上限）"
+
+    services:
+      - name: "CrmCustomerService"
+        description: "客户管理领域服务，处理客户创建、转移、公海等核心业务"
+      - name: "CrmBusinessService"
+        description: "商机管理领域服务，处理商机创建、状态变更等业务"
+      - name: "CrmPermissionService"
+        description: "数据权限领域服务，处理权限创建、转移、校验等业务"
+      - name: "CrmContractService"
+        description: "合同管理领域服务，处理合同签订、审批等业务"
+      - name: "CrmReceivableService"
+        description: "回款管理领域服务，处理回款录入、审批等业务"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口（当前模块未对外暴露API）"
+      components:
+        - "package-info.java"
+
+    - name: "controller"
+      purpose: "HTTP接口层，处理请求响应"
+      components:
+        - "CrmCustomerController - 客户管理接口"
+        - "CrmClueController - 线索管理接口"
+        - "CrmContactController - 联系人管理接口"
+        - "CrmBusinessController - 商机管理接口"
+        - "CrmBusinessStatusController - 商机状态管理接口"
+        - "CrmContractController - 合同管理接口"
+        - "CrmContractConfigController - 合同配置接口"
+        - "CrmReceivableController - 回款管理接口"
+        - "CrmReceivablePlanController - 回款计划接口"
+        - "CrmProductController - 产品管理接口"
+        - "CrmProductCategoryController - 产品分类接口"
+        - "CrmPermissionController - 数据权限接口"
+        - "CrmFollowUpRecordController - 跟进记录接口"
+        - "CrmOperateLogController - 操作日志接口"
+        - "CrmCustomerLimitConfigController - 客户限制配置接口"
+        - "CrmCustomerPoolConfigController - 公海池配置接口"
+        - "CrmStatisticsCustomerController - 客户统计接口"
+        - "CrmStatisticsFunnelController - 漏斗统计接口"
+        - "CrmStatisticsPerformanceController - 业绩统计接口"
+        - "CrmStatisticsPortraitController - 客户画像统计接口"
+        - "CrmStatisticsRankController - 排行榜统计接口"
+
+    - name: "service"
+      purpose: "业务逻辑层，处理核心业务"
+      components:
+        - "customer/ - 客户相关服务"
+        - "clue/ - 线索相关服务"
+        - "contact/ - 联系人相关服务"
+        - "business/ - 商机相关服务"
+        - "contract/ - 合同相关服务"
+        - "receivable/ - 回款相关服务"
+        - "product/ - 产品相关服务"
+        - "permission/ - 权限相关服务"
+        - "followup/ - 跟进记录服务"
+        - "statistics/ - 统计服务"
+
+    - name: "dal"
+      purpose: "数据访问层，处理数据库操作"
+      components:
+        - "dataobject/ - DO 实体类"
+        - "mysql/ - MyBatis Mapper 接口"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "AOP 权限校验"
+      location: "CrmPermission 注解 + CrmPermissionAspect"
+      purpose: "通过注解声明数据权限要求，AOP 自动校验"
+    - pattern: "策略模式"
+      location: "CrmBizTypeEnum 业务类型枚举"
+      purpose: "统一处理不同业务类型的权限校验逻辑"
+    - pattern: "模板方法"
+      location: "各 Service 实现类的校验方法"
+      purpose: "统一的业务校验流程"
+    - pattern: "观察者模式"
+      location: "CrmContractStatusListener、CrmReceivableStatusListener"
+      purpose: "监听 BPM 审批状态变更，更新业务状态"
+    - pattern: "Builder 模式"
+      location: "所有 DO 实体类使用 @Builder"
+      purpose: "简化复杂对象的构建"
+    - pattern: "代理模式"
+      location: "CrmCustomerServiceImpl.getSelf()"
+      purpose: "解决 AOP 事务代理问题"
+
+  # 模块间通信
+  communication:
+    apis: []  # 当前模块未对外暴露 API
+
+    consumers:
+      - module: "yudao-module-system"
+        api: "AdminUserApi"
+        purpose: "获取用户信息、校验用户"
+      - module: "yudao-module-system"
+        api: "DeptApi"
+        purpose: "获取部门信息"
+      - module: "yudao-module-bpm"
+        api: "流程审批"
+        purpose: "合同、回款的审批流程"
+
+    mq: []  # 当前模块未使用消息队列
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有 CRM 实体继承 BaseDO，包含 id、creator、create_time、updater、update_time、deleted 字段。注意：CRM 模块未使用 TenantBaseDO，不涉及多租户"
+
+  # 核心数据表
+  tables:
+    # ==================== 客户相关 ====================
+    - name: "crm_customer"
+      comment: "客户表"
+      entity: "CrmCustomerDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "客户名称" }
+        - { name: "follow_up_status", type: "TINYINT", comment: "跟进状态" }
+        - { name: "contact_last_time", type: "DATETIME", comment: "最后跟进时间" }
+        - { name: "contact_last_content", type: "VARCHAR", comment: "最后跟进内容" }
+        - { name: "contact_next_time", type: "DATETIME", comment: "下次联系时间" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "owner_time", type: "DATETIME", comment: "成为负责人时间" }
+        - { name: "lock_status", type: "TINYINT", comment: "锁定状态" }
+        - { name: "deal_status", type: "TINYINT", comment: "成交状态" }
+        - { name: "mobile", type: "VARCHAR", comment: "手机号" }
+        - { name: "telephone", type: "VARCHAR", comment: "电话" }
+        - { name: "qq", type: "VARCHAR", comment: "QQ" }
+        - { name: "wechat", type: "VARCHAR", comment: "微信" }
+        - { name: "email", type: "VARCHAR", comment: "邮箱" }
+        - { name: "area_id", type: "INT", comment: "地区ID" }
+        - { name: "detail_address", type: "VARCHAR", comment: "详细地址" }
+        - { name: "industry_id", type: "INT", comment: "所属行业" }
+        - { name: "level", type: "INT", comment: "客户等级" }
+        - { name: "source", type: "INT", comment: "客户来源" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_owner_user_id", columns: ["owner_user_id"] }
+        - { name: "idx_name", columns: ["name"] }
+
+    - name: "crm_customer_pool_config"
+      comment: "客户公海池配置表"
+      entity: "CrmCustomerPoolConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "enabled", type: "TINYINT", comment: "是否启用客户公海" }
+        - { name: "contact_expire_days", type: "INT", comment: "未跟进放入公海天数" }
+        - { name: "deal_expire_days", type: "INT", comment: "未成交放入公海天数" }
+        - { name: "notify_enabled", type: "TINYINT", comment: "是否开启提前提醒" }
+        - { name: "notify_days", type: "INT", comment: "提前提醒天数" }
+
+    - name: "crm_customer_limit_config"
+      comment: "客户限制配置表"
+      entity: "CrmCustomerLimitConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "type", type: "INT", comment: "限制类型（拥有上限/锁定上限）" }
+        - { name: "max_count", type: "INT", comment: "最大数量" }
+        - { name: "deal_count_enabled", type: "TINYINT", comment: "是否计入成交客户" }
+        - { name: "user_ids", type: "VARCHAR", comment: "适用用户ID列表" }
+        - { name: "dept_ids", type: "VARCHAR", comment: "适用部门ID列表" }
+
+    # ==================== 线索相关 ====================
+    - name: "crm_clue"
+      comment: "线索表"
+      entity: "CrmClueDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "线索名称" }
+        - { name: "follow_up_status", type: "TINYINT", comment: "跟进状态" }
+        - { name: "contact_last_time", type: "DATETIME", comment: "最后跟进时间" }
+        - { name: "contact_last_content", type: "VARCHAR", comment: "最后跟进内容" }
+        - { name: "contact_next_time", type: "DATETIME", comment: "下次联系时间" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "transform_status", type: "TINYINT", comment: "转化状态" }
+        - { name: "customer_id", type: "BIGINT", comment: "转化后的客户ID" }
+        - { name: "mobile", type: "VARCHAR", comment: "手机号" }
+        - { name: "telephone", type: "VARCHAR", comment: "电话" }
+        - { name: "qq", type: "VARCHAR", comment: "QQ" }
+        - { name: "wechat", type: "VARCHAR", comment: "微信" }
+        - { name: "email", type: "VARCHAR", comment: "邮箱" }
+        - { name: "area_id", type: "INT", comment: "地区ID" }
+        - { name: "detail_address", type: "VARCHAR", comment: "详细地址" }
+        - { name: "industry_id", type: "INT", comment: "所属行业" }
+        - { name: "level", type: "INT", comment: "客户等级" }
+        - { name: "source", type: "INT", comment: "客户来源" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    # ==================== 联系人相关 ====================
+    - name: "crm_contact"
+      comment: "联系人表"
+      entity: "CrmContactDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "联系人姓名" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "contact_last_time", type: "DATETIME", comment: "最后跟进时间" }
+        - { name: "contact_last_content", type: "VARCHAR", comment: "最后跟进内容" }
+        - { name: "contact_next_time", type: "DATETIME", comment: "下次联系时间" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "mobile", type: "VARCHAR", comment: "手机号" }
+        - { name: "telephone", type: "VARCHAR", comment: "电话" }
+        - { name: "email", type: "VARCHAR", comment: "邮箱" }
+        - { name: "qq", type: "BIGINT", comment: "QQ" }
+        - { name: "wechat", type: "VARCHAR", comment: "微信" }
+        - { name: "area_id", type: "INT", comment: "地区ID" }
+        - { name: "detail_address", type: "VARCHAR", comment: "详细地址" }
+        - { name: "sex", type: "INT", comment: "性别" }
+        - { name: "master", type: "TINYINT", comment: "是否关键决策人" }
+        - { name: "post", type: "VARCHAR", comment: "职位" }
+        - { name: "parent_id", type: "BIGINT", comment: "直属上级ID" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    - name: "crm_contact_business"
+      comment: "联系人商机关联表"
+      entity: "CrmContactBusinessDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "contact_id", type: "BIGINT", comment: "联系人ID" }
+        - { name: "business_id", type: "BIGINT", comment: "商机ID" }
+
+    # ==================== 商机相关 ====================
+    - name: "crm_business"
+      comment: "商机表"
+      entity: "CrmBusinessDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "商机名称" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "follow_up_status", type: "TINYINT", comment: "跟进状态" }
+        - { name: "contact_last_time", type: "DATETIME", comment: "最后跟进时间" }
+        - { name: "contact_next_time", type: "DATETIME", comment: "下次联系时间" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "status_type_id", type: "BIGINT", comment: "商机状态组ID" }
+        - { name: "status_id", type: "BIGINT", comment: "商机状态ID" }
+        - { name: "end_status", type: "INT", comment: "结束状态（赢单/输单/无效）" }
+        - { name: "end_remark", type: "VARCHAR", comment: "结束备注" }
+        - { name: "deal_time", type: "DATETIME", comment: "预计成交日期" }
+        - { name: "total_product_price", type: "DECIMAL", comment: "产品总金额" }
+        - { name: "discount_percent", type: "DECIMAL", comment: "整单折扣" }
+        - { name: "total_price", type: "DECIMAL", comment: "商机总金额" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    - name: "crm_business_status_type"
+      comment: "商机状态组表（配置表）"
+      entity: "CrmBusinessStatusTypeDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "状态组名称" }
+        - { name: "dept_ids", type: "VARCHAR", comment: "使用的部门ID列表" }
+
+    - name: "crm_business_status"
+      comment: "商机状态表（配置表）"
+      entity: "CrmBusinessStatusDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "type_id", type: "BIGINT", comment: "状态组ID" }
+        - { name: "name", type: "VARCHAR", comment: "状态名称" }
+        - { name: "percent", type: "INT", comment: "赢单率百分比" }
+        - { name: "sort", type: "INT", comment: "排序" }
+
+    - name: "crm_business_product"
+      comment: "商机产品关联表"
+      entity: "CrmBusinessProductDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "business_id", type: "BIGINT", comment: "商机ID" }
+        - { name: "product_id", type: "BIGINT", comment: "产品ID" }
+        - { name: "count", type: "DECIMAL", comment: "数量" }
+        - { name: "price", type: "DECIMAL", comment: "单价" }
+
+    # ==================== 合同相关 ====================
+    - name: "crm_contract"
+      comment: "合同表"
+      entity: "CrmContractDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "合同名称" }
+        - { name: "no", type: "VARCHAR", comment: "合同编号" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "business_id", type: "BIGINT", comment: "商机ID" }
+        - { name: "contact_last_time", type: "DATETIME", comment: "最后跟进时间" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "process_instance_id", type: "VARCHAR", comment: "工作流实例ID" }
+        - { name: "audit_status", type: "INT", comment: "审批状态" }
+        - { name: "order_date", type: "DATETIME", comment: "下单日期" }
+        - { name: "start_time", type: "DATETIME", comment: "开始时间" }
+        - { name: "end_time", type: "DATETIME", comment: "结束时间" }
+        - { name: "total_product_price", type: "DECIMAL", comment: "产品总金额" }
+        - { name: "discount_percent", type: "DECIMAL", comment: "整单折扣" }
+        - { name: "total_price", type: "DECIMAL", comment: "合同总金额" }
+        - { name: "sign_contact_id", type: "BIGINT", comment: "客户签约人ID" }
+        - { name: "sign_user_id", type: "BIGINT", comment: "公司签约人ID" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    - name: "crm_contract_config"
+      comment: "合同配置表"
+      entity: "CrmContractConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "deposit_enabled", type: "TINYINT", comment: "是否开启押金" }
+        - { name: "deposit_percent", type: "DECIMAL", comment: "押金比例" }
+
+    - name: "crm_contract_product"
+      comment: "合同产品关联表"
+      entity: "CrmContractProductDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "contract_id", type: "BIGINT", comment: "合同ID" }
+        - { name: "product_id", type: "BIGINT", comment: "产品ID" }
+        - { name: "count", type: "DECIMAL", comment: "数量" }
+        - { name: "price", type: "DECIMAL", comment: "单价" }
+
+    # ==================== 回款相关 ====================
+    - name: "crm_receivable"
+      comment: "回款表"
+      entity: "CrmReceivableDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "no", type: "VARCHAR", comment: "回款编号" }
+        - { name: "plan_id", type: "BIGINT", comment: "回款计划ID" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "contract_id", type: "BIGINT", comment: "合同ID" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "return_time", type: "DATETIME", comment: "回款日期" }
+        - { name: "return_type", type: "INT", comment: "回款方式" }
+        - { name: "price", type: "DECIMAL", comment: "回款金额" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+        - { name: "process_instance_id", type: "VARCHAR", comment: "工作流实例ID" }
+        - { name: "audit_status", type: "INT", comment: "审批状态" }
+
+    - name: "crm_receivable_plan"
+      comment: "回款计划表"
+      entity: "CrmReceivablePlanDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "period", type: "INT", comment: "期数" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "contract_id", type: "BIGINT", comment: "合同ID" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+        - { name: "return_time", type: "DATETIME", comment: "计划回款日期" }
+        - { name: "return_type", type: "INT", comment: "计划回款类型" }
+        - { name: "price", type: "DECIMAL", comment: "计划回款金额" }
+        - { name: "receivable_id", type: "BIGINT", comment: "实际回款ID" }
+        - { name: "remind_days", type: "INT", comment: "提前提醒天数" }
+        - { name: "remind_time", type: "DATETIME", comment: "提醒日期" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    # ==================== 产品相关 ====================
+    - name: "crm_product"
+      comment: "产品表"
+      entity: "CrmProductDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "产品名称" }
+        - { name: "no", type: "VARCHAR", comment: "产品编码" }
+        - { name: "unit", type: "INT", comment: "单位" }
+        - { name: "price", type: "DECIMAL", comment: "价格" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "category_id", type: "BIGINT", comment: "分类ID" }
+        - { name: "description", type: "VARCHAR", comment: "产品描述" }
+        - { name: "owner_user_id", type: "BIGINT", comment: "负责人用户编号" }
+
+    - name: "crm_product_category"
+      comment: "产品分类表"
+      entity: "CrmProductCategoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "name", type: "VARCHAR", comment: "分类名称" }
+        - { name: "parent_id", type: "BIGINT", comment: "父分类ID" }
+        - { name: "sort", type: "INT", comment: "排序" }
+
+    # ==================== 权限与跟进 ====================
+    - name: "crm_permission"
+      comment: "数据权限表"
+      entity: "CrmPermissionDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "biz_type", type: "INT", comment: "业务类型" }
+        - { name: "biz_id", type: "BIGINT", comment: "业务ID" }
+        - { name: "user_id", type: "BIGINT", comment: "用户ID" }
+        - { name: "level", type: "INT", comment: "权限级别" }
+      indexes:
+        - { name: "idx_biz", columns: ["biz_type", "biz_id"] }
+        - { name: "idx_user", columns: ["user_id"] }
+
+    - name: "crm_follow_up_record"
+      comment: "跟进记录表"
+      entity: "CrmFollowUpRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID" }
+        - { name: "biz_type", type: "INT", comment: "业务类型" }
+        - { name: "biz_id", type: "BIGINT", comment: "业务ID" }
+        - { name: "type", type: "INT", comment: "跟进类型" }
+        - { name: "content", type: "VARCHAR", comment: "跟进内容" }
+        - { name: "next_time", type: "DATETIME", comment: "下次联系时间" }
+        - { name: "pic_urls", type: "VARCHAR", comment: "图片URL列表" }
+        - { name: "file_urls", type: "VARCHAR", comment: "附件URL列表" }
+        - { name: "business_ids", type: "VARCHAR", comment: "关联商机ID列表" }
+        - { name: "contact_ids", type: "VARCHAR", comment: "关联联系人ID列表" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "crm_customer"
+      to: "crm_business"
+      type: "1:N"
+      foreign_key: "customer_id"
+      description: "一个客户可以有多个商机"
+    - from: "crm_customer"
+      to: "crm_contact"
+      type: "1:N"
+      foreign_key: "customer_id"
+      description: "一个客户可以有多个联系人"
+    - from: "crm_customer"
+      to: "crm_contract"
+      type: "1:N"
+      foreign_key: "customer_id"
+      description: "一个客户可以签订多个合同"
+    - from: "crm_customer"
+      to: "crm_receivable"
+      type: "1:N"
+      foreign_key: "customer_id"
+      description: "一个客户可以有多个回款"
+    - from: "crm_business"
+      to: "crm_contract"
+      type: "1:N"
+      foreign_key: "business_id"
+      description: "一个商机可以签订多个合同"
+    - from: "crm_contract"
+      to: "crm_receivable"
+      type: "1:N"
+      foreign_key: "contract_id"
+      description: "一个合同可以有多个回款"
+    - from: "crm_contract"
+      to: "crm_receivable_plan"
+      type: "1:N"
+      foreign_key: "contract_id"
+      description: "一个合同可以有多个回款计划"
+    - from: "crm_receivable_plan"
+      to: "crm_receivable"
+      type: "1:1"
+      foreign_key: "receivable_id"
+      description: "一个回款计划对应一个实际回款"
+    - from: "crm_business_status_type"
+      to: "crm_business_status"
+      type: "1:N"
+      foreign_key: "type_id"
+      description: "一个状态组包含多个状态"
+    - from: "crm_product_category"
+      to: "crm_product"
+      type: "1:N"
+      foreign_key: "category_id"
+      description: "一个分类下有多个产品"
+    - from: "crm_clue"
+      to: "crm_customer"
+      type: "N:1"
+      foreign_key: "customer_id"
+      description: "线索转化为客户"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - CRM xxx')"
+      - "@RestController"
+      - "@RequestMapping('/crm/xxx')"
+      - "@Validated"
+      - "@PreAuthorize('@ss.hasPermission('crm:xxx:action')')"
+      - "@Operation(summary = 'xxx')"
+      - "@Parameter(name = 'id', description = '编号', required = true)"
+    example: |
+      @Tag(name = "管理后台 - CRM 客户")
+      @RestController
+      @RequestMapping("/crm/customer")
+      @Validated
+      public class CrmCustomerController {
+
+          @PostMapping("/create")
+          @Operation(summary = "创建客户")
+          @PreAuthorize("@ss.hasPermission('crm:customer:create')")
+          public CommonResult<Long> createCustomer(@Valid @RequestBody CrmCustomerSaveReqVO createReqVO) {
+              return success(customerService.createCustomer(createReqVO, getLoginUserId()));
+          }
+
+          @PutMapping("/update")
+          @Operation(summary = "更新客户")
+          @PreAuthorize("@ss.hasPermission('crm:customer:update')")
+          public CommonResult<Boolean> updateCustomer(@Valid @RequestBody CrmCustomerSaveReqVO updateReqVO) {
+              customerService.updateCustomer(updateReqVO);
+              return success(true);
+          }
+
+          @GetMapping("/page")
+          @Operation(summary = "获得客户分页")
+          @PreAuthorize("@ss.hasPermission('crm:customer:query')")
+          public CommonResult<PageResult<CrmCustomerRespVO>> getCustomerPage(@Valid CrmCustomerPageReqVO pageVO) {
+              PageResult<CrmCustomerDO> pageResult = customerService.getCustomerPage(pageVO, getLoginUserId());
+              return success(new PageResult<>(buildCustomerDetailList(pageResult.getList()), pageResult.getTotal()));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "接口定义业务方法，使用 @Valid 注解校验参数"
+    impl_pattern: |
+      - @Service 注解标记服务类
+      - @Validated 启用方法参数校验
+      - @Transactional(rollbackFor = Exception.class) 声明事务
+      - @LogRecord 记录操作日志
+      - @CrmPermission 声明数据权限要求
+    example: |
+      @Service
+      @Validated
+      public class CrmCustomerServiceImpl implements CrmCustomerService {
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          @LogRecord(type = CRM_CUSTOMER_TYPE, subType = CRM_CUSTOMER_CREATE_SUB_TYPE,
+                     bizNo = "{{#customer.id}}", success = CRM_CUSTOMER_CREATE_SUCCESS)
+          public Long createCustomer(CrmCustomerSaveReqVO createReqVO, Long userId) {
+              // 1. 校验拥有客户是否到达上限
+              validateCustomerExceedOwnerLimit(createReqVO.getOwnerUserId(), 1);
+
+              // 2. 插入客户
+              CrmCustomerDO customer = initCustomer(createReqVO, userId);
+              customerMapper.insert(customer);
+
+              // 3. 创建数据权限
+              permissionService.createPermission(new CrmPermissionCreateReqBO()
+                  .setBizType(CrmBizTypeEnum.CRM_CUSTOMER.getType())
+                  .setBizId(customer.getId())
+                  .setUserId(userId)
+                  .setLevel(CrmPermissionLevelEnum.OWNER.getLevel()));
+
+              // 4. 记录操作日志上下文
+              LogRecordContext.putVariable("customer", customer);
+              return customer.getId();
+          }
+
+          @Override
+          @CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#id",
+                         level = CrmPermissionLevelEnum.READ)
+          public CrmCustomerDO getCustomer(Long id) {
+              return customerMapper.selectById(id);
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      - 继承 BaseMapperX<T> 获得通用 CRUD 方法
+      - 使用 @Mapper 注解标记
+      - 复杂查询使用 LambdaQueryWrapperX
+    example: |
+      @Mapper
+      public interface CrmCustomerMapper extends BaseMapperX<CrmCustomerDO> {
+
+          default PageResult<CrmCustomerDO> selectPage(CrmCustomerPageReqVO pageReqVO, Long userId) {
+              return selectPage(pageReqVO, new LambdaQueryWrapperX<CrmCustomerDO>()
+                  .likeIfPresent(CrmCustomerDO::getName, pageReqVO.getName())
+                  .eqIfPresent(CrmCustomerDO::getOwnerUserId, pageReqVO.getOwnerUserId())
+                  .orderByDesc(CrmCustomerDO::getId));
+          }
+      }
+
+  # 数据权限控制
+  permission:
+    annotation_pattern: "@CrmPermission(bizType = CrmBizTypeEnum.XXX, bizId = '#id', level = CrmPermissionLevelEnum.XXX)"
+    levels:
+      - level: "OWNER"
+        code: 1
+        description: "负责人权限，拥有所有操作权限，可以删除、转移"
+      - level: "READ"
+        code: 2
+        description: "只读权限，只能查看数据"
+      - level: "WRITE"
+        code: 3
+        description: "读写权限，可以编辑数据但不能删除"
+    example: |
+      // 查询需要 READ 权限
+      @CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#id", level = CrmPermissionLevelEnum.READ)
+      public CrmCustomerDO getCustomer(Long id)
+
+      // 更新需要 WRITE 权限
+      @CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#updateReqVO.id", level = CrmPermissionLevelEnum.WRITE)
+      public void updateCustomer(CrmCustomerSaveReqVO updateReqVO)
+
+      // 删除需要 OWNER 权限
+      @CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#id", level = CrmPermissionLevelEnum.OWNER)
+      public void deleteCustomer(Long id)
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-020-xxx-xxx"
+    examples:
+      - code: "1_020_006_000"
+        message: "客户不存在"
+        constant: "CUSTOMER_NOT_EXISTS"
+      - code: "1_020_002_000"
+        message: "商机不存在"
+        constant: "BUSINESS_NOT_EXISTS"
+      - code: "1_020_007_001"
+        message: "{}操作失败，原因：没有权限"
+        constant: "CRM_PERMISSION_DENIED"
+    usage: |
+      // 抛出业务异常
+      throw exception(CUSTOMER_NOT_EXISTS);
+      throw exception(CUSTOMER_OWNER_EXISTS, customer.getName());
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "CommonResult.error(errorCode)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增 CRM 业务功能"
+    steps:
+      - step: 1
+        action: "创建 DO 实体类"
+        description: "在 dal/dataobject 包下创建实体类，继承 BaseDO，添加 @TableName 注解"
+      - step: 2
+        action: "创建 Mapper 接口"
+        description: "在 dal/mysql 包下创建 Mapper 接口，继承 BaseMapperX"
+      - step: 3
+        action: "创建 Service 接口和实现类"
+        description: "在 service 包下创建接口和实现类，添加 @CrmPermission 注解控制数据权限"
+      - step: 4
+        action: "创建 Controller 和 VO"
+        description: "在 controller 包下创建 Controller 和 VO 类，添加权限注解和 Swagger 注解"
+      - step: 5
+        action: "添加业务类型枚举"
+        description: "在 CrmBizTypeEnum 中添加新的业务类型，确保权限系统正确识别"
+      - step: 6
+        action: "添加错误码"
+        description: "在 ErrorCodeConstants 中添加相关错误码"
+
+  # 新增商机阶段示例
+  new_business_stage:
+    title: "自定义商机阶段"
+    steps:
+      - step: 1
+        action: "创建商机状态组"
+        description: "通过 CrmBusinessStatusService.createBusinessStatusType() 创建新的状态组"
+      - step: 2
+        action: "添加状态阶段"
+        description: "为状态组添加多个状态，设置赢单率和排序"
+      - step: 3
+        action: "关联部门"
+        description: "设置状态组适用的部门列表"
+      - step: 4
+        action: "使用状态组"
+        description: "创建商机时选择对应的状态组"
+
+  # 新增客户类型示例
+  new_customer_type:
+    title: "新增客户类型/行业"
+    steps:
+      - step: 1
+        action: "修改字典数据"
+        description: "在 CRM_CUSTOMER_INDUSTRY 字典中添加新的行业类型"
+      - step: 2
+        action: "前端适配"
+        description: "前端页面会自动读取字典数据显示下拉选项"
+
+  # 最佳实践
+  best_practices:
+    - practice: "数据权限校验"
+      description: "所有涉及数据操作的方法都必须添加 @CrmPermission 注解，确保数据安全"
+    - practice: "操作日志记录"
+      description: "关键业务操作（创建、更新、删除、转移）使用 @LogRecord 记录操作日志"
+    - practice: "事务管理"
+      description: "涉及多表操作的方法添加 @Transactional 注解，确保数据一致性"
+    - practice: "参数校验"
+      description: "VO 类使用 @Valid 注解进行参数校验，Service 层使用 @Validated"
+    - practice: "公海池机制"
+      description: "客户放入公海时，需要同时更新联系人的负责人为空"
+    - practice: "客户转移"
+      description: "客户转移时，可选择同时转移联系人、商机、合同"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      api: "AdminUserApi"
+      purpose: "获取用户信息、校验用户存在性"
+    - module: "yudao-module-system"
+      api: "DeptApi"
+      purpose: "获取部门信息，用于商机状态组关联"
+    - module: "yudao-module-bpm"
+      api: "流程审批"
+      purpose: "合同、回款的审批流程管理"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      version: "3.x"
+      purpose: "ORM 框架，提供 CRUD 操作"
+    - name: "Spring Security"
+      version: "5.x"
+      purpose: "权限校验"
+    - name: "Swagger/OpenAPI"
+      version: "3.x"
+      purpose: "API 文档生成"
+    - name: "EasyExcel"
+      version: "3.x"
+      purpose: "Excel 导入导出"
+    - name: "LogRecord"
+      version: "mzt-biz-log"
+      purpose: "操作日志记录"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/dal/dataobject/customer/CrmCustomerDO.java"
+    purpose: "客户实体类，CRM 核心聚合根"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/dal/dataobject/business/CrmBusinessDO.java"
+    purpose: "商机实体类，销售漏斗核心"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/dal/dataobject/permission/CrmPermissionDO.java"
+    purpose: "数据权限实体，权限控制核心"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/service/customer/CrmCustomerService.java"
+    purpose: "客户服务接口，定义客户核心业务方法"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/service/customer/CrmCustomerServiceImpl.java"
+    purpose: "客户服务实现，包含公海池、转移等复杂业务逻辑"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/service/permission/CrmPermissionService.java"
+    purpose: "数据权限服务接口"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/controller/admin/customer/CrmCustomerController.java"
+    purpose: "客户控制器，HTTP 接口入口"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/enums/common/CrmBizTypeEnum.java"
+    purpose: "业务类型枚举，权限控制的基础"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/enums/permission/CrmPermissionLevelEnum.java"
+    purpose: "权限级别枚举"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义"
+  - path: "yudao-module-crm/src/main/java/cn/iocoder/yudao/module/crm/framework/permission/core/annotations/CrmPermission.java"
+    purpose: "数据权限注解定义"

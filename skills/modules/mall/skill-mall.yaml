@@ -1,0 +1,654 @@
+# Skill 模板文件
+# 用于提取模块知识的标准格式
+
+skill:
+  id: "skill-mall"
+  name: "Mall Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-mall"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    商城系统（Mall）是 ruoyi-vue-pro 项目的电商核心模块，提供完整的电商解决方案。
+    包含商品管理、促销活动、交易订单、数据统计四大核心能力：
+    - 商品管理：SPU/SKU 商品模型、商品分类、品牌、属性规格管理
+    - 促销活动：优惠券、秒杀、拼团、砍价、满减送、积分商城等
+    - 交易订单：购物车、订单创建/支付/发货/收货、售后退款
+    - 数据统计：交易统计、商品统计、会员统计等
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "SPU-SKU 模型：标准电商商品模型，SPU 为商品标准化单元，SKU 为库存单位"
+    - "订单状态机：订单状态流转严格遵循状态机模式，确保状态变更可追溯"
+    - "领域驱动设计：按业务领域划分子模块（product/promotion/trade/statistics）"
+    - "分层架构：Controller -> Service -> DAL 三层架构，职责清晰"
+    - "聚合根设计：订单（TradeOrder）和商品（ProductSpu）作为聚合根"
+    - "API 模块分离：trade-api 独立模块，提供跨模块调用接口"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "ProductSpu（商品SPU）"
+        type: "聚合根"
+        entities: ["ProductSku（商品SKU）", "ProductCategory（分类）", "ProductBrand（品牌）", "ProductProperty（属性）"]
+        description: "商品SPU作为聚合根，管理SKU、分类、品牌、属性等关联实体"
+      - name: "TradeOrder（交易订单）"
+        type: "聚合根"
+        entities: ["TradeOrderItem（订单项）", "AfterSale（售后单）", "Cart（购物车）"]
+        description: "订单作为交易核心聚合根，管理订单项、售后、购物车等"
+      - name: "CouponTemplate（优惠券模板）"
+        type: "聚合根"
+        entities: ["Coupon（优惠券）"]
+        description: "优惠券模板管理优惠券的发放和使用"
+      - name: "CombinationActivity（拼团活动）"
+        type: "聚合根"
+        entities: ["CombinationProduct（拼团商品）", "CombinationRecord（拼团记录）"]
+        description: "拼团活动管理拼团商品和拼团参与记录"
+
+    value_objects:
+      - "ProductSkuDO.Property（SKU属性值对象）"
+      - "TradeOrderDO.Address（收货地址值对象）"
+      - "DeliveryExpressTemplateCharge（运费模板计费规则）"
+
+    services:
+      - "ProductSpuService：商品SPU业务逻辑"
+      - "TradeOrderUpdateService：订单创建和状态更新"
+      - "TradePriceService：价格计算服务"
+      - "AfterSaleService：售后服务"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口，提供RPC调用能力"
+      components:
+        - "ProductSpuApi/ProductSkuApi：商品信息查询、库存更新"
+        - "TradeOrderApi：订单信息查询"
+        - "CouponApi：优惠券使用"
+        - "SeckillActivityApi/CombinationRecordApi：营销活动验证"
+
+    - name: "controller"
+      purpose: "HTTP接口，分为管理后台(admin)和用户端(app)"
+      components:
+        - "admin/spu/ProductSpuController：商品SPU管理"
+        - "admin/order/TradeOrderController：订单管理"
+        - "app/spu/AppProductSpuController：商品展示"
+        - "app/order/AppTradeOrderController：用户下单"
+
+    - name: "service"
+      purpose: "业务逻辑层，核心业务处理"
+      components:
+        - "ProductSpuService/ProductSkuService：商品业务"
+        - "TradeOrderUpdateService/TradeOrderQueryService：订单业务"
+        - "AfterSaleService：售后业务"
+        - "CartService：购物车业务"
+        - "CouponService：优惠券业务"
+
+    - name: "dal"
+      purpose: "数据访问层，MyBatis-Plus Mapper"
+      components:
+        - "ProductSpuMapper/ProductSkuMapper：商品数据访问"
+        - "TradeOrderMapper/TradeOrderItemMapper：订单数据访问"
+        - "CouponMapper/CouponTemplateMapper：优惠券数据访问"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "状态模式"
+      location: "TradeOrderStatusEnum, ProductSpuStatusEnum"
+      purpose: "订单状态和商品状态的状态机管理，通过枚举定义状态流转"
+    - pattern: "策略模式"
+      location: "TradePriceService"
+      purpose: "价格计算策略，支持不同促销活动的价格计算"
+    - pattern: "模板方法模式"
+      location: "BaseDO, TenantBaseDO"
+      purpose: "数据实体基类，统一处理创建时间、更新时间、删除标记等"
+    - pattern: "工厂模式"
+      location: "ProductSpuConvert, TradeOrderConvert"
+      purpose: "MapStruct转换器，VO与DO之间的对象转换"
+    - pattern: "观察者模式"
+      location: "TradeOrderLogService"
+      purpose: "订单操作日志记录，订单状态变更时自动记录日志"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "ProductSpuApi"
+        module: "yudao-module-product"
+        purpose: "查询商品信息、更新库存"
+      - name: "ProductSkuApi"
+        module: "yudao-module-product"
+        purpose: "查询SKU信息、更新库存"
+      - name: "CouponApi"
+        module: "yudao-module-promotion"
+        purpose: "优惠券使用、回收"
+      - name: "SeckillActivityApi"
+        module: "yudao-module-promotion"
+        purpose: "秒杀活动校验、库存扣减"
+
+    consumers:
+      - module: "yudao-module-trade"
+        api: "ProductSpuApi"
+        purpose: "下单时查询商品信息、扣减库存"
+      - module: "yudao-module-trade"
+        api: "CouponApi"
+        purpose: "下单时使用优惠券"
+      - module: "yudao-module-statistics"
+        api: "TradeOrderApi"
+        purpose: "统计交易数据"
+
+    mq:
+      - topic: "order.paid"
+        purpose: "订单支付成功消息，触发积分发放、优惠券赠送等"
+      - topic: "order.delivered"
+        purpose: "订单发货消息，通知用户"
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有DO实体继承BaseDO，包含id、creator、createTime、updater、updateTime、deleted字段"
+
+  # 核心数据表
+  tables:
+    # ========== 商品模块 ==========
+    - name: "product_spu"
+      comment: "商品SPU表"
+      entity: "ProductSpuDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "商品SPU编号" }
+        - { name: "name", type: "String", comment: "商品名称" }
+        - { name: "keyword", type: "String", comment: "关键字" }
+        - { name: "introduction", type: "String", comment: "商品简介" }
+        - { name: "description", type: "String", comment: "商品详情" }
+        - { name: "category_id", type: "Long", comment: "分类编号" }
+        - { name: "brand_id", type: "Long", comment: "品牌编号" }
+        - { name: "pic_url", type: "String", comment: "商品封面图" }
+        - { name: "slider_pic_urls", type: "List<String>", comment: "轮播图" }
+        - { name: "status", type: "Integer", comment: "商品状态：-1回收站 0下架 1上架" }
+        - { name: "spec_type", type: "Boolean", comment: "规格类型：false单规格 true多规格" }
+        - { name: "price", type: "Integer", comment: "最低价格（分）" }
+        - { name: "market_price", type: "Integer", comment: "市场价（分）" }
+        - { name: "cost_price", type: "Integer", comment: "成本价（分）" }
+        - { name: "stock", type: "Integer", comment: "库存总量" }
+        - { name: "sales_count", type: "Integer", comment: "销量" }
+        - { name: "delivery_types", type: "List<Integer>", comment: "配送方式" }
+        - { name: "delivery_template_id", type: "Long", comment: "运费模板编号" }
+
+    - name: "product_sku"
+      comment: "商品SKU表"
+      entity: "ProductSkuDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "SKU编号" }
+        - { name: "spu_id", type: "Long", comment: "SPU编号" }
+        - { name: "properties", type: "List<Property>", comment: "属性数组JSON" }
+        - { name: "price", type: "Integer", comment: "商品价格（分）" }
+        - { name: "market_price", type: "Integer", comment: "市场价（分）" }
+        - { name: "cost_price", type: "Integer", comment: "成本价（分）" }
+        - { name: "bar_code", type: "String", comment: "商品条码" }
+        - { name: "pic_url", type: "String", comment: "图片地址" }
+        - { name: "stock", type: "Integer", comment: "库存" }
+        - { name: "weight", type: "Double", comment: "重量（kg）" }
+        - { name: "volume", type: "Double", comment: "体积（m^3）" }
+        - { name: "first_brokerage_price", type: "Integer", comment: "一级分销佣金" }
+        - { name: "second_brokerage_price", type: "Integer", comment: "二级分销佣金" }
+
+    - name: "product_category"
+      comment: "商品分类表"
+      entity: "ProductCategoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "分类编号" }
+        - { name: "parent_id", type: "Long", comment: "父分类编号" }
+        - { name: "name", type: "String", comment: "分类名称" }
+        - { name: "pic_url", type: "String", comment: "分类图片" }
+        - { name: "sort", type: "Integer", comment: "排序" }
+        - { name: "status", type: "Integer", comment: "状态：0启用 1禁用" }
+
+    - name: "product_brand"
+      comment: "商品品牌表"
+      entity: "ProductBrandDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "品牌编号" }
+        - { name: "name", type: "String", comment: "品牌名称" }
+        - { name: "pic_url", type: "String", comment: "品牌图片" }
+        - { name: "sort", type: "Integer", comment: "排序" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    # ========== 交易模块 ==========
+    - name: "trade_order"
+      comment: "交易订单表"
+      entity: "TradeOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "订单编号" }
+        - { name: "no", type: "String", comment: "订单流水号" }
+        - { name: "type", type: "Integer", comment: "订单类型" }
+        - { name: "terminal", type: "Integer", comment: "订单来源终端" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "status", type: "Integer", comment: "订单状态" }
+        - { name: "product_count", type: "Integer", comment: "商品数量" }
+        - { name: "total_price", type: "Integer", comment: "商品原价（分）" }
+        - { name: "discount_price", type: "Integer", comment: "优惠金额（分）" }
+        - { name: "delivery_price", type: "Integer", comment: "运费金额（分）" }
+        - { name: "pay_price", type: "Integer", comment: "应付金额（分）" }
+        - { name: "pay_order_id", type: "Long", comment: "支付订单编号" }
+        - { name: "pay_status", type: "Boolean", comment: "是否已支付" }
+        - { name: "pay_time", type: "LocalDateTime", comment: "付款时间" }
+        - { name: "delivery_type", type: "Integer", comment: "配送方式" }
+        - { name: "logistics_id", type: "Long", comment: "物流公司编号" }
+        - { name: "logistics_no", type: "String", comment: "物流单号" }
+        - { name: "receiver_name", type: "String", comment: "收件人名称" }
+        - { name: "receiver_mobile", type: "String", comment: "收件人手机" }
+        - { name: "receiver_detail_address", type: "String", comment: "收件人详细地址" }
+        - { name: "refund_status", type: "Integer", comment: "售后状态" }
+        - { name: "coupon_id", type: "Long", comment: "优惠券编号" }
+        - { name: "coupon_price", type: "Integer", comment: "优惠券减免金额" }
+
+    - name: "trade_order_item"
+      comment: "交易订单项表"
+      entity: "TradeOrderItemDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "订单项编号" }
+        - { name: "order_id", type: "Long", comment: "订单编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "spu_id", type: "Long", comment: "SPU编号" }
+        - { name: "sku_id", type: "Long", comment: "SKU编号" }
+        - { name: "spu_name", type: "String", comment: "商品名称" }
+        - { name: "sku_name", type: "String", comment: "SKU名称" }
+        - { name: "price", type: "Integer", comment: "商品原价（分）" }
+        - { name: "count", type: "Integer", comment: "购买数量" }
+        - { name: "pay_price", type: "Integer", comment: "子订单实付金额" }
+        - { name: "after_sale_status", type: "Integer", comment: "售后状态" }
+
+    - name: "trade_after_sale"
+      comment: "售后订单表"
+      entity: "AfterSaleDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "售后编号" }
+        - { name: "no", type: "String", comment: "售后流水号" }
+        - { name: "order_id", type: "Long", comment: "订单编号" }
+        - { name: "order_item_id", type: "Long", comment: "订单项编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "type", type: "Integer", comment: "售后类型：0退款1退货退款" }
+        - { name: "way", type: "Integer", comment: "退款方式" }
+        - { name: "status", type: "Integer", comment: "售后状态" }
+        - { name: "refund_price", type: "Integer", comment: "退款金额" }
+        - { name: "apply_reason", type: "String", comment: "申请原因" }
+
+    # ========== 促销模块 ==========
+    - name: "promotion_coupon_template"
+      comment: "优惠券模板表"
+      entity: "CouponTemplateDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "模板编号" }
+        - { name: "name", type: "String", comment: "优惠券名称" }
+        - { name: "status", type: "Integer", comment: "状态" }
+        - { name: "total_count", type: "Integer", comment: "发放数量" }
+        - { name: "take_limit_count", type: "Integer", comment: "每人限领数量" }
+        - { name: "take_type", type: "Integer", comment: "领取方式" }
+        - { name: "product_scope", type: "Integer", comment: "商品范围" }
+        - { name: "discount_type", type: "Integer", comment: "折扣类型" }
+
+    - name: "promotion_coupon"
+      comment: "优惠券表"
+      entity: "CouponDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "优惠券编号" }
+        - { name: "template_id", type: "Long", comment: "模板编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "status", type: "Integer", comment: "状态：1未使用2已使用3已过期" }
+
+    - name: "promotion_seckill_activity"
+      comment: "秒杀活动表"
+      entity: "SeckillActivityDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "活动编号" }
+        - { name: "name", type: "String", comment: "活动名称" }
+        - { name: "spu_id", type: "Long", comment: "SPU编号" }
+        - { name: "status", type: "Integer", comment: "活动状态" }
+        - { name: "start_time", type: "LocalDateTime", comment: "开始时间" }
+        - { name: "end_time", type: "LocalDateTime", comment: "结束时间" }
+        - { name: "total_limit_count", type: "Integer", comment: "总限购数量" }
+        - { name: "single_limit_count", type: "Integer", comment: "单次限购数量" }
+
+    - name: "promotion_combination_activity"
+      comment: "拼团活动表"
+      entity: "CombinationActivityDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "活动编号" }
+        - { name: "name", type: "String", comment: "活动名称" }
+        - { name: "spu_id", type: "Long", comment: "SPU编号" }
+        - { name: "status", type: "Integer", comment: "活动状态" }
+        - { name: "user_size", type: "Integer", comment: "成团人数" }
+        - { name: "limit_duration", type: "Integer", comment: "拼团时长（小时）" }
+
+    - name: "promotion_bargain_activity"
+      comment: "砍价活动表"
+      entity: "BargainActivityDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "活动编号" }
+        - { name: "name", type: "String", comment: "活动名称" }
+        - { name: "spu_id", type: "Long", comment: "SPU编号" }
+        - { name: "status", type: "Integer", comment: "活动状态" }
+        - { name: "bargain_first_price", type: "Integer", comment: "砍价起始价格" }
+        - { name: "bargain_min_price", type: "Integer", comment: "砍价最低价格" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "product_spu"
+      to: "product_sku"
+      type: "1:N"
+      foreign_key: "spu_id"
+      comment: "一个SPU对应多个SKU"
+    - from: "product_spu"
+      to: "product_category"
+      type: "N:1"
+      foreign_key: "category_id"
+      comment: "多个SPU属于一个分类"
+    - from: "product_spu"
+      to: "product_brand"
+      type: "N:1"
+      foreign_key: "brand_id"
+      comment: "多个SPU属于一个品牌"
+    - from: "trade_order"
+      to: "trade_order_item"
+      type: "1:N"
+      foreign_key: "order_id"
+      comment: "一个订单包含多个订单项"
+    - from: "trade_order_item"
+      to: "product_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+      comment: "订单项关联SKU"
+    - from: "trade_order"
+      to: "trade_after_sale"
+      type: "1:N"
+      foreign_key: "order_id"
+      comment: "一个订单可能有多个售后单"
+    - from: "promotion_coupon_template"
+      to: "promotion_coupon"
+      type: "1:N"
+      foreign_key: "template_id"
+      comment: "一个模板发放多张优惠券"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@RestController"
+      - "@RequestMapping"
+      - "@Tag(name = \"模块名称\")"
+      - "@Operation(summary = \"接口描述\")"
+      - "@PreAuthorize(\"@ss.hasPermission('权限标识')\")"
+    example: |
+      @Tag(name = "管理后台 - 商品 SPU")
+      @RestController
+      @RequestMapping("/product/spu")
+      @Validated
+      public class ProductSpuController {
+
+          @Resource
+          private ProductSpuService productSpuService;
+
+          @PostMapping("/create")
+          @Operation(summary = "创建商品 SPU")
+          @PreAuthorize("@ss.hasPermission('product:spu:create')")
+          public CommonResult<Long> createProductSpu(@Valid @RequestBody ProductSpuSaveReqVO createReqVO) {
+              return success(productSpuService.createSpu(createReqVO));
+          }
+
+          @GetMapping("/page")
+          @Operation(summary = "获得商品 SPU 分页")
+          @PreAuthorize("@ss.hasPermission('product:spu:query')")
+          public CommonResult<PageResult<ProductSpuRespVO>> getSpuPage(@Valid ProductSpuPageReqVO pageVO) {
+              PageResult<ProductSpuDO> pageResult = productSpuService.getSpuPage(pageVO);
+              return success(BeanUtils.toBean(pageResult, ProductSpuRespVO.class));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: |
+      public interface ProductSpuService {
+          Long createSpu(@Valid ProductSpuSaveReqVO createReqVO);
+          void updateSpu(@Valid ProductSpuSaveReqVO updateReqVO);
+          void deleteSpu(Long id);
+          ProductSpuDO getSpu(Long id);
+          PageResult<ProductSpuDO> getSpuPage(ProductSpuPageReqVO pageReqVO);
+      }
+    impl_pattern: |
+      @Service
+      @Validated
+      public class ProductSpuServiceImpl implements ProductSpuService {
+
+          @Resource
+          private ProductSpuMapper productSpuMapper;
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public Long createSpu(ProductSpuSaveReqVO createReqVO) {
+              // 1. 校验分类、品牌
+              validateCategory(createReqVO.getCategoryId());
+              brandService.validateProductBrand(createReqVO.getBrandId());
+              // 2. 校验 SKU
+              productSkuService.validateSkuList(skuSaveReqList, createReqVO.getSpecType());
+              // 3. 插入 SPU
+              ProductSpuDO spu = BeanUtils.toBean(createReqVO, ProductSpuDO.class);
+              productSpuMapper.insert(spu);
+              // 4. 插入 SKU
+              productSkuService.createSkuList(spu.getId(), skuSaveReqList);
+              return spu.getId();
+          }
+      }
+    example: |
+      // 商品创建流程
+      @Transactional(rollbackFor = Exception.class)
+      public Long createSpu(ProductSpuSaveReqVO createReqVO) {
+          // 1. 校验分类、品牌
+          validateCategory(createReqVO.getCategoryId());
+          brandService.validateProductBrand(createReqVO.getBrandId());
+          // 2. 校验 SKU
+          List<ProductSkuSaveReqVO> skuSaveReqList = createReqVO.getSkus();
+          productSkuService.validateSkuList(skuSaveReqList, createReqVO.getSpecType());
+          // 3. 初始化 SPU 信息
+          ProductSpuDO spu = BeanUtils.toBean(createReqVO, ProductSpuDO.class);
+          initSpuFromSkus(spu, skuSaveReqList);
+          // 4. 插入 SPU
+          productSpuMapper.insert(spu);
+          // 5. 插入 SKU
+          productSkuService.createSkuList(spu.getId(), skuSaveReqList);
+          return spu.getId();
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      @Mapper
+      public interface ProductSpuMapper extends BaseMapperX<ProductSpuDO> {
+
+          default PageResult<ProductSpuDO> selectPage(ProductSpuPageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<ProductSpuDO>()
+                      .likeIfPresent(ProductSpuDO::getName, reqVO.getName())
+                      .eqIfPresent(ProductSpuDO::getCategoryId, reqVO.getCategoryId())
+                      .eqIfPresent(ProductSpuDO::getStatus, reqVO.getStatus())
+                      .orderByDesc(ProductSpuDO::getSort));
+          }
+      }
+    example: |
+      // 使用 MyBatis-Plus 查询
+      List<ProductSpuDO> list = productSpuMapper.selectList(
+          new LambdaQueryWrapper<ProductSpuDO>()
+              .eq(ProductSpuDO::getStatus, ProductSpuStatusEnum.ENABLE.getStatus())
+              .orderByDesc(ProductSpuDO::getSort)
+      );
+
+  # 异常处理
+  error_handling:
+    code_prefix:
+      product: "1-008-xxx-xxx"
+      trade: "1-011-xxx-xxx"
+      promotion: "1-013-xxx-xxx"
+    examples:
+      - code: "1_008_005_000"
+        message: "商品 SPU 不存在"
+        module: "product"
+      - code: "1_008_006_004"
+        message: "商品 SKU 库存不足"
+        module: "product"
+      - code: "1_011_000_011"
+        message: "交易订单不存在"
+        module: "trade"
+      - code: "1_011_000_017"
+        message: "交易订单发货失败，订单不是【待发货】状态"
+        module: "trade"
+      - code: "1_013_004_000"
+        message: "优惠劵模板不存在"
+        module: "promotion"
+      - code: "1_013_008_006"
+        message: "秒杀失败，原因：秒杀库存不足"
+        module: "promotion"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE, args)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增业务功能（以商品为例）"
+    steps:
+      - "1. 创建 DO 实体类：在 dal/dataobject 目录下创建实体类，继承 BaseDO"
+      - "2. 创建 Mapper 接口：在 dal/mysql 目录下创建 Mapper，继承 BaseMapperX"
+      - "3. 创建 Service 接口和实现：在 service 目录下创建接口和实现类"
+      - "4. 创建 VO 类：在 controller/vo 目录下创建请求和响应 VO"
+      - "5. 创建 Controller：在 controller 目录下创建控制器"
+      - "6. 创建错误码：在 enums/ErrorCodeConstants.java 中定义错误码"
+      - "7. 编写单元测试：验证业务逻辑正确性"
+
+  # 新增渠道/类型示例
+  new_channel:
+    title: "新增促销活动类型"
+    steps:
+      - "1. 创建活动 DO 实体：如 XxxActivityDO，关联商品和规则"
+      - "2. 创建 API 接口：提供活动校验、库存扣减等跨模块调用能力"
+      - "3. 创建 Service 层：处理活动创建、状态流转、库存管理"
+      - "4. 集成到订单流程：在 TradePriceService 中增加价格计算逻辑"
+      - "5. 集成到下单流程：在 TradeOrderUpdateService 中处理活动商品下单"
+      - "6. 创建管理后台接口：活动创建、编辑、上下架等"
+      - "7. 创建用户端接口：活动列表、详情、参与等"
+
+  # 最佳实践
+  best_practices:
+    - "商品状态管理：使用 ProductSpuStatusEnum 枚举，状态变更通过 updateSpuStatus 方法"
+    - "订单状态流转：严格遵循状态机模式，状态变更记录日志"
+    - "库存扣减：使用乐观锁或 Redis 原子操作，防止超卖"
+    - "价格计算：统一使用分为单位，避免浮点精度问题"
+    - "事务管理：涉及多表操作时使用 @Transactional 注解"
+    - "异常处理：使用框架提供的 exception() 方法抛出业务异常"
+    - "API 设计：跨模块调用通过 API 接口，避免直接依赖实现类"
+    - "并发控制：使用分布式锁处理秒杀、拼团等高并发场景"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-member"
+      api: "MemberUserApi"
+      purpose: "获取会员信息，用于订单关联用户"
+    - module: "yudao-module-pay"
+      api: "PayOrderApi"
+      purpose: "创建支付订单，处理支付回调"
+    - module: "yudao-module-system"
+      api: "AreaApi"
+      purpose: "获取地区信息，用于收货地址"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      version: "3.x"
+      purpose: "ORM 框架，简化数据库操作"
+    - name: "MapStruct"
+      version: "1.x"
+      purpose: "对象映射，VO 与 DO 转换"
+    - name: "Spring Validation"
+      version: "2.x"
+      purpose: "参数校验"
+    - name: "Swagger/OpenAPI"
+      version: "3.x"
+      purpose: "API 文档生成"
+    - name: "Redis"
+      version: "6.x"
+      purpose: "缓存、分布式锁、库存扣减"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  # 商品模块
+  - path: "yudao-module-mall/yudao-module-product/src/main/java/cn/iocoder/yudao/module/product/dal/dataobject/spu/ProductSpuDO.java"
+    purpose: "商品SPU实体类，电商核心领域模型"
+  - path: "yudao-module-mall/yudao-module-product/src/main/java/cn/iocoder/yudao/module/product/dal/dataobject/sku/ProductSkuDO.java"
+    purpose: "商品SKU实体类，库存管理单元"
+  - path: "yudao-module-mall/yudao-module-product/src/main/java/cn/iocoder/yudao/module/product/service/spu/ProductSpuService.java"
+    purpose: "商品SPU服务接口，定义商品CRUD操作"
+  - path: "yudao-module-mall/yudao-module-product/src/main/java/cn/iocoder/yudao/module/product/controller/admin/spu/ProductSpuController.java"
+    purpose: "商品SPU管理接口，后台商品管理入口"
+  - path: "yudao-module-mall/yudao-module-product/src/main/java/cn/iocoder/yudao/module/product/enums/ErrorCodeConstants.java"
+    purpose: "商品模块错误码定义"
+
+  # 交易模块
+  - path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/yudao/module/trade/dal/dataobject/order/TradeOrderDO.java"
+    purpose: "交易订单实体类，订单聚合根"
+  - path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/yudao/module/trade/service/order/TradeOrderUpdateService.java"
+    purpose: "订单更新服务，订单创建和状态流转"
+  - path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/yudao/module/trade/service/price/TradePriceService.java"
+    purpose: "价格计算服务，订单金额计算核心"
+  - path: "yudao-module-mall/yudao-module-trade/src/main/java/cn/iocoder/yudao/module/trade/service/aftersale/AfterSaleService.java"
+    purpose: "售后服务，退款退货处理"
+  - path: "yudao-module-mall/yudao-module-trade-api/src/main/java/cn/iocoder/yudao/module/trade/enums/ErrorCodeConstants.java"
+    purpose: "交易模块错误码定义"
+
+  # 促销模块
+  - path: "yudao-module-mall/yudao-module-promotion/src/main/java/cn/iocoder/yudao/module/promotion/dal/dataobject/coupon/CouponTemplateDO.java"
+    purpose: "优惠券模板实体类"
+  - path: "yudao-module-mall/yudao-module-promotion/src/main/java/cn/iocoder/yudao/module/promotion/dal/dataobject/seckill/SeckillActivityDO.java"
+    purpose: "秒杀活动实体类"
+  - path: "yudao-module-mall/yudao-module-promotion/src/main/java/cn/iocoder/yudao/module/promotion/dal/dataobject/combination/CombinationActivityDO.java"
+    purpose: "拼团活动实体类"
+  - path: "yudao-module-mall/yudao-module-promotion/src/main/java/cn/iocoder/yudao/module/promotion/enums/ErrorCodeConstants.java"
+    purpose: "促销模块错误码定义"
+
+  # 统计模块
+  - path: "yudao-module-mall/yudao-module-statistics/src/main/java/cn/iocoder/yudao/module/statistics/service/trade/TradeStatisticsService.java"
+    purpose: "交易统计服务，订单数据汇总"

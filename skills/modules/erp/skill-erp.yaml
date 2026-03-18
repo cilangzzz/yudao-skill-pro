@@ -1,0 +1,968 @@
+# ERP 模块 Skill 文档
+# 企业资源计划模块，涵盖采购、销售、库存、财务等核心业务
+
+skill:
+  id: "skill-erp"
+  name: "ERP Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-erp"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    ERP（企业资源计划）模块是企业管理核心系统，实现进销存一体化管理。
+    主要业务场景：
+    1. 采购管理：采购订单 -> 采购入库 -> 采购退货 -> 付款
+    2. 销售管理：销售订单 -> 销售出库 -> 销售退货 -> 收款
+    3. 库存管理：其它入库/出库、库存调拨、库存盘点、库存查询
+    4. 财务管理：结算账户、付款单、收款单
+    5. 基础资料：产品、产品分类、产品单位、供应商、客户、仓库
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "单据状态机：所有业务单据采用 PROCESS(未审核) -> APPROVE(已审核) 状态流转"
+    - "主子表设计：订单类单据采用 Order + OrderItem 主子表结构，支持明细项增删改差量更新"
+    - "库存增量更新：库存变动采用 updateCountIncrement 增量更新，避免并发问题"
+    - "单据号生成器：基于 Redis 的分布式单据号生成，格式：前缀 + yyyyMMdd + 6位序号"
+    - "审核权限控制：已审核单据不可修改/删除，需反审核后才能操作"
+    - "业务关联校验：单据之间存在关联关系，删除/反审核时需检查关联单据"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      # 采购聚合
+      - name: "采购订单 (ErpPurchaseOrderDO)"
+        type: "聚合根"
+        entities:
+          - "采购订单项 (ErpPurchaseOrderItemDO)"
+          - "供应商 (ErpSupplierDO)"
+        description: "采购域核心聚合，管理采购订单及其明细项"
+
+      - name: "采购入库 (ErpPurchaseInDO)"
+        type: "聚合根"
+        entities:
+          - "采购入库项 (ErpPurchaseInItemDO)"
+        description: "关联采购订单，记录采购入库明细"
+
+      - name: "采购退货 (ErpPurchaseReturnDO)"
+        type: "聚合根"
+        entities:
+          - "采购退货项 (ErpPurchaseReturnItemDO)"
+        description: "关联采购订单，记录采购退货明细"
+
+      # 销售聚合
+      - name: "销售订单 (ErpSaleOrderDO)"
+        type: "聚合根"
+        entities:
+          - "销售订单项 (ErpSaleOrderItemDO)"
+          - "客户 (ErpCustomerDO)"
+        description: "销售域核心聚合，管理销售订单及其明细项"
+
+      - name: "销售出库 (ErpSaleOutDO)"
+        type: "聚合根"
+        entities:
+          - "销售出库项 (ErpSaleOutItemDO)"
+        description: "关联销售订单，记录销售出库明细"
+
+      - name: "销售退货 (ErpSaleReturnDO)"
+        type: "聚合根"
+        entities:
+          - "销售退货项 (ErpSaleReturnItemDO)"
+        description: "关联销售订单，记录销售退货明细"
+
+      # 库存聚合
+      - name: "库存 (ErpStockDO)"
+        type: "聚合根"
+        entities:
+          - "仓库 (ErpWarehouseDO)"
+          - "产品 (ErpProductDO)"
+        description: "库存域核心，记录产品在各仓库的实时库存"
+
+      - name: "库存记录 (ErpStockRecordDO)"
+        type: "实体"
+        description: "记录所有库存变动明细，支持追溯"
+
+      # 财务聚合
+      - name: "付款单 (ErpFinancePaymentDO)"
+        type: "聚合根"
+        entities:
+          - "付款单项 (ErpFinancePaymentItemDO)"
+          - "结算账户 (ErpAccountDO)"
+        description: "财务域付款管理"
+
+      - name: "收款单 (ErpFinanceReceiptDO)"
+        type: "聚合根"
+        entities:
+          - "收款单项 (ErpFinanceReceiptItemDO)"
+          - "结算账户 (ErpAccountDO)"
+        description: "财务域收款管理"
+
+    value_objects:
+      - name: "ErpStockRecordCreateReqBO"
+        type: "值对象"
+        description: "库存记录创建请求BO，封装库存变动所需的业务信息"
+
+    services:
+      - name: "ErpPurchaseOrderService"
+        type: "领域服务"
+        description: "采购订单领域服务，管理采购订单生命周期"
+      - name: "ErpSaleOrderService"
+        type: "领域服务"
+        description: "销售订单领域服务，管理销售订单生命周期"
+      - name: "ErpStockService"
+        type: "领域服务"
+        description: "库存领域服务，管理库存变动"
+      - name: "ErpStockRecordService"
+        type: "领域服务"
+        description: "库存记录领域服务，记录库存变动明细"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "controller"
+      purpose: "HTTP接口层，处理请求响应、参数校验、权限控制"
+      components:
+        - "ErpPurchaseOrderController - 采购订单接口"
+        - "ErpPurchaseInController - 采购入库接口"
+        - "ErpPurchaseReturnController - 采购退货接口"
+        - "ErpSaleOrderController - 销售订单接口"
+        - "ErpSaleOutController - 销售出库接口"
+        - "ErpSaleReturnController - 销售退货接口"
+        - "ErpStockController - 库存查询接口"
+        - "ErpStockInController - 其它入库接口"
+        - "ErpStockOutController - 其它出库接口"
+        - "ErpStockMoveController - 库存调拨接口"
+        - "ErpStockCheckController - 库存盘点接口"
+        - "ErpFinancePaymentController - 付款单接口"
+        - "ErpFinanceReceiptController - 收款单接口"
+        - "ErpProductController - 产品接口"
+        - "ErpSupplierController - 供应商接口"
+        - "ErpCustomerController - 客户接口"
+        - "ErpWarehouseController - 仓库接口"
+
+    - name: "service"
+      purpose: "业务逻辑层，实现领域服务、事务管理、业务规则校验"
+      components:
+        - "purchase/ - 采购域服务（订单、入库、退货、供应商）"
+        - "sale/ - 销售域服务（订单、出库、退货、客户）"
+        - "stock/ - 库存域服务（库存、仓库、入库、出库、调拨、盘点、记录）"
+        - "finance/ - 财务域服务（账户、付款、收款）"
+        - "product/ - 产品域服务（产品、分类、单位）"
+        - "statistics/ - 统计服务（采购统计、销售统计）"
+
+    - name: "dal"
+      purpose: "数据访问层，封装数据库操作、Redis操作"
+      components:
+        - "dataobject/ - DO实体类（按业务域分包）"
+        - "mysql/ - MyBatis Mapper接口"
+        - "redis/ - Redis操作（单据号生成）"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "状态机模式 (State Machine)"
+      location: "cn.iocoder.yudao.module.erp.enums.ErpAuditStatus"
+      purpose: "定义单据审核状态 PROCESS(10-未审核) -> APPROVE(20-已审核)，控制单据生命周期"
+
+    - pattern: "主子表模式 (Master-Detail)"
+      location: "purchase/ErpPurchaseOrderDO + ErpPurchaseOrderItemDO"
+      purpose: "订单类单据采用主子表设计，支持明细项差量更新"
+
+    - pattern: "策略模式 (Strategy)"
+      location: "cn.iocoder.yudao.module.erp.enums.stock.ErpStockRecordBizTypeEnum"
+      purpose: "库存记录业务类型枚举，定义不同业务场景的库存变动类型"
+
+    - pattern: "分布式ID生成"
+      location: "cn.iocoder.yudao.module.erp.dal.redis.no.ErpNoRedisDAO"
+      purpose: "基于Redis的分布式单据号生成，保证唯一性和有序性"
+
+    - pattern: "增量更新模式"
+      location: "ErpStockMapper.updateCountIncrement"
+      purpose: "库存增量更新，使用乐观锁避免并发问题"
+
+  # 模块间通信
+  communication:
+    apis: []  # ERP模块不对外暴露API接口
+    consumers:
+      - module: "system"
+        api: "AdminUserApi"
+        purpose: "获取用户信息，用于显示操作人姓名"
+    mq: []  # 暂无消息队列使用
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有DO继承BaseDO，包含id、creator、create_time、updater、update_time、deleted字段"
+
+  # 核心数据表
+  tables:
+    # ========== 产品相关表 ==========
+    - name: "erp_product"
+      comment: "产品表"
+      entity: "ErpProductDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "产品编号" }
+        - { name: "name", type: "VARCHAR", comment: "产品名称" }
+        - { name: "bar_code", type: "VARCHAR", comment: "产品条码" }
+        - { name: "category_id", type: "BIGINT", comment: "产品分类ID" }
+        - { name: "unit_id", type: "BIGINT", comment: "单位ID" }
+        - { name: "status", type: "INT", comment: "状态(0正常 1停用)" }
+        - { name: "standard", type: "VARCHAR", comment: "规格" }
+        - { name: "purchase_price", type: "DECIMAL", comment: "采购价" }
+        - { name: "sale_price", type: "DECIMAL", comment: "销售价" }
+        - { name: "min_price", type: "DECIMAL", comment: "最低价" }
+
+    - name: "erp_product_category"
+      comment: "产品分类表"
+      entity: "ErpProductCategoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "分类编号" }
+        - { name: "parent_id", type: "BIGINT", comment: "父分类ID" }
+        - { name: "name", type: "VARCHAR", comment: "分类名称" }
+        - { name: "status", type: "INT", comment: "状态" }
+
+    - name: "erp_product_unit"
+      comment: "产品单位表"
+      entity: "ErpProductUnitDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "单位编号" }
+        - { name: "name", type: "VARCHAR", comment: "单位名称" }
+        - { name: "status", type: "INT", comment: "状态" }
+
+    # ========== 采购相关表 ==========
+    - name: "erp_supplier"
+      comment: "供应商表"
+      entity: "ErpSupplierDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "供应商编号" }
+        - { name: "name", type: "VARCHAR", comment: "供应商名称" }
+        - { name: "contact", type: "VARCHAR", comment: "联系人" }
+        - { name: "mobile", type: "VARCHAR", comment: "手机号" }
+        - { name: "status", type: "INT", comment: "状态" }
+
+    - name: "erp_purchase_order"
+      comment: "采购订单表"
+      entity: "ErpPurchaseOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "采购订单号(CGDD+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态(10未审核 20已审核)" }
+        - { name: "supplier_id", type: "BIGINT", comment: "供应商ID" }
+        - { name: "account_id", type: "BIGINT", comment: "结算账户ID" }
+        - { name: "order_time", type: "DATETIME", comment: "下单时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "最终合计价格" }
+        - { name: "total_product_price", type: "DECIMAL", comment: "合计产品价格" }
+        - { name: "total_tax_price", type: "DECIMAL", comment: "合计税额" }
+        - { name: "discount_percent", type: "DECIMAL", comment: "优惠率(%)" }
+        - { name: "discount_price", type: "DECIMAL", comment: "优惠金额" }
+        - { name: "in_count", type: "DECIMAL", comment: "已入库数量" }
+        - { name: "return_count", type: "DECIMAL", comment: "已退货数量" }
+
+    - name: "erp_purchase_order_item"
+      comment: "采购订单项表"
+      entity: "ErpPurchaseOrderItemDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "order_id", type: "BIGINT", comment: "采购订单ID" }
+        - { name: "product_id", type: "BIGINT", comment: "产品ID" }
+        - { name: "product_unit_id", type: "BIGINT", comment: "产品单位ID" }
+        - { name: "count", type: "DECIMAL", comment: "数量" }
+        - { name: "product_price", type: "DECIMAL", comment: "产品单价" }
+        - { name: "tax_percent", type: "DECIMAL", comment: "税率(%)" }
+        - { name: "in_count", type: "DECIMAL", comment: "已入库数量" }
+        - { name: "return_count", type: "DECIMAL", comment: "已退货数量" }
+
+    - name: "erp_purchase_in"
+      comment: "采购入库表"
+      entity: "ErpPurchaseInDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "入库单号" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "supplier_id", type: "BIGINT", comment: "供应商ID" }
+        - { name: "order_id", type: "BIGINT", comment: "采购订单ID" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "in_time", type: "DATETIME", comment: "入库时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计价格" }
+        - { name: "payment_price", type: "DECIMAL", comment: "已付款金额" }
+
+    - name: "erp_purchase_return"
+      comment: "采购退货表"
+      entity: "ErpPurchaseReturnDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "退货单号" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "supplier_id", type: "BIGINT", comment: "供应商ID" }
+        - { name: "order_id", type: "BIGINT", comment: "采购订单ID" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "return_time", type: "DATETIME", comment: "退货时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计价格" }
+        - { name: "refund_price", type: "DECIMAL", comment: "已退款金额" }
+
+    # ========== 销售相关表 ==========
+    - name: "erp_customer"
+      comment: "客户表"
+      entity: "ErpCustomerDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "客户编号" }
+        - { name: "name", type: "VARCHAR", comment: "客户名称" }
+        - { name: "contact", type: "VARCHAR", comment: "联系人" }
+        - { name: "mobile", type: "VARCHAR", comment: "手机号" }
+        - { name: "status", type: "INT", comment: "状态" }
+
+    - name: "erp_sale_order"
+      comment: "销售订单表"
+      entity: "ErpSaleOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "销售订单号(XSDD+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态(10未审核 20已审核)" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "account_id", type: "BIGINT", comment: "结算账户ID" }
+        - { name: "sale_user_id", type: "BIGINT", comment: "销售员ID" }
+        - { name: "order_time", type: "DATETIME", comment: "下单时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "最终合计价格" }
+        - { name: "out_count", type: "DECIMAL", comment: "已出库数量" }
+        - { name: "return_count", type: "DECIMAL", comment: "已退货数量" }
+
+    - name: "erp_sale_order_item"
+      comment: "销售订单项表"
+      entity: "ErpSaleOrderItemDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "order_id", type: "BIGINT", comment: "销售订单ID" }
+        - { name: "product_id", type: "BIGINT", comment: "产品ID" }
+        - { name: "count", type: "DECIMAL", comment: "数量" }
+        - { name: "product_price", type: "DECIMAL", comment: "产品单价" }
+        - { name: "out_count", type: "DECIMAL", comment: "已出库数量" }
+        - { name: "return_count", type: "DECIMAL", comment: "已退货数量" }
+
+    - name: "erp_sale_out"
+      comment: "销售出库表"
+      entity: "ErpSaleOutDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "出库单号" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "order_id", type: "BIGINT", comment: "销售订单ID" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "out_time", type: "DATETIME", comment: "出库时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计价格" }
+        - { name: "receipt_price", type: "DECIMAL", comment: "已收款金额" }
+
+    - name: "erp_sale_return"
+      comment: "销售退货表"
+      entity: "ErpSaleReturnDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "退货单号" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "order_id", type: "BIGINT", comment: "销售订单ID" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "return_time", type: "DATETIME", comment: "退货时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计价格" }
+        - { name: "refund_price", type: "DECIMAL", comment: "已退款金额" }
+
+    # ========== 库存相关表 ==========
+    - name: "erp_warehouse"
+      comment: "仓库表"
+      entity: "ErpWarehouseDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "仓库编号" }
+        - { name: "name", type: "VARCHAR", comment: "仓库名称" }
+        - { name: "address", type: "VARCHAR", comment: "仓库地址" }
+        - { name: "status", type: "INT", comment: "状态" }
+
+    - name: "erp_stock"
+      comment: "产品库存表"
+      entity: "ErpStockDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "product_id", type: "BIGINT", comment: "产品ID" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "count", type: "DECIMAL", comment: "库存数量" }
+
+    - name: "erp_stock_record"
+      comment: "库存明细表"
+      entity: "ErpStockRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "product_id", type: "BIGINT", comment: "产品ID" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "count", type: "DECIMAL", comment: "出入库数量(正数入库/负数出库)" }
+        - { name: "total_count", type: "DECIMAL", comment: "变动后库存量" }
+        - { name: "biz_type", type: "INT", comment: "业务类型" }
+        - { name: "biz_id", type: "BIGINT", comment: "业务编号" }
+        - { name: "biz_item_id", type: "BIGINT", comment: "业务项编号" }
+        - { name: "biz_no", type: "VARCHAR", comment: "业务单号" }
+
+    - name: "erp_stock_in"
+      comment: "其它入库表"
+      entity: "ErpStockInDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "入库单号(QTRK+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "in_time", type: "DATETIME", comment: "入库时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计价格" }
+
+    - name: "erp_stock_out"
+      comment: "其它出库表"
+      entity: "ErpStockOutDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "出库单号(QCKD+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "out_time", type: "DATETIME", comment: "出库时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计价格" }
+
+    - name: "erp_stock_move"
+      comment: "库存调拨表"
+      entity: "ErpStockMoveDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "调拨单号(QCDB+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "from_warehouse_id", type: "BIGINT", comment: "调出仓库ID" }
+        - { name: "to_warehouse_id", type: "BIGINT", comment: "调入仓库ID" }
+        - { name: "move_time", type: "DATETIME", comment: "调拨时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+
+    - name: "erp_stock_check"
+      comment: "库存盘点表"
+      entity: "ErpStockCheckDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "盘点单号(QCPD+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库ID" }
+        - { name: "check_time", type: "DATETIME", comment: "盘点时间" }
+        - { name: "total_count", type: "DECIMAL", comment: "合计数量" }
+
+    # ========== 财务相关表 ==========
+    - name: "erp_account"
+      comment: "结算账户表"
+      entity: "ErpAccountDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "账户编号" }
+        - { name: "name", type: "VARCHAR", comment: "账户名称" }
+        - { name: "no", type: "VARCHAR", comment: "账户编号" }
+        - { name: "status", type: "INT", comment: "状态" }
+
+    - name: "erp_finance_payment"
+      comment: "付款单表"
+      entity: "ErpFinancePaymentDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "付款单号(FKD+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "supplier_id", type: "BIGINT", comment: "供应商ID" }
+        - { name: "account_id", type: "BIGINT", comment: "付款账户ID" }
+        - { name: "payment_time", type: "DATETIME", comment: "付款时间" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计金额" }
+        - { name: "discount_price", type: "DECIMAL", comment: "优惠金额" }
+        - { name: "payment_price", type: "DECIMAL", comment: "实付金额" }
+
+    - name: "erp_finance_receipt"
+      comment: "收款单表"
+      entity: "ErpFinanceReceiptDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "no", type: "VARCHAR", comment: "收款单号(SKD+yyyyMMdd+6位序号)" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "customer_id", type: "BIGINT", comment: "客户ID" }
+        - { name: "account_id", type: "BIGINT", comment: "收款账户ID" }
+        - { name: "receipt_time", type: "DATETIME", comment: "收款时间" }
+        - { name: "total_price", type: "DECIMAL", comment: "合计金额" }
+        - { name: "discount_price", type: "DECIMAL", comment: "优惠金额" }
+        - { name: "receipt_price", type: "DECIMAL", comment: "实收金额" }
+
+  # 表关系（ER关系）
+  relationships:
+    # 产品相关
+    - from: "erp_product"
+      to: "erp_product_category"
+      type: "N:1"
+      foreign_key: "category_id"
+    - from: "erp_product"
+      to: "erp_product_unit"
+      type: "N:1"
+      foreign_key: "unit_id"
+
+    # 采购相关
+    - from: "erp_purchase_order"
+      to: "erp_supplier"
+      type: "N:1"
+      foreign_key: "supplier_id"
+    - from: "erp_purchase_order_item"
+      to: "erp_purchase_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "erp_purchase_in"
+      to: "erp_purchase_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "erp_purchase_return"
+      to: "erp_purchase_order"
+      type: "N:1"
+      foreign_key: "order_id"
+
+    # 销售相关
+    - from: "erp_sale_order"
+      to: "erp_customer"
+      type: "N:1"
+      foreign_key: "customer_id"
+    - from: "erp_sale_order_item"
+      to: "erp_sale_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "erp_sale_out"
+      to: "erp_sale_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "erp_sale_return"
+      to: "erp_sale_order"
+      type: "N:1"
+      foreign_key: "order_id"
+
+    # 库存相关
+    - from: "erp_stock"
+      to: "erp_product"
+      type: "N:1"
+      foreign_key: "product_id"
+    - from: "erp_stock"
+      to: "erp_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+    - from: "erp_stock_record"
+      to: "erp_product"
+      type: "N:1"
+      foreign_key: "product_id"
+    - from: "erp_stock_record"
+      to: "erp_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - ERP XXX') - Swagger接口文档标签"
+      - "@RestController - RESTful控制器"
+      - "@RequestMapping('/erp/xxx') - 请求路径前缀"
+      - "@PreAuthorize('@ss.hasPermission('erp:xxx:create')') - 权限控制"
+      - "@Validated - 参数校验"
+    example: |
+      @Tag(name = "管理后台 - ERP 采购订单")
+      @RestController
+      @RequestMapping("/erp/purchase-order")
+      @Validated
+      public class ErpPurchaseOrderController {
+
+          @PostMapping("/create")
+          @Operation(summary = "创建采购订单")
+          @PreAuthorize("@ss.hasPermission('erp:purchase-order:create')")
+          public CommonResult<Long> createPurchaseOrder(@Valid @RequestBody ErpPurchaseOrderSaveReqVO createReqVO) {
+              return success(purchaseOrderService.createPurchaseOrder(createReqVO));
+          }
+
+          @PutMapping("/update-status")
+          @Operation(summary = "更新采购订单的状态")
+          @PreAuthorize("@ss.hasPermission('erp:purchase-order:update-status')")
+          public CommonResult<Boolean> updatePurchaseOrderStatus(@RequestParam("id") Long id,
+                                                                 @RequestParam("status") Integer status) {
+              purchaseOrderService.updatePurchaseOrderStatus(id, status);
+              return success(true);
+          }
+
+          @GetMapping("/page")
+          @Operation(summary = "获得采购订单分页")
+          @PreAuthorize("@ss.hasPermission('erp:purchase-order:query')")
+          public CommonResult<PageResult<ErpPurchaseOrderRespVO>> getPurchaseOrderPage(@Valid ErpPurchaseOrderPageReqVO pageReqVO) {
+              PageResult<ErpPurchaseOrderDO> pageResult = purchaseOrderService.getPurchaseOrderPage(pageReqVO);
+              return success(buildPurchaseOrderVOPageResult(pageResult));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: |
+      public interface ErpPurchaseOrderService {
+          // 基础CRUD
+          Long createPurchaseOrder(ErpPurchaseOrderSaveReqVO createReqVO);
+          void updatePurchaseOrder(ErpPurchaseOrderSaveReqVO updateReqVO);
+          void deletePurchaseOrder(List<Long> ids);
+          ErpPurchaseOrderDO getPurchaseOrder(Long id);
+          PageResult<ErpPurchaseOrderDO> getPurchaseOrderPage(ErpPurchaseOrderPageReqVO pageReqVO);
+
+          // 状态更新
+          void updatePurchaseOrderStatus(Long id, Integer status);
+
+          // 关联更新
+          void updatePurchaseOrderInCount(Long id, Map<Long, BigDecimal> inCountMap);
+          void updatePurchaseOrderReturnCount(Long orderId, Map<Long, BigDecimal> returnCountMap);
+
+          // 校验方法
+          ErpPurchaseOrderDO validatePurchaseOrder(Long id);
+
+          // 订单项查询
+          List<ErpPurchaseOrderItemDO> getPurchaseOrderItemListByOrderId(Long orderId);
+      }
+
+    impl_pattern: |
+      @Service
+      @Validated
+      public class ErpPurchaseOrderServiceImpl implements ErpPurchaseOrderService {
+
+          @Resource
+          private ErpPurchaseOrderMapper purchaseOrderMapper;
+          @Resource
+          private ErpPurchaseOrderItemMapper purchaseOrderItemMapper;
+          @Resource
+          private ErpNoRedisDAO noRedisDAO;
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public Long createPurchaseOrder(ErpPurchaseOrderSaveReqVO createReqVO) {
+              // 1. 校验业务数据
+              List<ErpPurchaseOrderItemDO> items = validatePurchaseOrderItems(createReqVO.getItems());
+              supplierService.validateSupplier(createReqVO.getSupplierId());
+
+              // 2. 生成单据号
+              String no = noRedisDAO.generate(ErpNoRedisDAO.PURCHASE_ORDER_NO_PREFIX);
+
+              // 3. 计算价格
+              ErpPurchaseOrderDO order = BeanUtils.toBean(createReqVO, ErpPurchaseOrderDO.class);
+              order.setNo(no).setStatus(ErpAuditStatus.PROCESS.getStatus());
+              calculateTotalPrice(order, items);
+
+              // 4. 保存主表和子表
+              purchaseOrderMapper.insert(order);
+              items.forEach(item -> item.setOrderId(order.getId()));
+              purchaseOrderItemMapper.insertBatch(items);
+
+              return order.getId();
+          }
+      }
+
+    example: |
+      // 采购入库审核流程
+      @Override
+      @Transactional(rollbackFor = Exception.class)
+      public void updatePurchaseInStatus(Long id, Integer status) {
+          boolean approve = ErpAuditStatus.APPROVE.getStatus().equals(status);
+          // 1. 校验存在
+          ErpPurchaseInDO purchaseIn = validatePurchaseInExists(id);
+          // 2. 校验状态
+          if (purchaseIn.getStatus().equals(status)) {
+              throw exception(approve ? PURCHASE_IN_APPROVE_FAIL : PURCHASE_IN_PROCESS_FAIL);
+          }
+
+          // 3. 更新库存
+          if (approve) {
+              List<ErpPurchaseInItemDO> items = purchaseInItemMapper.selectListByInId(id);
+              items.forEach(item -> {
+                      // 创建库存记录
+                      ErpStockRecordCreateReqBO reqBO = new ErpStockRecordCreateReqBO();
+                      reqBO.setProductId(item.getProductId());
+                      reqBO.setWarehouseId(purchaseIn.getWarehouseId());
+                      reqBO.setCount(item.getCount());
+                      reqBO.setBizType(ErpStockRecordBizTypeEnum.PURCHASE_IN.getType());
+                      reqBO.setBizId(id);
+                      reqBO.setBizItemId(item.getId());
+                      reqBO.setBizNo(purchaseIn.getNo());
+                      // 更新库存
+                      stockRecordService.createStockRecord(reqBO);
+                  });
+          } else {
+              // 反审核，扣减库存
+              stockRecordService.deleteStockRecord(id, ErpStockRecordBizTypeEnum.PURCHASE_IN_CANCEL.getType());
+          }
+
+          // 4. 更新状态
+          purchaseInMapper.updateById(new ErpPurchaseInDO().setId(id).setStatus(status));
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      @Mapper
+      public interface ErpPurchaseOrderMapper extends BaseMapperX<ErpPurchaseOrderDO> {
+
+          default ErpPurchaseOrderDO selectByNo(String no) {
+              return selectOne(ErpPurchaseOrderDO::getNo, no);
+          }
+
+          default PageResult<ErpPurchaseOrderDO> selectPage(ErpPurchaseOrderPageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<ErpPurchaseOrderDO>()
+                      .likeIfPresent(ErpPurchaseOrderDO::getNo, reqVO.getNo())
+                      .eqIfPresent(ErpPurchaseOrderDO::getStatus, reqVO.getStatus())
+                      .eqIfPresent(ErpPurchaseOrderDO::getSupplierId, reqVO.getSupplierId())
+                      .betweenIfPresent(ErpPurchaseOrderDO::getOrderTime, reqVO.getOrderTime())
+                      .orderByDesc(ErpPurchaseOrderDO::getId));
+          }
+
+          default int updateByIdAndStatus(Long id, Integer status, ErpPurchaseOrderDO update) {
+              return update(update, new LambdaQueryWrapperX<ErpPurchaseOrderDO>()
+                      .eq(ErpPurchaseOrderDO::getId, id)
+                      .eq(ErpPurchaseOrderDO::getStatus, status));
+          }
+      }
+
+    example: |
+      // 库存增量更新 - 使用乐观锁避免并发问题
+      @Mapper
+      public interface ErpStockMapper extends BaseMapperX<ErpStockDO> {
+
+          default int updateCountIncrement(Long id, BigDecimal count, Boolean negativeEnable) {
+              // 如果不允许负库存，需要检查库存是否充足
+              if (!negativeEnable) {
+                  return update(null, new LambdaUpdateWrapper<ErpStockDO>()
+                          .setSql("count = count + " + count)
+                          .eq(ErpStockDO::getId, id)
+                          .ge(count.compareTo(BigDecimal.ZERO) < 0, ErpStockDO::getCount, count.abs()));
+              }
+              return update(null, new LambdaUpdateWrapper<ErpStockDO>()
+                      .setSql("count = count + " + count)
+                      .eq(ErpStockDO::getId, id));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-030-xxx-xxx"
+    examples:
+      - code: "1_030_101_000"
+        message: "采购订单不存在"
+        constant: "PURCHASE_ORDER_NOT_EXISTS"
+      - code: "1_030_101_001"
+        message: "采购订单({})已审核，无法删除"
+        constant: "PURCHASE_ORDER_DELETE_FAIL_APPROVE"
+      - code: "1_030_101_003"
+        message: "审核失败，只有未审核的采购订单才能审核"
+        constant: "PURCHASE_ORDER_APPROVE_FAIL"
+      - code: "1_030_404_000"
+        message: "操作失败，产品({})所在仓库({})的库存：{}，小于变更数量：{}"
+        constant: "STOCK_COUNT_NEGATIVE"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE, args...)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增业务单据类型"
+    steps:
+      - step: "1. 创建DO实体类"
+        detail: |
+          在 dal/dataobject/{domain}/ 下创建主表DO和子表DO
+          继承 BaseDO，使用 @TableName、@KeySequence 注解
+          定义字段并使用 @TableId 标注主键
+
+      - step: "2. 创建Mapper接口"
+        detail: |
+          在 dal/mysql/{domain}/ 下创建Mapper接口
+          继承 BaseMapperX<DO>，添加自定义查询方法
+          实现分页查询、按ID查询等方法
+
+      - step: "3. 创建Service层"
+        detail: |
+          在 service/{domain}/ 下创建Service接口和实现类
+          实现CRUD、状态更新、业务校验等方法
+          使用 @Transactional 注解保证事务
+
+      - step: "4. 创建Controller层"
+        detail: |
+          在 controller/admin/{domain}/ 下创建Controller
+          添加 @Tag、@RestController、@PreAuthorize 注解
+          实现创建、更新、删除、查询、导出等接口
+
+      - step: "5. 创建VO类"
+        detail: |
+          在 controller/admin/{domain}/vo/ 下创建：
+          - SaveReqVO: 创建/更新请求VO
+          - PageReqVO: 分页查询请求VO
+          - RespVO: 响应VO
+
+      - step: "6. 添加单据号前缀"
+        detail: |
+          在 ErpNoRedisDAO 中添加单据号前缀常量
+          格式：X + X + XX（如：CGDD-采购订单）
+
+      - step: "7. 添加错误码"
+        detail: |
+          在 ErrorCodeConstants 中添加错误码
+          格式：1_030_xxx_xxx
+
+  # 新增渠道/类型示例
+  new_channel:
+    title: "新增库存业务类型"
+    steps:
+      - step: "1. 添加业务类型枚举"
+        detail: |
+          在 ErpStockRecordBizTypeEnum 中添加新类型：
+          NEW_TYPE(90, "新业务类型"),
+          NEW_TYPE_CANCEL(91, "新业务类型（作废）")
+
+      - step: "2. 创建业务单据"
+        detail: "参考采购入库/销售出库创建对应的业务单据"
+
+      - step: "3. 在业务审核时创建库存记录"
+        detail: |
+          审核通过时调用 stockRecordService.createStockRecord()
+          反审核时调用 stockRecordService.deleteStockRecord()
+
+  # 最佳实践
+  best_practices:
+    - practice: "单据状态管理"
+      description: |
+        所有业务单据使用 ErpAuditStatus 枚举管理状态
+        PROCESS(10) - 未审核/审核中
+        APPROVE(20) - 已审核
+        状态变更需要校验前置状态和关联数据
+
+    - practice: "主子表更新"
+      description: |
+        使用 diffList 方法对比新旧数据
+        分别处理新增、修改、删除的子表记录
+        批量操作使用 insertBatch、updateBatch、deleteByIds
+
+    - practice: "库存操作"
+      description: |
+        使用 updateCountIncrement 增量更新库存
+        通过乐观锁避免并发问题
+        每次库存变动都创建 stock_record 记录
+
+    - practice: "单据号生成"
+      description: |
+        使用 ErpNoRedisDAO.generate() 生成唯一单据号
+        格式：前缀 + yyyyMMdd + 6位自增序号
+        基于Redis保证分布式唯一性
+
+    - practice: "数据关联查询"
+      description: |
+        分页查询时批量查询关联数据
+        使用 convertMap、convertMultiMap 构建映射
+        避免N+1查询问题
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "system"
+      api: "AdminUserApi"
+      purpose: "获取用户信息，显示操作人姓名"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      version: "3.x"
+      purpose: "ORM框架，简化数据库操作"
+    - name: "Hutool"
+      version: "5.x"
+      purpose: "Java工具类库，日期、集合等工具"
+    - name: "Spring Redis"
+      version: "2.x"
+      purpose: "Redis操作，单据号生成"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  # 枚举和常量
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/enums/ErpAuditStatus.java"
+    purpose: "审核状态枚举，定义单据状态流转"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量，定义所有业务异常"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/enums/stock/ErpStockRecordBizTypeEnum.java"
+    purpose: "库存记录业务类型枚举"
+
+  # 核心服务
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/service/purchase/ErpPurchaseOrderServiceImpl.java"
+    purpose: "采购订单服务实现，展示标准业务流程"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/service/stock/ErpStockServiceImpl.java"
+    purpose: "库存服务实现，展示库存增量更新"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/service/stock/ErpStockRecordServiceImpl.java"
+    purpose: "库存记录服务，管理库存变动明细"
+
+  # 数据访问
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/dal/redis/no/ErpNoRedisDAO.java"
+    purpose: "单据号生成器，分布式唯一ID"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/dal/dataobject/purchase/ErpPurchaseOrderDO.java"
+    purpose: "采购订单DO，展示主表设计"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/dal/dataobject/stock/ErpStockDO.java"
+    purpose: "库存DO，展示库存表设计"
+
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/dal/dataobject/stock/ErpStockRecordDO.java"
+    purpose: "库存记录DO，展示库存明细设计"
+
+  # 业务对象
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/service/stock/bo/ErpStockRecordCreateReqBO.java"
+    purpose: "库存记录创建请求BO，展示值对象设计"
+
+  # 控制器示例
+  - path: "yudao-module-erp/src/main/java/cn/iocoder/yudao/module/erp/controller/admin/purchase/ErpPurchaseOrderController.java"
+    purpose: "采购订单控制器，展示标准Controller设计"

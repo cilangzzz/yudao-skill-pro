@@ -1,0 +1,722 @@
+# Skill 文档 - yudao-module-iot 模块
+# 物联网平台模块知识提取
+
+skill:
+  id: "skill-iot"
+  name: "IoT Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-iot"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：物联网平台核心模块，提供设备接入、管理、数据采集、规则引擎、OTA升级等能力
+  business_position: |
+    IoT 物联网平台模块，作为整个系统的设备接入和管理中心：
+    1. 设备管理：设备注册、认证、状态管理、分组管理
+    2. 产品管理：产品定义、物模型配置、协议设置
+    3. 协议适配：支持 MQTT、CoAP、HTTP、TCP、UDP、WebSocket、Modbus、EMQX 等多种协议
+    4. 规则引擎：场景联动、数据流转、告警触发
+    5. OTA升级：固件管理、升级任务、升级记录
+    6. 数据处理：设备属性存储、消息记录、统计分析
+
+  # 设计原则：协议抽象、设备模型化、规则驱动
+  design_principles:
+    - "协议适配器模式：通过 IotProtocol 接口抽象不同传输协议，支持灵活扩展"
+    - "产品-设备模型：产品定义设备模板，设备继承产品配置，支持一型一密动态注册"
+    - "物模型驱动：通过 ThingModel 定义设备属性、事件、服务，实现标准化数据交互"
+    - "规则引擎：基于触发器-条件-动作模型，实现场景联动自动化"
+    - "多租户设计：设备、产品、规则等都支持租户隔离"
+    - "分层架构：gateway 网关层处理协议，biz 业务层处理逻辑，core 核心层定义模型"
+
+  # 领域模型：核心领域对象及其关系
+  domain_model:
+    aggregates:
+      - name: "设备聚合"
+        type: "聚合根"
+        entities: ["IotDeviceDO", "IotDeviceGroupDO", "IotDevicePropertyDO", "IotDeviceMessageDO"]
+        description: "设备是 IoT 平台的核心实体，包含设备基本信息、状态、属性、消息等"
+
+      - name: "产品聚合"
+        type: "聚合根"
+        entities: ["IotProductDO", "IotProductCategoryDO", "IotThingModelDO"]
+        description: "产品是设备的模板，定义物模型（属性、事件、服务）和协议配置"
+
+      - name: "规则引擎聚合"
+        type: "聚合根"
+        entities: ["IotSceneRuleDO", "IotDataRuleDO", "IotDataSinkDO", "IotAlertConfigDO", "IotAlertRecordDO"]
+        description: "规则引擎处理设备数据流转、场景联动、告警触发"
+
+      - name: "OTA升级聚合"
+        type: "聚合根"
+        entities: ["IotOtaFirmwareDO", "IotOtaTaskDO", "IotOtaTaskRecordDO"]
+        description: "OTA 升级管理固件版本、升级任务和升级记录"
+
+    value_objects:
+      - name: "ThingModelProperty"
+        description: "物模型属性定义，包含数据类型、单位、范围等"
+      - name: "ThingModelEvent"
+        description: "物模型事件定义，包含事件类型、参数等"
+      - name: "ThingModelService"
+        description: "物模型服务定义，包含输入输出参数"
+      - name: "IotDeviceIdentity"
+        description: "设备身份标识，包含 productKey、deviceName"
+
+    services:
+      - name: "IotDeviceService"
+        description: "设备管理服务，处理设备 CRUD、认证、状态更新"
+      - name: "IotDeviceMessageService"
+        description: "设备消息服务，处理消息收发、记录存储"
+      - name: "IotSceneRuleService"
+        description: "场景规则服务，执行场景联动逻辑"
+      - name: "IotProtocol"
+        description: "协议接口，定义协议生命周期（启动、停止、运行状态）"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "yudao-module-iot-gateway"
+      purpose: "协议网关层，处理设备连接、协议解析"
+      components:
+        - "protocol/mqtt/IotMqttProtocol - MQTT 协议实现"
+        - "protocol/coap/IotCoapProtocol - CoAP 协议实现"
+        - "protocol/http/IotHttpProtocol - HTTP 协议实现"
+        - "protocol/tcp/IotTcpProtocol - TCP 协议实现"
+        - "protocol/udp/IotUdpProtocol - UDP 协议实现"
+        - "protocol/websocket/IotWebSocketProtocol - WebSocket 协议实现"
+        - "protocol/modbus/IotModbusTcpClientProtocol - Modbus TCP 客户端"
+        - "protocol/modbus/IotModbusTcpServerProtocol - Modbus TCP 服务端"
+        - "protocol/emqx/IotEmqxProtocol - EMQX 协议桥接"
+        - "handler/upstream - 上行消息处理器"
+        - "handler/downstream - 下行消息处理器"
+
+    - name: "yudao-module-iot-biz"
+      purpose: "业务逻辑层，处理设备、产品、规则等核心业务"
+      components:
+        - "service/device - 设备管理服务"
+        - "service/product - 产品管理服务"
+        - "service/thingmodel - 物模型管理服务"
+        - "service/rule - 规则引擎服务"
+        - "service/ota - OTA 升级服务"
+        - "service/alert - 告警服务"
+        - "controller/admin - 管理后台接口"
+
+    - name: "yudao-module-iot-core"
+      purpose: "核心层，定义公共模型、枚举、工具类"
+      components:
+        - "enums - 协议类型、设备状态、消息方法等枚举"
+        - "mq/message - 设备消息模型"
+        - "biz/dto - 业务 DTO"
+        - "topic - Topic 定义和工具"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "策略模式 / 适配器模式"
+      location: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/IotProtocol.java"
+      purpose: "定义协议接口，不同协议实现统一接口，支持灵活扩展新协议"
+
+    - pattern: "模板方法模式"
+      location: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/AbstractIotProtocolDownstreamSubscriber.java"
+      purpose: "抽象下行消息订阅者，子类实现具体的消息处理逻辑"
+
+    - pattern: "观察者模式"
+      location: "yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/rule/scene/"
+      purpose: "场景规则引擎，设备状态变化触发规则执行"
+
+    - pattern: "责任链模式"
+      location: "yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/rule/scene/matcher/"
+      purpose: "规则匹配器链，依次判断触发条件、执行条件是否满足"
+
+    - pattern: "工厂模式"
+      location: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/serialize/IotMessageSerializerManager.java"
+      purpose: "消息序列化器工厂，根据序列化类型获取对应的序列化器"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "IotDeviceCommonApi"
+        path: "yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/biz/IotDeviceCommonApi.java"
+        description: "设备通用 API，提供设备认证、查询、注册等接口"
+        methods:
+          - "authDevice - 设备认证"
+          - "getDevice - 获取设备信息"
+          - "getModbusDeviceConfigList - 获取 Modbus 设备配置"
+          - "registerDevice - 设备动态注册"
+          - "registerSubDevices - 子设备动态注册"
+
+    consumers:
+      - module: "yudao-module-system"
+        api: "AdminUserApi"
+        purpose: "获取告警接收用户信息"
+
+    mq:
+      - type: "IotMessageBus"
+        description: "内部消息总线，用于设备消息在 gateway 和 biz 之间传递"
+        topics:
+          - "device:message:upstream - 设备上行消息"
+          - "device:message:downstream - 设备下行消息"
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "TenantBaseDO | BaseDO"
+    description: |
+      - TenantBaseDO: 设备、产品、场景规则等需要租户隔离的实体
+      - BaseDO: 设备分组、固件、告警记录等不需要租户隔离的实体
+
+  # 核心数据表
+  tables:
+    # 设备相关表
+    - name: "iot_device"
+      comment: "IoT 设备表"
+      entity: "IotDeviceDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "设备 ID，主键" }
+        - { name: "device_name", type: "VARCHAR(64)", comment: "设备名称，产品内唯一" }
+        - { name: "nickname", type: "VARCHAR(64)", comment: "设备备注名称" }
+        - { name: "serial_number", type: "VARCHAR(64)", comment: "设备序列号" }
+        - { name: "product_id", type: "BIGINT", comment: "产品编号" }
+        - { name: "product_key", type: "VARCHAR(32)", comment: "产品标识（冗余）" }
+        - { name: "device_type", type: "INT", comment: "设备类型（冗余）" }
+        - { name: "gateway_id", type: "BIGINT", comment: "网关设备编号（子设备）" }
+        - { name: "state", type: "INT", comment: "设备状态：0未激活、1在线、2离线" }
+        - { name: "device_secret", type: "VARCHAR(64)", comment: "设备密钥" }
+        - { name: "group_ids", type: "VARCHAR(255)", comment: "设备分组编号集合（JSON）" }
+        - { name: "firmware_id", type: "BIGINT", comment: "固件编号" }
+        - { name: "latitude", type: "DECIMAL(10,6)", comment: "纬度" }
+        - { name: "longitude", type: "DECIMAL(10,6)", comment: "经度" }
+        - { name: "online_time", type: "DATETIME", comment: "最后上线时间" }
+        - { name: "offline_time", type: "DATETIME", comment: "最后离线时间" }
+        - { name: "active_time", type: "DATETIME", comment: "激活时间" }
+      indexes:
+        - { name: "idx_product_id", columns: ["product_id"] }
+        - { name: "idx_product_key_device_name", columns: ["product_key", "device_name"], unique: true }
+
+    - name: "iot_device_group"
+      comment: "IoT 设备分组表"
+      entity: "IotDeviceGroupDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "分组 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "分组名称" }
+        - { name: "status", type: "INT", comment: "分组状态" }
+        - { name: "description", type: "VARCHAR(255)", comment: "分组描述" }
+
+    - name: "iot_device_message"
+      comment: "IoT 设备消息表"
+      entity: "IotDeviceMessageDO"
+      extends: "BaseDO"
+      storage: "TDengine 时序数据库"
+      columns:
+        - { name: "device_id", type: "BIGINT", comment: "设备编号" }
+        - { name: "product_key", type: "VARCHAR(32)", comment: "产品标识" }
+        - { name: "device_name", type: "VARCHAR(64)", comment: "设备名称" }
+        - { name: "method", type: "VARCHAR(64)", comment: "消息方法" }
+        - { name: "request_id", type: "VARCHAR(64)", comment: "请求 ID" }
+        - { name: "payload", type: "TEXT", comment: "消息内容" }
+
+    # 产品相关表
+    - name: "iot_product"
+      comment: "IoT 产品表"
+      entity: "IotProductDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "产品 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "产品名称" }
+        - { name: "product_key", type: "VARCHAR(32)", comment: "产品标识" }
+        - { name: "product_secret", type: "VARCHAR(64)", comment: "产品密钥" }
+        - { name: "category_id", type: "BIGINT", comment: "产品分类编号" }
+        - { name: "device_type", type: "INT", comment: "设备类型" }
+        - { name: "net_type", type: "INT", comment: "联网方式" }
+        - { name: "protocol_type", type: "VARCHAR(32)", comment: "协议类型" }
+        - { name: "serialize_type", type: "VARCHAR(32)", comment: "序列化类型" }
+        - { name: "status", type: "INT", comment: "产品状态" }
+        - { name: "register_enabled", type: "BOOLEAN", comment: "是否开启动态注册" }
+
+    - name: "iot_product_category"
+      comment: "IoT 产品分类表"
+      entity: "IotProductCategoryDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "分类 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "分类名称" }
+        - { name: "parent_id", type: "BIGINT", comment: "父分类 ID" }
+        - { name: "sort", type: "INT", comment: "排序" }
+
+    - name: "iot_thing_model"
+      comment: "IoT 产品物模型功能表"
+      entity: "IotThingModelDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "物模型功能 ID" }
+        - { name: "product_id", type: "BIGINT", comment: "产品编号" }
+        - { name: "product_key", type: "VARCHAR(32)", comment: "产品标识" }
+        - { name: "identifier", type: "VARCHAR(64)", comment: "功能标识符" }
+        - { name: "name", type: "VARCHAR(64)", comment: "功能名称" }
+        - { name: "type", type: "INT", comment: "功能类型：1属性、2事件、3服务" }
+        - { name: "property", type: "JSON", comment: "属性定义" }
+        - { name: "event", type: "JSON", comment: "事件定义" }
+        - { name: "service", type: "JSON", comment: "服务定义" }
+
+    # 规则引擎相关表
+    - name: "iot_scene_rule"
+      comment: "IoT 场景联动规则表"
+      entity: "IotSceneRuleDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "场景联动 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "场景名称" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "triggers", type: "JSON", comment: "触发器配置" }
+        - { name: "actions", type: "JSON", comment: "动作配置" }
+        - { name: "last_trigger_time", type: "DATETIME", comment: "最后触发时间" }
+
+    - name: "iot_data_sink"
+      comment: "IoT 数据流转目的地表"
+      entity: "IotDataSinkDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "数据目的地 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "名称" }
+        - { name: "type", type: "VARCHAR(32)", comment: "类型：HTTP/MQTT/Kafka/RabbitMQ/Redis/RocketMQ/TCP/WebSocket" }
+        - { name: "config", type: "JSON", comment: "配置信息" }
+
+    - name: "iot_alert_config"
+      comment: "IoT 告警配置表"
+      entity: "IotAlertConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "告警配置 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "告警名称" }
+        - { name: "level", type: "INT", comment: "告警级别" }
+        - { name: "status", type: "INT", comment: "状态" }
+        - { name: "scene_rule_ids", type: "VARCHAR(255)", comment: "关联的场景规则 ID 列表" }
+        - { name: "receive_user_ids", type: "VARCHAR(255)", comment: "接收用户 ID 列表" }
+
+    # OTA 升级相关表
+    - name: "iot_ota_firmware"
+      comment: "IoT OTA 固件表"
+      entity: "IotOtaFirmwareDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "固件 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "固件名称" }
+        - { name: "version", type: "VARCHAR(32)", comment: "版本号" }
+        - { name: "product_id", type: "BIGINT", comment: "产品编号" }
+        - { name: "file_url", type: "VARCHAR(512)", comment: "固件文件 URL" }
+        - { name: "file_size", type: "BIGINT", comment: "文件大小" }
+        - { name: "file_digest_algorithm", type: "VARCHAR(32)", comment: "签名算法" }
+        - { name: "file_digest_value", type: "VARCHAR(128)", comment: "签名值" }
+
+    - name: "iot_ota_task"
+      comment: "IoT OTA 升级任务表"
+      entity: "IotOtaTaskDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "任务 ID" }
+        - { name: "name", type: "VARCHAR(64)", comment: "任务名称" }
+        - { name: "firmware_id", type: "BIGINT", comment: "固件编号" }
+        - { name: "product_id", type: "BIGINT", comment: "产品编号" }
+        - { name: "status", type: "INT", comment: "任务状态" }
+
+    - name: "iot_ota_task_record"
+      comment: "IoT OTA 升级任务记录表"
+      entity: "IotOtaTaskRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "记录 ID" }
+        - { name: "task_id", type: "BIGINT", comment: "任务 ID" }
+        - { name: "device_id", type: "BIGINT", comment: "设备 ID" }
+        - { name: "status", type: "INT", comment: "升级状态" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "iot_device"
+      to: "iot_product"
+      type: "N:1"
+      foreign_key: "product_id"
+      description: "设备属于某个产品"
+
+    - from: "iot_device"
+      to: "iot_device"
+      type: "N:1"
+      foreign_key: "gateway_id"
+      description: "子设备关联网关设备"
+
+    - from: "iot_product"
+      to: "iot_product_category"
+      type: "N:1"
+      foreign_key: "category_id"
+      description: "产品属于某个分类"
+
+    - from: "iot_thing_model"
+      to: "iot_product"
+      type: "N:1"
+      foreign_key: "product_id"
+      description: "物模型属于某个产品"
+
+    - from: "iot_ota_firmware"
+      to: "iot_product"
+      type: "N:1"
+      foreign_key: "product_id"
+      description: "固件属于某个产品"
+
+    - from: "iot_ota_task"
+      to: "iot_ota_firmware"
+      type: "N:1"
+      foreign_key: "firmware_id"
+      description: "升级任务使用某个固件"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = \"管理后台 - IoT 设备\")"
+      - "@RestController"
+      - "@RequestMapping(\"/iot/device\")"
+      - "@PreAuthorize(\"@ss.hasPermission('iot:device:create')\")"
+    example: |
+      @Tag(name = "管理后台 - IoT 设备")
+      @RestController
+      @RequestMapping("/iot/device")
+      @Validated
+      public class IotDeviceController {
+          @Resource
+          private IotDeviceService deviceService;
+
+          @PostMapping("/create")
+          @Operation(summary = "创建设备")
+          @PreAuthorize("@ss.hasPermission('iot:device:create')")
+          public CommonResult<Long> createDevice(@Valid @RequestBody IotDeviceSaveReqVO createReqVO) {
+              return success(deviceService.createDevice(createReqVO));
+          }
+
+          @GetMapping("/page")
+          @Operation(summary = "获得设备分页")
+          @PreAuthorize("@ss.hasPermission('iot:device:query')")
+          public CommonResult<PageResult<IotDeviceRespVO>> getDevicePage(@Valid IotDevicePageReqVO pageReqVO) {
+              PageResult<IotDeviceDO> pageResult = deviceService.getDevicePage(pageReqVO);
+              return success(BeanUtils.toBean(pageResult, IotDeviceRespVO.class));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: |
+      public interface IotDeviceService {
+          // CRUD 操作
+          Long createDevice(@Valid IotDeviceSaveReqVO createReqVO);
+          void updateDevice(@Valid IotDeviceSaveReqVO updateReqVO);
+          void deleteDevice(Long id);
+          IotDeviceDO getDevice(Long id);
+          PageResult<IotDeviceDO> getDevicePage(IotDevicePageReqVO pageReqVO);
+
+          // 业务操作
+          boolean authDevice(@Valid IotDeviceAuthReqDTO authReqDTO);
+          void updateDeviceState(Long id, Integer state);
+          IotDeviceRegisterRespDTO registerDevice(@Valid IotDeviceRegisterReqDTO reqDTO);
+
+          // 缓存操作
+          IotDeviceDO getDeviceFromCache(Long id);
+          IotDeviceDO getDeviceFromCache(String productKey, String deviceName);
+      }
+    impl_pattern: |
+      @Service
+      @Validated
+      public class IotDeviceServiceImpl implements IotDeviceService {
+          @Resource
+          private IotDeviceMapper deviceMapper;
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public Long createDevice(IotDeviceSaveReqVO createReqVO) {
+              // 1. 校验产品存在
+              IotProductDO product = productService.validateProductExists(createReqVO.getProductId());
+              // 2. 生成设备密钥
+              String deviceSecret = generateDeviceSecret();
+              // 3. 插入设备
+              IotDeviceDO device = BeanUtils.toBean(createReqVO, IotDeviceDO.class)
+                      .setProductKey(product.getProductKey())
+                      .setDeviceType(product.getDeviceType())
+                      .setDeviceSecret(deviceSecret)
+                      .setState(IotDeviceStateEnum.INACTIVE.getState());
+              deviceMapper.insert(device);
+              return device.getId();
+          }
+      }
+    example: |
+      // 设备认证示例
+      @Override
+      public boolean authDevice(IotDeviceAuthReqDTO authReqDTO) {
+          // 1. 获取设备信息
+          IotDeviceDO device = getDeviceFromCache(authReqDTO.getProductKey(), authReqDTO.getDeviceName());
+          if (device == null) {
+              return false;
+          }
+          // 2. 校验设备密钥
+          if (!StrUtil.equals(device.getDeviceSecret(), authReqDTO.getDeviceSecret())) {
+              return false;
+          }
+          // 3. 更新设备状态为在线
+          updateDeviceState(device, IotDeviceStateEnum.ONLINE.getState());
+          return true;
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      @Mapper
+      public interface IotDeviceMapper extends BaseMapperX<IotDeviceDO> {
+          default PageResult<IotDeviceDO> selectPage(IotDevicePageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<IotDeviceDO>()
+                      .likeIfPresent(IotDeviceDO::getDeviceName, reqVO.getDeviceName())
+                      .eqIfPresent(IotDeviceDO::getProductId, reqVO.getProductId())
+                      .eqIfPresent(IotDeviceDO::getState, reqVO.getState())
+                      .orderByDesc(IotDeviceDO::getId));
+          }
+      }
+    example: |
+      // 设备属性存储在 Redis 中
+      @Resource
+      private DevicePropertyRedisDAO devicePropertyRedisDAO;
+
+      public void updateDeviceProperty(String productKey, String deviceName, String identifier, Object value) {
+          String key = formatDevicePropertyKey(productKey, deviceName, identifier);
+          IotDevicePropertyDO property = IotDevicePropertyDO.builder()
+                  .value(value)
+                  .updateTime(LocalDateTime.now())
+                  .build();
+          devicePropertyRedisDAO.set(key, property);
+      }
+
+  # 协议扩展示例
+  protocol:
+    interface_definition: |
+      public interface IotProtocol {
+          String getId();                    // 协议实例 ID
+          String getServerId();              // 服务器 ID（消息追踪）
+          IotProtocolTypeEnum getType();     // 协议类型
+          void start();                      // 启动协议服务
+          void stop();                       // 停止协议服务
+          boolean isRunning();               // 检查运行状态
+      }
+    example: |
+      // MQTT 协议实现示例
+      public class IotMqttProtocol implements IotProtocol {
+          private MqttServer mqttServer;
+          private IotMqttConnectionManager connectionManager;
+
+          @Override
+          public void start() {
+              // 1. 创建 MQTT 服务器
+              mqttServer = MqttServer.create(vertx, options);
+              mqttServer.endpointHandler(this::handleEndpoint);
+
+              // 2. 启动服务器
+              mqttServer.listen();
+              running = true;
+
+              // 3. 启动下行消息订阅者
+              downstreamSubscriber.start();
+          }
+
+          private void handleEndpoint(MqttEndpoint endpoint) {
+              // 1. 处理认证
+              if (!authHandler.handleAuthenticationRequest(endpoint)) {
+                  endpoint.reject(MqttConnectReturnCode.CONNECTION_REFUSED_BAD_USER_NAME_OR_PASSWORD);
+                  return;
+              }
+              // 2. 设置消息处理器
+              endpoint.publishHandler(message -> processMessage(endpoint, message));
+              // 3. 接受连接
+              endpoint.accept(false);
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-011"
+    examples:
+      - code: "1-011-000-000"
+        message: "设备不存在"
+      - code: "1-011-000-001"
+        message: "设备认证失败"
+      - code: "1-011-000-002"
+        message: "设备已存在"
+      - code: "1-011-001-000"
+        message: "产品不存在"
+      - code: "1-011-002-000"
+        message: "物模型不存在"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "CommonResult.error(ErrorCodeConstants.DEVICE_NOT_EXISTS)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增协议类型
+  new_protocol:
+    title: "新增协议类型"
+    steps:
+      - step: 1
+        action: "添加协议类型枚举"
+        file: "yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/enums/IotProtocolTypeEnum.java"
+        description: "在枚举中添加新的协议类型，如 GOPHER(\"gopher\")"
+
+      - step: 2
+        action: "创建协议配置类"
+        file: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/{protocol}/Iot{Protocol}Config.java"
+        description: "定义协议特有的配置参数，如端口、超时时间、SSL 配置等"
+
+      - step: 3
+        action: "实现协议接口"
+        file: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/{protocol}/Iot{Protocol}Protocol.java"
+        description: |
+          实现 IotProtocol 接口：
+          - start(): 启动协议服务，创建服务器/客户端
+          - stop(): 停止协议服务，释放资源
+          - handleUpstream(): 处理上行消息
+          - handleDownstream(): 处理下行消息
+
+      - step: 4
+        action: "实现上行消息处理器"
+        file: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/{protocol}/handler/upstream/Iot{Protocol}UpstreamHandler.java"
+        description: "处理设备上报的消息，解析后发送到消息总线"
+
+      - step: 5
+        action: "实现下行消息订阅者"
+        file: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/{protocol}/handler/downstream/Iot{Protocol}DownstreamSubscriber.java"
+        description: "订阅下行消息，下发给设备"
+
+      - step: 6
+        action: "注册协议到管理器"
+        file: "yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/IotProtocolManager.java"
+        description: "在配置中添加新协议的实例化逻辑"
+
+  # 新增设备类型
+  new_device_type:
+    title: "新增设备类型"
+    steps:
+      - step: 1
+        action: "添加设备类型枚举"
+        file: "yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/enums/product/IotProductDeviceTypeEnum.java"
+        description: "在枚举中添加新的设备类型"
+
+      - step: 2
+        action: "定义物模型"
+        file: "通过管理后台配置"
+        description: "为新产品定义物模型（属性、事件、服务）"
+
+      - step: 3
+        action: "配置协议"
+        file: "产品管理页面"
+        description: "设置产品使用的协议类型和序列化方式"
+
+  # 新增规则动作
+  new_rule_action:
+    title: "新增场景联动动作类型"
+    steps:
+      - step: 1
+        action: "添加动作类型枚举"
+        file: "yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/enums/rule/IotSceneRuleActionTypeEnum.java"
+        description: "添加新的动作类型枚举值"
+
+      - step: 2
+        action: "实现动作执行器"
+        file: "yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/rule/scene/action/Iot{Action}SceneRuleAction.java"
+        description: "实现 IotSceneRuleAction 接口，定义动作执行逻辑"
+
+      - step: 3
+        action: "注册动作执行器"
+        description: "在 Spring 容器中注册为 Bean，自动被规则引擎发现和调用"
+
+  # 最佳实践
+  best_practices:
+    - "设备密钥安全性：设备密钥应使用强随机数生成，避免硬编码或简单规则"
+    - "协议扩展：新协议应继承 AbstractIotProtocolDownstreamSubscriber，复用下行消息处理逻辑"
+    - "消息存储：设备消息使用 TDengine 时序数据库存储，支持高效查询和聚合"
+    - "设备缓存：频繁访问的设备信息使用 Redis 缓存，减少数据库压力"
+    - "规则引擎：场景规则应设置合理的触发条件，避免频繁触发导致性能问题"
+    - "OTA升级：大规模升级应分批进行，避免网络拥塞和服务器压力"
+    - "租户隔离：所有设备操作都应考虑租户隔离，防止越权访问"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      api: "AdminUserApi"
+      purpose: "获取告警接收用户信息"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "vertx-mqtt"
+      version: "4.x"
+      purpose: "MQTT 服务器实现"
+    - name: "californium"
+      version: "3.x"
+      purpose: "CoAP 服务器实现"
+    - name: "jmodbus"
+      version: "1.x"
+      purpose: "Modbus 协议实现"
+    - name: "netty"
+      version: "4.x"
+      purpose: "TCP/UDP/WebSocket 网络框架"
+    - name: "tdengine-jdbc"
+      version: "3.x"
+      purpose: "TDengine 时序数据库驱动"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-iot/yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/enums/IotProtocolTypeEnum.java"
+    purpose: "协议类型枚举定义"
+
+  - path: "yudao-module-iot/yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/IotProtocol.java"
+    purpose: "协议接口定义，所有协议必须实现此接口"
+
+  - path: "yudao-module-iot/yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/mqtt/IotMqttProtocol.java"
+    purpose: "MQTT 协议实现，最常用的设备接入协议"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/device/IotDeviceService.java"
+    purpose: "设备管理服务接口"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/device/message/IotDeviceMessageService.java"
+    purpose: "设备消息服务接口"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/rule/scene/IotSceneRuleService.java"
+    purpose: "场景联动规则服务"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/device/IotDeviceDO.java"
+    purpose: "设备实体类定义"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/product/IotProductDO.java"
+    purpose: "产品实体类定义"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/thingmodel/IotThingModelDO.java"
+    purpose: "物模型实体类定义"
+
+  - path: "yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/controller/admin/device/IotDeviceController.java"
+    purpose: "设备管理 Controller"
+
+  - path: "yudao-module-iot/yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/biz/IotDeviceCommonApi.java"
+    purpose: "设备通用 API 接口"

@@ -1,0 +1,58 @@
+# 设计模式索引
+
+patterns:
+  # 创建型模式
+  - id: "factory-pattern"
+    name: "工厂模式"
+    file: "factory-pattern.yaml"
+    modules: ["pay", "infra"]
+    description: "创建对象实例的工厂接口，支持多类型扩展"
+
+  # 行为型模式
+  - id: "template-method-pattern"
+    name: "模板方法模式"
+    file: "template-method-pattern.yaml"
+    modules: ["pay", "infra"]
+    description: "定义算法骨架，子类实现具体步骤"
+
+  - id: "strategy-pattern"
+    name: "策略模式"
+    file: "strategy-pattern.yaml"
+    modules: ["pay", "infra", "ai"]
+    description: "封装可互换的算法族"
+
+# 模式选择指南
+selection_guide:
+  - scenario: "需要根据配置创建不同类型的客户端"
+    patterns: ["factory-pattern", "strategy-pattern"]
+    example: "支付渠道、短信渠道"
+
+  - scenario: "需要统一处理流程，但具体实现不同"
+    patterns: ["template-method-pattern"]
+    example: "支付下单流程、短信发送流程"
+
+  - scenario: "需要动态切换算法或行为"
+    patterns: ["strategy-pattern"]
+    example: "AI模型切换、支付方式切换"
+
+# 模式组合
+combinations:
+  - name: "工厂 + 策略"
+    description: "工厂创建策略实例"
+    usage: "PayClientFactory创建PayClient实例"
+
+  - name: "工厂 + 模板方法"
+    description: "工厂创建模板方法的具体实现"
+    usage: "SmsClientFactory创建AbstractSmsClient子类"
+
+  - name: "模板方法 + 策略"
+    description: "模板方法定义骨架，策略实现变化部分"
+    usage: "AbstractPayClient定义骨架，具体PayClient实现策略"
+
+# 扩展指南
+extension:
+  new_pattern:
+    steps:
+      - "创建模式知识库文件: skills/patterns/{pattern}-pattern.yaml"
+      - "更新此索引文件"
+      - "关联应用到相关模块"

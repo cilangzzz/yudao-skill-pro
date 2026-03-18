@@ -1,0 +1,609 @@
+# Skill 文件 - yudao-module-member 会员模块
+# 用于提取模块知识的标准格式
+
+skill:
+  id: "skill-member"
+  name: "Member Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-member"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    会员中心模块，负责管理C端用户的会员体系，包括：
+    1. 会员用户管理：注册、登录、个人信息管理
+    2. 会员等级体系：等级配置、经验累积、自动升降级
+    3. 积分系统：积分获取、消费、记录追踪
+    4. 签到功能：每日签到、连续签到奖励
+    5. 会员标签与分组：用户分类管理
+    6. 收货地址管理：多地址支持、默认地址
+
+    在整个系统中的定位：
+    - 作为C端用户的核心数据层，与system模块的AdminUser区分
+    - 为mall模块提供会员信息、积分抵扣、等级折扣等支持
+    - 通过API接口对外暴露会员服务，支持跨模块调用
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "领域驱动设计(DDD)：会员(MemberUser)作为聚合根，关联等级、积分、标签等实体"
+    - "分层架构：Controller -> Service -> DAL 清晰分层，API层提供跨模块调用"
+    - "单一职责：每个Service专注一个业务领域，如MemberUserService、MemberLevelService"
+    - "开闭原则：通过枚举定义业务类型(MemberPointBizTypeEnum)，便于扩展新的积分/经验来源"
+    - "事务一致性：积分变更、等级变更使用@Transactional保证数据一致性"
+    - "TenantBaseDO继承：会员数据支持多租户隔离"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "MemberUser"
+        type: "聚合根"
+        description: "会员用户，包含账号信息、基础信息、积分、等级、标签等"
+        entities:
+          - "MemberLevelDO (会员等级)"
+          - "MemberGroupDO (会员分组)"
+          - "MemberTagDO (会员标签)"
+          - "MemberAddressDO (收货地址)"
+
+    value_objects:
+      - name: "MemberPointRecord"
+        type: "值对象"
+        description: "积分变更记录，不可变的历史记录"
+      - name: "MemberExperienceRecord"
+        type: "值对象"
+        description: "经验变更记录"
+      - name: "MemberLevelRecord"
+        type: "值对象"
+        description: "等级变更记录"
+      - name: "MemberSignInRecord"
+        type: "值对象"
+        description: "签到记录"
+
+    services:
+      - name: "MemberUserService"
+        description: "会员用户管理服务"
+      - name: "MemberAuthService"
+        description: "会员认证服务（登录、登出、token刷新）"
+      - name: "MemberLevelService"
+        description: "会员等级服务（等级配置、经验管理、自动升级）"
+      - name: "MemberPointRecordService"
+        description: "积分记录服务"
+      - name: "MemberSignInRecordService"
+        description: "签到服务"
+      - name: "AddressService"
+        description: "收货地址服务"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口，供其他模块调用"
+      components:
+        - "MemberUserApi - 会员用户查询接口"
+        - "MemberPointApi - 积分增减接口"
+        - "MemberLevelApi - 等级查询、经验增减接口"
+        - "MemberAddressApi - 收货地址查询接口"
+        - "MemberConfigApi - 会员配置查询接口"
+
+    - name: "controller"
+      purpose: "HTTP接口，分为admin(管理后台)和app(C端应用)"
+      components:
+        - "admin/user/MemberUserController - 会员用户管理"
+        - "admin/level/MemberLevelController - 等级配置管理"
+        - "admin/point/MemberPointRecordController - 积分记录查询"
+        - "admin/signin/MemberSignInConfigController - 签到规则配置"
+        - "admin/tag/MemberTagController - 标签管理"
+        - "admin/group/MemberGroupController - 分组管理"
+        - "app/auth/AppAuthController - C端认证（登录、注册、登出）"
+        - "app/address/AppAddressController - C端收货地址"
+        - "app/signin/AppMemberSignInRecordController - C端签到"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "user/MemberUserService - 会员用户核心服务"
+        - "auth/MemberAuthService - 认证服务"
+        - "level/MemberLevelService - 等级服务"
+        - "level/MemberLevelRecordService - 等级变更记录"
+        - "level/MemberExperienceRecordService - 经验记录"
+        - "point/MemberPointRecordService - 积分记录"
+        - "signin/MemberSignInRecordService - 签到服务"
+        - "signin/MemberSignInConfigService - 签到配置"
+        - "tag/MemberTagService - 标签服务"
+        - "group/MemberGroupService - 分组服务"
+        - "address/AddressService - 地址服务"
+        - "config/MemberConfigService - 配置服务"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject/user/MemberUserDO - 会员用户DO"
+        - "dataobject/level/MemberLevelDO - 等级DO"
+        - "dataobject/level/MemberLevelRecordDO - 等级记录DO"
+        - "dataobject/level/MemberExperienceRecordDO - 经验记录DO"
+        - "dataobject/point/MemberPointRecordDO - 积分记录DO"
+        - "dataobject/signin/MemberSignInConfigDO - 签到配置DO"
+        - "dataobject/signin/MemberSignInRecordDO - 签到记录DO"
+        - "dataobject/tag/MemberTagDO - 标签DO"
+        - "dataobject/group/MemberGroupDO - 分组DO"
+        - "dataobject/address/MemberAddressDO - 地址DO"
+        - "dataobject/config/MemberConfigDO - 配置DO"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "DTO转换模式"
+      location: "api/*/dto/*.java"
+      purpose: "API层使用DTO隔离内部DO，保护领域模型"
+    - pattern: "策略模式(枚举实现)"
+      location: "enums/point/MemberPointBizTypeEnum.java"
+      purpose: "定义积分业务类型，支持多种积分来源"
+    - pattern: "模板方法"
+      location: "service/level/MemberLevelServiceImpl.java"
+      purpose: "等级变更流程：记录变更 -> 更新经验 -> 计算新等级 -> 通知用户"
+    - pattern: "Facade模式"
+      location: "api/*ApiImpl.java"
+      purpose: "API实现类封装Service调用，简化跨模块交互"
+    - pattern: "观察者模式(MQ)"
+      location: "mq/producer/user/MemberUserProducer.java"
+      purpose: "用户创建后发送消息，解耦后续处理逻辑"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "MemberUserApi"
+        methods: ["getUser", "getUserList", "getUserByMobile", "validateUser"]
+        consumers: ["pay", "mall-trade", "mall-promotion"]
+      - name: "MemberPointApi"
+        methods: ["addPoint", "reducePoint"]
+        consumers: ["mall-trade", "mall-promotion"]
+      - name: "MemberLevelApi"
+        methods: ["getMemberLevel", "addExperience", "reduceExperience"]
+        consumers: ["mall-trade"]
+      - name: "MemberAddressApi"
+        methods: ["getAddress", "getDefaultAddress"]
+        consumers: ["mall-trade"]
+      - name: "MemberConfigApi"
+        methods: ["getConfig"]
+        consumers: ["mall-trade"]
+
+    consumers:
+      - module: "system"
+        api: "SmsCodeApi"
+        purpose: "短信验证码校验"
+      - module: "system"
+        api: "SocialClientApi"
+        purpose: "社交登录、微信小程序登录"
+      - module: "infra"
+        api: "文件存储"
+        purpose: "头像上传"
+
+    mq:
+      - name: "MemberUserCreateMessage"
+        direction: "producer"
+        purpose: "用户创建后发送消息，通知其他模块"
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "TenantBaseDO"
+    description: "会员核心表(MemberUserDO)继承TenantBaseDO支持多租户，其他表继承BaseDO"
+
+  # 核心数据表
+  tables:
+    - name: "member_user"
+      comment: "会员用户表"
+      entity: "MemberUserDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "用户ID" }
+        - { name: "mobile", type: "String", comment: "手机号(唯一索引)" }
+        - { name: "password", type: "String", comment: "加密密码" }
+        - { name: "status", type: "Integer", comment: "状态(0启用1禁用)" }
+        - { name: "register_ip", type: "String", comment: "注册IP" }
+        - { name: "register_terminal", type: "Integer", comment: "注册终端" }
+        - { name: "login_ip", type: "String", comment: "最后登录IP" }
+        - { name: "login_date", type: "LocalDateTime", comment: "最后登录时间" }
+        - { name: "nickname", type: "String", comment: "昵称" }
+        - { name: "avatar", type: "String", comment: "头像" }
+        - { name: "name", type: "String", comment: "真实姓名" }
+        - { name: "sex", type: "Integer", comment: "性别" }
+        - { name: "birthday", type: "LocalDateTime", comment: "生日" }
+        - { name: "area_id", type: "Integer", comment: "地区ID" }
+        - { name: "mark", type: "String", comment: "用户备注" }
+        - { name: "point", type: "Integer", comment: "当前积分" }
+        - { name: "tag_ids", type: "List<Long>", comment: "标签ID列表(JSON存储)" }
+        - { name: "level_id", type: "Long", comment: "等级ID" }
+        - { name: "experience", type: "Integer", comment: "当前经验" }
+        - { name: "group_id", type: "Long", comment: "分组ID" }
+      indexes:
+        - { name: "uk_mobile", columns: ["mobile"] }
+
+    - name: "member_level"
+      comment: "会员等级表"
+      entity: "MemberLevelDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "等级ID" }
+        - { name: "name", type: "String", comment: "等级名称" }
+        - { name: "level", type: "Integer", comment: "等级值(用于排序)" }
+        - { name: "experience", type: "Integer", comment: "升级所需经验" }
+        - { name: "discount_percent", type: "Integer", comment: "享受折扣百分比" }
+        - { name: "icon", type: "String", comment: "等级图标" }
+        - { name: "background_url", type: "String", comment: "等级背景图" }
+        - { name: "status", type: "Integer", comment: "状态(0启用1禁用)" }
+
+    - name: "member_point_record"
+      comment: "积分记录表"
+      entity: "MemberPointRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "记录ID" }
+        - { name: "user_id", type: "Long", comment: "用户ID" }
+        - { name: "biz_id", type: "String", comment: "业务编码" }
+        - { name: "biz_type", type: "Integer", comment: "业务类型(枚举)" }
+        - { name: "title", type: "String", comment: "积分标题" }
+        - { name: "description", type: "String", comment: "积分描述" }
+        - { name: "point", type: "Integer", comment: "变动积分(正负)" }
+        - { name: "total_point", type: "Integer", comment: "变动后积分" }
+
+    - name: "member_experience_record"
+      comment: "经验记录表"
+      entity: "MemberExperienceRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "记录ID" }
+        - { name: "user_id", type: "Long", comment: "用户ID" }
+        - { name: "biz_type", type: "Integer", comment: "业务类型(枚举)" }
+        - { name: "biz_id", type: "String", comment: "业务编号" }
+        - { name: "title", type: "String", comment: "标题" }
+        - { name: "description", type: "String", comment: "描述" }
+        - { name: "experience", type: "Integer", comment: "变动经验(正负)" }
+        - { name: "total_experience", type: "Integer", comment: "变动后经验" }
+
+    - name: "member_level_record"
+      comment: "等级变更记录表"
+      entity: "MemberLevelRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "记录ID" }
+        - { name: "user_id", type: "Long", comment: "用户ID" }
+        - { name: "level_id", type: "Long", comment: "等级ID" }
+        - { name: "level", type: "Integer", comment: "等级值(冗余)" }
+        - { name: "discount_percent", type: "Integer", comment: "折扣(冗余)" }
+        - { name: "experience", type: "Integer", comment: "升级经验(冗余)" }
+        - { name: "user_experience", type: "Integer", comment: "用户变更后经验" }
+        - { name: "remark", type: "String", comment: "备注" }
+        - { name: "description", type: "String", comment: "描述" }
+
+    - name: "member_sign_in_config"
+      comment: "签到配置表"
+      entity: "MemberSignInConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "配置ID" }
+        - { name: "day", type: "Integer", comment: "签到第N天" }
+        - { name: "point", type: "Integer", comment: "奖励积分" }
+        - { name: "experience", type: "Integer", comment: "奖励经验" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    - name: "member_sign_in_record"
+      comment: "签到记录表"
+      entity: "MemberSignInRecordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "记录ID" }
+        - { name: "user_id", type: "Long", comment: "用户ID" }
+        - { name: "day", type: "Integer", comment: "第几天签到" }
+        - { name: "point", type: "Integer", comment: "签到获得积分" }
+        - { name: "experience", type: "Integer", comment: "签到获得经验" }
+
+    - name: "member_tag"
+      comment: "会员标签表"
+      entity: "MemberTagDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "标签ID" }
+        - { name: "name", type: "String", comment: "标签名称" }
+
+    - name: "member_group"
+      comment: "会员分组表"
+      entity: "MemberGroupDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "分组ID" }
+        - { name: "name", type: "String", comment: "分组名称" }
+        - { name: "remark", type: "String", comment: "备注" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    - name: "member_address"
+      comment: "收货地址表"
+      entity: "MemberAddressDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "地址ID" }
+        - { name: "user_id", type: "Long", comment: "用户ID" }
+        - { name: "name", type: "String", comment: "收件人名称" }
+        - { name: "mobile", type: "String", comment: "手机号" }
+        - { name: "area_id", type: "Long", comment: "地区ID" }
+        - { name: "detail_address", type: "String", comment: "详细地址" }
+        - { name: "default_status", type: "Boolean", comment: "是否默认" }
+
+    - name: "member_config"
+      comment: "会员配置表"
+      entity: "MemberConfigDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "配置ID" }
+        - { name: "point_trade_deduct_enable", type: "Boolean", comment: "积分抵扣开关" }
+        - { name: "point_trade_deduct_unit_price", type: "Integer", comment: "积分抵扣单位(1积分=多少分)" }
+        - { name: "point_trade_deduct_max_price", type: "Integer", comment: "积分抵扣上限(分)" }
+        - { name: "point_trade_give_point", type: "Integer", comment: "1元赠送积分" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "member_user"
+      to: "member_level"
+      type: "N:1"
+      foreign_key: "level_id"
+    - from: "member_user"
+      to: "member_group"
+      type: "N:1"
+      foreign_key: "group_id"
+    - from: "member_user"
+      to: "member_tag"
+      type: "N:N"
+      foreign_key: "tag_ids(JSON数组)"
+    - from: "member_point_record"
+      to: "member_user"
+      type: "N:1"
+      foreign_key: "user_id"
+    - from: "member_experience_record"
+      to: "member_user"
+      type: "N:1"
+      foreign_key: "user_id"
+    - from: "member_level_record"
+      to: "member_user"
+      type: "N:1"
+      foreign_key: "user_id"
+    - from: "member_level_record"
+      to: "member_level"
+      type: "N:1"
+      foreign_key: "level_id"
+    - from: "member_sign_in_record"
+      to: "member_user"
+      type: "N:1"
+      foreign_key: "user_id"
+    - from: "member_address"
+      to: "member_user"
+      type: "N:1"
+      foreign_key: "user_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - XXX') - Swagger分组"
+      - "@RestController @RequestMapping('/member/xxx')"
+      - "@PreAuthorize('@ss.hasPermission(\\'member:xxx:action\\')') - 权限控制"
+      - "@PermitAll - 无需登录(如登录接口)"
+    example: |
+      @Tag(name = "管理后台 - 会员用户")
+      @RestController
+      @RequestMapping("/member/user")
+      @Validated
+      public class MemberUserController {
+          @Resource
+          private MemberUserService memberUserService;
+
+          @PutMapping("/update-point")
+          @Operation(summary = "更新会员用户积分")
+          @PreAuthorize("@ss.hasPermission('member:user:update-point')")
+          public CommonResult<Boolean> updateUserPoint(@Valid @RequestBody MemberUserUpdatePointReqVO updateReqVO) {
+              memberPointRecordService.createPointRecord(updateReqVO.getId(), updateReqVO.getPoint(),
+                      MemberPointBizTypeEnum.ADMIN, String.valueOf(getLoginUserId()));
+              return success(true);
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "定义在service包下，以Service结尾"
+    impl_pattern: "实现类以ServiceImpl结尾，使用@Service注解"
+    example: |
+      // Service接口
+      public interface MemberPointRecordService {
+          void createPointRecord(Long userId, Integer point, MemberPointBizTypeEnum bizType, String bizId);
+      }
+
+      // Service实现
+      @Service
+      @Validated
+      public class MemberPointRecordServiceImpl implements MemberPointRecordService {
+          @Resource
+          private MemberPointRecordMapper memberPointRecordMapper;
+          @Resource
+          private MemberUserService memberUserService;
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public void createPointRecord(Long userId, Integer point, MemberPointBizTypeEnum bizType, String bizId) {
+              // 1. 校验用户积分余额
+              MemberUserDO user = memberUserService.getUser(userId);
+              int totalPoint = ObjectUtil.defaultIfNull(user.getPoint(), 0) + point;
+              if (totalPoint < 0) {
+                  throw exception(USER_POINT_NOT_ENOUGH);
+              }
+              // 2. 更新用户积分
+              memberUserService.updateUserPoint(userId, point);
+              // 3. 增加积分记录
+              MemberPointRecordDO record = new MemberPointRecordDO()
+                      .setUserId(userId).setBizId(bizId).setBizType(bizType.getType())
+                      .setPoint(point).setTotalPoint(totalPoint);
+              memberPointRecordMapper.insert(record);
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: "继承BaseMapperX，在mysql包下"
+    example: |
+      @Mapper
+      public interface MemberUserMapper extends BaseMapperX<MemberUserDO> {
+          default MemberUserDO selectByMobile(String mobile) {
+              return selectOne(MemberUserDO::getMobile, mobile);
+          }
+          default int updatePointIncr(Long id, Integer point) {
+              return update(new MemberUserDO().setPoint(point),
+                      new LambdaQueryWrapper<MemberUserDO>().eq(MemberUserDO::getId, id));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1_004_XXX_XXX"
+    examples:
+      - code: "1_004_001_000"
+        message: "用户不存在"
+      - code: "1_004_001_003"
+        message: "用户积分余额不足"
+      - code: "1_004_003_000"
+        message: "登录失败，账号密码不正确"
+      - code: "1_004_006_000"
+        message: "用户标签不存在"
+      - code: "1_004_008_000"
+        message: "用户积分记录业务类型不支持"
+      - code: "1_004_010_000"
+        message: "今日已签到，请勿重复签到"
+      - code: "1_004_011_000"
+        message: "用户等级不存在"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE, args...)"
+
+  # 枚举定义
+  enums:
+    - name: "MemberPointBizTypeEnum"
+      description: "积分业务类型"
+      values:
+        - { type: 1, name: "SIGN", desc: "签到", add: true }
+        - { type: 2, name: "ADMIN", desc: "管理员修改", add: true }
+        - { type: 11, name: "ORDER_USE", desc: "订单积分抵扣", add: false }
+        - { type: 21, name: "ORDER_GIVE", desc: "订单积分奖励", add: true }
+
+    - name: "MemberExperienceBizTypeEnum"
+      description: "经验业务类型"
+      values:
+        - { type: 0, name: "ADMIN", desc: "管理员调整", add: true }
+        - { type: 1, name: "INVITE_REGISTER", desc: "邀新奖励", add: true }
+        - { type: 4, name: "SIGN_IN", desc: "签到奖励", add: true }
+        - { type: 11, name: "ORDER_GIVE", desc: "下单奖励", add: true }
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增会员权益功能"
+    steps:
+      - "1. 在dal/dataobject下创建MemberBenefitDO实体类"
+      - "2. 创建MemberBenefitMapper接口"
+      - "3. 创建MemberBenefitService接口和实现类"
+      - "4. 创建admin和app的Controller"
+      - "5. 在ErrorCodeConstants中添加错误码"
+      - "6. 如需对外暴露API，在api包下创建MemberBenefitApi"
+
+  # 新增会员等级步骤
+  new_channel:
+    title: "新增会员等级"
+    steps:
+      - "1. 通过管理后台或直接插入member_level表"
+      - "2. 设置等级名称、等级值、升级所需经验"
+      - "3. 配置享受折扣百分比"
+      - "4. 上传等级图标和背景图"
+      - "5. 确保升级经验值在相邻等级之间"
+
+  # 新增积分来源
+  new_point_source:
+    title: "新增积分来源类型"
+    steps:
+      - "1. 在MemberPointBizTypeEnum中添加新的枚举值"
+      - "2. 设置type(唯一)、name、description、add(是否增加)"
+      - "3. 在对应业务场景调用MemberPointApi.addPoint或reducePoint"
+      - "4. 示例：MemberPointApi.addPoint(userId, 10, MemberPointBizTypeEnum.NEW_TYPE.getType(), bizId)"
+
+  # 最佳实践
+  best_practices:
+    - "积分变更使用MemberPointApi，保证记录完整性"
+    - "经验变更使用MemberLevelApi，自动触发等级计算"
+    - "用户创建后发送MQ消息，便于其他模块处理"
+    - "等级经验配置需确保递增顺序，系统会自动校验"
+    - "积分抵扣配置通过MemberConfigApi获取，支持动态调整"
+    - "签到规则配置支持连续签到奖励递增"
+    - "地址管理支持多地址，需处理默认地址切换逻辑"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "system"
+      api: "SmsCodeApi"
+      purpose: "短信验证码校验(登录、修改手机、重置密码)"
+    - module: "system"
+      api: "SocialClientApi"
+      purpose: "社交登录(微信、QQ等)、微信小程序登录"
+    - module: "infra"
+      api: "文件存储"
+      purpose: "头像上传存储"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "spring-security-crypto"
+      version: "Spring Boot自带"
+      purpose: "密码加密(BCryptPasswordEncoder)"
+    - name: "mybatis-plus"
+      version: "3.x"
+      purpose: "ORM框架，数据访问增强"
+    - name: "hutool"
+      version: "5.x"
+      purpose: "工具类库"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/dal/dataobject/user/MemberUserDO.java"
+    purpose: "会员用户实体，聚合根"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/service/user/MemberUserService.java"
+    purpose: "会员用户服务接口"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/service/level/MemberLevelService.java"
+    purpose: "会员等级服务，含经验管理和自动升级"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/api/point/MemberPointApi.java"
+    purpose: "积分API接口，供其他模块调用"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/enums/point/MemberPointBizTypeEnum.java"
+    purpose: "积分业务类型枚举"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/controller/app/auth/AppAuthController.java"
+    purpose: "C端认证控制器"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/service/signin/MemberSignInRecordService.java"
+    purpose: "签到服务"
+  - path: "yudao-module-member/src/main/java/cn/iocoder/yudao/module/member/dal/dataobject/config/MemberConfigDO.java"
+    purpose: "会员配置(积分抵扣设置)"

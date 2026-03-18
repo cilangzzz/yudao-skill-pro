@@ -1,0 +1,136 @@
+# 策略模式知识库
+
+pattern:
+  id: "strategy-pattern"
+  name: "策略模式"
+  category: "行为型模式"
+  description: "定义一系列算法，把它们封装起来，并使它们可互相替换，让算法独立于使用它的客户而变化"
+
+# 模式结构
+structure:
+  participants:
+    - name: "Strategy"
+      role: "策略接口"
+      description: "定义所有支持的算法的公共接口"
+    - name: "ConcreteStrategy"
+      role: "具体策略"
+      description: "实现策略接口的具体算法"
+    - name: "Context"
+      role: "上下文"
+      description: "维护对策略对象的引用"
+
+# 项目中的应用
+applications:
+  - module: "pay"
+    location: "PayClient接口及其实现"
+    purpose: "支持多渠道支付"
+    code_path: "yudao-module-pay/.../pay/core/client/PayClient.java"
+    strategies:
+      - name: "AlipayQrPayClient"
+        description: "支付宝扫码支付"
+      - name: "AlipayAppPayClient"
+        description: "支付宝App支付"
+      - name: "WxNativePayClient"
+        description: "微信Native支付"
+      - name: "WxAppPayClient"
+        description: "微信App支付"
+    implementation: |
+      public interface PayClient<Config extends PayClientConfig> {
+          Long getId();
+          PayOrderRespDTO unifiedOrder(PayOrderUnifiedReqDTO reqDTO);
+          PayRefundRespDTO unifiedRefund(PayRefundUnifiedReqDTO reqDTO);
+      }
+
+  - module: "infra/sms"
+    location: "SmsClient接口及其实现"
+    purpose: "支持多渠道短信发送"
+    strategies:
+      - name: "AliyunSmsClient"
+        description: "阿里云短信"
+      - name: "TencentSmsClient"
+        description: "腾讯云短信"
+      - name: "HuaweiSmsClient"
+        description: "华为云短信"
+      - name: "QiniuSmsClient"
+        description: "七牛云短信"
+
+  - module: "ai"
+    location: "ChatModel接口及其实现"
+    purpose: "支持多AI模型"
+    strategies:
+      - name: "OpenAIChatModel"
+        description: "OpenAI聊天模型"
+      - name: "BaiduChatModel"
+        description: "百度文心一言"
+      - name: "ZhipuChatModel"
+        description: "智谱AI"
+      - name: "TongyiChatModel"
+        description: "阿里通义千问"
+
+# 使用场景
+scenarios:
+  - "需要在运行时选择算法"
+  - "有多个类只在行为上有差异"
+  - "需要动态切换算法"
+  - "需要隐藏算法实现细节"
+
+# 优点
+advantages:
+  - "算法可自由切换"
+  - "避免使用多重条件判断"
+  - "易于扩展新策略"
+  - "符合开闭原则"
+
+# 缺点
+disadvantages:
+  - "客户端需要了解所有策略"
+  - "策略过多时类数量增加"
+
+# 与工厂模式配合
+factory_integration:
+  description: "策略模式通常与工厂模式配合使用，由工厂创建具体策略实例"
+  example:
+    factory: "PayClientFactory"
+    purpose: "根据渠道配置创建对应的PayClient实例"
+    code: |
+      // 通过工厂获取策略
+      PayClient client = payClientFactory.getPayClient(channelId);
+      // 使用策略
+      PayOrderRespDTO response = client.unifiedOrder(reqDTO);
+
+# 扩展指南
+extension_guide:
+  title: "如何新增策略"
+  steps:
+    - step: 1
+      action: "创建策略实现类"
+      description: "实现策略接口"
+    - step: 2
+      action: "定义配置类"
+      description: "如果需要配置参数"
+    - step: 3
+      action: "修改工厂"
+      description: "在工厂中添加创建分支"
+    - step: 4
+      action: "添加枚举"
+      description: "如果需要类型枚举"
+
+  example:
+    title: "新增短信渠道"
+    code: |
+      // 1. 创建实现类
+      public class XxxSmsClient extends AbstractSmsClient {
+          @Override
+          protected void doInit() { ... }
+
+          @Override
+          public SmsSendResultDTO sendSms(SmsSendMessageDTO message) { ... }
+      }
+
+      // 2. 添加渠道枚举
+      public enum SmsChannelEnum {
+          XXX(10, "XXX短信");
+      }
+
+      // 3. 修改工厂创建逻辑
+      case XXX: return new XxxSmsClient(properties);

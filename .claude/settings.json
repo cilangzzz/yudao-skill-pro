@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"h:/basePlatform/ruoyi-vue-pro-master/ruoyi-vue-pro-master/skills/modules/\"*/)"
+    ]
+  }
+}

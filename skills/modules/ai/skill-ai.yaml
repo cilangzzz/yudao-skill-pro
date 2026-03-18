@@ -1,0 +1,706 @@
+# Skill 文件 - AI 模块
+# 用于提取模块知识的标准格式
+
+skill:
+  id: "skill-ai"
+  name: "AI Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-ai"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    AI 模块是系统的智能化核心，提供大模型集成能力，支持多种 AI 能力：
+    1. 聊天对话：支持多模型切换、流式响应、知识库增强、联网搜索
+    2. 图像生成：支持 OpenAI DALL-E、Stable Diffusion、Midjourney、硅基流动等
+    3. 音乐生成：支持 Suno AI 音乐创作
+    4. 知识库：RAG 检索增强生成，支持文档分片、向量存储、语义检索
+    5. 写作助手：AI 辅助写作
+    6. 思维导图：AI 生成思维导图
+    7. 工作流：可视化 AI 工作流编排
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "策略模式：通过 AiModelFactory 统一创建不同平台的 AI 模型实例"
+    - "工厂模式：AiModelFactoryImpl 负责创建 ChatModel、ImageModel、EmbeddingModel 等"
+    - "单例缓存：使用 Hutool Singleton 缓存 AI 客户端实例，避免重复创建"
+    - "Spring AI 集成：基于 Spring AI 框架，实现多模型统一抽象"
+    - "开放-封闭原则：新增 AI 平台只需扩展 AiPlatformEnum 和工厂方法"
+    - "接口隔离：Service 层接口按领域划分，职责单一"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "聊天会话"
+        type: "聚合根"
+        entities: ["AiChatMessageDO"]
+        description: "用户发起的对话，包含多条消息"
+      - name: "知识库"
+        type: "聚合根"
+        entities: ["AiKnowledgeDocumentDO", "AiKnowledgeSegmentDO"]
+        description: "知识库包含多个文档，文档包含多个分段"
+      - name: "AI 模型配置"
+        type: "聚合根"
+        entities: ["AiApiKeyDO"]
+        description: "模型配置关联 API 密钥"
+
+    value_objects:
+      - name: "AiPlatformEnum"
+        description: "AI 平台枚举，定义支持的 AI 服务商"
+      - name: "AiModelTypeEnum"
+        description: "模型类型枚举：对话、图像、语音、视频、向量、重排序"
+
+    services:
+      - name: "AiChatMessageService"
+        description: "聊天消息服务，处理对话生成"
+      - name: "AiImageService"
+        description: "图像生成服务"
+      - name: "AiKnowledgeService"
+        description: "知识库管理服务"
+      - name: "AiModelService"
+        description: "模型配置管理服务"
+      - name: "AiMusicService"
+        description: "音乐生成服务"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "controller"
+      purpose: "HTTP 接口层"
+      components:
+        - "AiChatMessageController: 聊天消息接口"
+        - "AiChatConversationController: 对话管理接口"
+        - "AiImageController: 图像生成接口"
+        - "AiKnowledgeController: 知识库管理接口"
+        - "AiModelController: 模型配置接口"
+        - "AiMusicController: 音乐生成接口"
+        - "AiWriteController: 写作助手接口"
+        - "AiMindMapController: 思维导图接口"
+        - "AiWorkflowController: 工作流接口"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "chat/: 聊天相关服务"
+        - "image/: 图像生成服务"
+        - "knowledge/: 知识库服务"
+        - "model/: 模型配置服务"
+        - "music/: 音乐生成服务"
+        - "write/: 写作服务"
+        - "mindmap/: 思维导图服务"
+        - "workflow/: 工作流服务"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject/: DO 实体类"
+        - "mysql/: MyBatis Mapper 接口"
+
+    - name: "framework/ai"
+      purpose: "AI 框架集成层"
+      components:
+        - "core/model/: 模型工厂和多平台适配"
+        - "core/webserch/: 联网搜索客户端"
+        - "config/: 自动配置类"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "工厂模式"
+      location: "framework/ai/core/model/AiModelFactory.java"
+      purpose: "统一创建各平台 AI 模型实例，屏蔽创建细节"
+    - pattern: "策略模式"
+      location: "framework/ai/core/model/AiModelFactoryImpl.java"
+      purpose: "根据平台类型选择不同的模型创建策略"
+    - pattern: "单例模式"
+      location: "framework/ai/core/model/AiModelFactoryImpl.java"
+      purpose: "使用 Hutool Singleton 缓存 AI 客户端，避免重复创建连接"
+    - pattern: "模板方法"
+      location: "service/chat/AiChatMessageServiceImpl.java"
+      purpose: "聊天消息处理的统一流程"
+
+  # 模块间通信
+  communication:
+    apis: []
+      # 暂无对外暴露的 RPC API
+    consumers:
+      - module: "system"
+        api: "AdminUserApi"
+        purpose: "获取用户信息"
+    mq: []
+      # 暂未使用消息队列
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有实体继承 BaseDO，包含 id、creator、createTime、updater、updateTime、deleted 字段"
+
+  # 核心数据表
+  tables:
+    # ========== 模型配置 ==========
+    - name: "ai_api_key"
+      comment: "AI API 密钥表"
+      entity: "AiApiKeyDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "名称" }
+        - { name: "api_key", type: "String", comment: "密钥" }
+        - { name: "platform", type: "String", comment: "平台，枚举 AiPlatformEnum" }
+        - { name: "url", type: "String", comment: "API 地址" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    - name: "ai_model"
+      comment: "AI 模型配置表"
+      entity: "AiModelDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "key_id", type: "Long", comment: "API 密钥编号" }
+        - { name: "name", type: "String", comment: "模型名称" }
+        - { name: "model", type: "String", comment: "模型标识" }
+        - { name: "platform", type: "String", comment: "平台" }
+        - { name: "type", type: "Integer", comment: "类型：1对话 2图片 3语音 4视频 5向量 6重排序" }
+        - { name: "sort", type: "Integer", comment: "排序值" }
+        - { name: "status", type: "Integer", comment: "状态" }
+        - { name: "temperature", type: "Double", comment: "温度参数" }
+        - { name: "max_tokens", type: "Integer", comment: "最大 Token 数" }
+        - { name: "max_contexts", type: "Integer", comment: "最大上下文数" }
+
+    - name: "ai_chat_role"
+      comment: "AI 聊天角色表"
+      entity: "AiChatRoleDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "角色名称" }
+        - { name: "avatar", type: "String", comment: "角色头像" }
+        - { name: "category", type: "String", comment: "角色分类" }
+        - { name: "description", type: "String", comment: "角色描述" }
+        - { name: "system_message", type: "String", comment: "角色设定" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "model_id", type: "Long", comment: "模型编号" }
+        - { name: "knowledge_ids", type: "List<Long>", comment: "知识库编号列表" }
+        - { name: "tool_ids", type: "List<Long>", comment: "工具编号列表" }
+        - { name: "mcp_client_names", type: "List<String>", comment: "MCP Client 名字列表" }
+        - { name: "public_status", type: "Boolean", comment: "是否公开" }
+        - { name: "sort", type: "Integer", comment: "排序值" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    - name: "ai_tool"
+      comment: "AI 工具表"
+      entity: "AiToolDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "工具名称（Bean 名字）" }
+        - { name: "description", type: "String", comment: "工具描述" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    # ========== 聊天对话 ==========
+    - name: "ai_chat_conversation"
+      comment: "AI 聊天对话表"
+      entity: "AiChatConversationDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "title", type: "String", comment: "对话标题" }
+        - { name: "pinned", type: "Boolean", comment: "是否置顶" }
+        - { name: "pinned_time", type: "LocalDateTime", comment: "置顶时间" }
+        - { name: "role_id", type: "Long", comment: "角色编号" }
+        - { name: "model_id", type: "Long", comment: "模型编号" }
+        - { name: "model", type: "String", comment: "模型标识" }
+        - { name: "system_message", type: "String", comment: "角色设定" }
+        - { name: "temperature", type: "Double", comment: "温度参数" }
+        - { name: "max_tokens", type: "Integer", comment: "最大 Token 数" }
+        - { name: "max_contexts", type: "Integer", comment: "最大上下文数" }
+
+    - name: "ai_chat_message"
+      comment: "AI 聊天消息表"
+      entity: "AiChatMessageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "conversation_id", type: "Long", comment: "对话编号" }
+        - { name: "reply_id", type: "Long", comment: "回复消息编号" }
+        - { name: "type", type: "String", comment: "消息类型（USER/ASSISTANT/SYSTEM）" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "role_id", type: "Long", comment: "角色编号" }
+        - { name: "model", type: "String", comment: "模型标识" }
+        - { name: "model_id", type: "Long", comment: "模型编号" }
+        - { name: "content", type: "String", comment: "聊天内容" }
+        - { name: "reasoning_content", type: "String", comment: "推理内容" }
+        - { name: "use_context", type: "Boolean", comment: "是否携带上下文" }
+        - { name: "segment_ids", type: "List<Long>", comment: "知识库段落编号数组" }
+        - { name: "web_search_pages", type: "List<WebPage>", comment: "联网搜索网页内容" }
+        - { name: "attachment_urls", type: "List<String>", comment: "附件 URL 数组" }
+
+    # ========== 图像生成 ==========
+    - name: "ai_image"
+      comment: "AI 绘画表"
+      entity: "AiImageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "prompt", type: "String", comment: "提示词" }
+        - { name: "platform", type: "String", comment: "平台" }
+        - { name: "model_id", type: "Long", comment: "模型编号" }
+        - { name: "model", type: "String", comment: "模型标识" }
+        - { name: "width", type: "Integer", comment: "图片宽度" }
+        - { name: "height", type: "Integer", comment: "图片高度" }
+        - { name: "status", type: "Integer", comment: "生成状态" }
+        - { name: "finish_time", type: "LocalDateTime", comment: "完成时间" }
+        - { name: "error_message", type: "String", comment: "错误信息" }
+        - { name: "pic_url", type: "String", comment: "图片地址" }
+        - { name: "public_status", type: "Boolean", comment: "是否公开" }
+        - { name: "options", type: "Map<String,Object>", comment: "绘制参数" }
+        - { name: "buttons", type: "List<Button>", comment: "MJ 按钮" }
+        - { name: "task_id", type: "String", comment: "任务编号" }
+
+    # ========== 知识库 ==========
+    - name: "ai_knowledge"
+      comment: "AI 知识库表"
+      entity: "AiKnowledgeDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "知识库名称" }
+        - { name: "description", type: "String", comment: "知识库描述" }
+        - { name: "embedding_model_id", type: "Long", comment: "向量模型编号" }
+        - { name: "embedding_model", type: "String", comment: "模型标识" }
+        - { name: "top_k", type: "Integer", comment: "TopK" }
+        - { name: "similarity_threshold", type: "Double", comment: "相似度阈值" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    - name: "ai_knowledge_document"
+      comment: "AI 知识库文档表"
+      entity: "AiKnowledgeDocumentDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "knowledge_id", type: "Long", comment: "知识库编号" }
+        - { name: "name", type: "String", comment: "文档名称" }
+        - { name: "url", type: "String", comment: "文件 URL" }
+        - { name: "content", type: "String", comment: "内容" }
+        - { name: "content_length", type: "Integer", comment: "文档长度" }
+        - { name: "tokens", type: "Integer", comment: "Token 数量" }
+        - { name: "segment_max_tokens", type: "Integer", comment: "分片最大 Token 数" }
+        - { name: "retrieval_count", type: "Integer", comment: "召回次数" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    - name: "ai_knowledge_segment"
+      comment: "AI 知识库分段表"
+      entity: "AiKnowledgeSegmentDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "knowledge_id", type: "Long", comment: "知识库编号" }
+        - { name: "document_id", type: "Long", comment: "文档编号" }
+        - { name: "content", type: "String", comment: "切片内容" }
+        - { name: "content_length", type: "Integer", comment: "内容长度" }
+        - { name: "vector_id", type: "String", comment: "向量库编号" }
+        - { name: "tokens", type: "Integer", comment: "Token 数量" }
+        - { name: "retrieval_count", type: "Integer", comment: "召回次数" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+    # ========== 音乐生成 ==========
+    - name: "ai_music"
+      comment: "AI 音乐表"
+      entity: "AiMusicDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "title", type: "String", comment: "音乐名称" }
+        - { name: "lyric", type: "String", comment: "歌词" }
+        - { name: "image_url", type: "String", comment: "图片地址" }
+        - { name: "audio_url", type: "String", comment: "音频地址" }
+        - { name: "video_url", type: "String", comment: "视频地址" }
+        - { name: "status", type: "Integer", comment: "音乐状态" }
+        - { name: "generate_mode", type: "Integer", comment: "生成模式" }
+        - { name: "description", type: "String", comment: "描述词" }
+        - { name: "platform", type: "String", comment: "平台" }
+        - { name: "model", type: "String", comment: "模型" }
+        - { name: "tags", type: "List<String>", comment: "音乐风格标签" }
+        - { name: "duration", type: "Double", comment: "音乐时长" }
+        - { name: "public_status", type: "Boolean", comment: "是否公开" }
+        - { name: "task_id", type: "String", comment: "任务编号" }
+        - { name: "error_message", type: "String", comment: "错误信息" }
+
+    # ========== 写作 ==========
+    - name: "ai_write"
+      comment: "AI 写作表"
+      entity: "AiWriteDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "type", type: "Integer", comment: "写作类型" }
+        - { name: "platform", type: "String", comment: "平台" }
+        - { name: "model_id", type: "Long", comment: "模型编号" }
+        - { name: "model", type: "String", comment: "模型" }
+        - { name: "prompt", type: "String", comment: "生成内容提示" }
+        - { name: "generated_content", type: "String", comment: "生成的内容" }
+        - { name: "original_content", type: "String", comment: "原文" }
+        - { name: "length", type: "Integer", comment: "长度提示词" }
+        - { name: "format", type: "Integer", comment: "格式提示词" }
+        - { name: "tone", type: "Integer", comment: "语气提示词" }
+        - { name: "language", type: "Integer", comment: "语言提示词" }
+        - { name: "error_message", type: "String", comment: "错误信息" }
+
+    # ========== 思维导图 ==========
+    - name: "ai_mind_map"
+      comment: "AI 思维导图表"
+      entity: "AiMindMapDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "user_id", type: "Long", comment: "用户编号" }
+        - { name: "platform", type: "String", comment: "平台" }
+        - { name: "model_id", type: "Long", comment: "模型编号" }
+        - { name: "model", type: "String", comment: "模型" }
+        - { name: "prompt", type: "String", comment: "生成内容提示" }
+        - { name: "generated_content", type: "String", comment: "生成的内容" }
+        - { name: "error_message", type: "String", comment: "错误信息" }
+
+    # ========== 工作流 ==========
+    - name: "ai_workflow"
+      comment: "AI 工作流表"
+      entity: "AiWorkflowDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "Long", comment: "编号" }
+        - { name: "name", type: "String", comment: "工作流名称" }
+        - { name: "code", type: "String", comment: "工作流标识" }
+        - { name: "graph", type: "String", comment: "工作流模型 JSON 数据" }
+        - { name: "remark", type: "String", comment: "备注" }
+        - { name: "status", type: "Integer", comment: "状态" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "ai_chat_conversation"
+      to: "ai_chat_message"
+      type: "1:N"
+      foreign_key: "conversation_id"
+    - from: "ai_knowledge"
+      to: "ai_knowledge_document"
+      type: "1:N"
+      foreign_key: "knowledge_id"
+    - from: "ai_knowledge_document"
+      to: "ai_knowledge_segment"
+      type: "1:N"
+      foreign_key: "document_id"
+    - from: "ai_model"
+      to: "ai_api_key"
+      type: "N:1"
+      foreign_key: "key_id"
+    - from: "ai_chat_role"
+      to: "ai_model"
+      type: "N:1"
+      foreign_key: "model_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - XXX')"
+      - "@RestController"
+      - "@RequestMapping('/ai/xxx')"
+      - "@Operation(summary = 'xxx')"
+    example: |
+      @Tag(name = "管理后台 - 聊天消息")
+      @RestController
+      @RequestMapping("/ai/chat/message")
+      public class AiChatMessageController {
+
+          @Resource
+          private AiChatMessageService chatMessageService;
+
+          @Operation(summary = "发送消息（流式）")
+          @PostMapping(value = "/send-stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+          public Flux<CommonResult<AiChatMessageSendRespVO>> sendChatMessageStream(
+                  @Valid @RequestBody AiChatMessageSendReqVO sendReqVO) {
+              return chatMessageService.sendChatMessageStream(sendReqVO, getLoginUserId());
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "定义接口 + Impl 实现类，接口用于解耦"
+    impl_pattern: "@Service 注解，使用 @Resource 注入依赖"
+    example: |
+      public interface AiChatMessageService {
+          // 同步发送消息
+          AiChatMessageSendRespVO sendMessage(AiChatMessageSendReqVO sendReqVO, Long userId);
+          // 流式发送消息
+          Flux<CommonResult<AiChatMessageSendRespVO>> sendChatMessageStream(
+              AiChatMessageSendReqVO sendReqVO, Long userId);
+      }
+
+      @Service
+      public class AiChatMessageServiceImpl implements AiChatMessageService {
+          @Resource
+          private AiModelService modelService;
+
+          @Override
+          public Flux<CommonResult<AiChatMessageSendRespVO>> sendChatMessageStream(
+                  AiChatMessageSendReqVO sendReqVO, Long userId) {
+              // 1. 获取对话和模型配置
+              // 2. 构建消息上下文
+              // 3. 调用 ChatModel 流式生成
+              // 4. 保存消息记录
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: "继承 BaseMapperX，使用 LambdaQueryWrapper 查询"
+    example: |
+      @Mapper
+      public interface AiChatMessageMapper extends BaseMapperX<AiChatMessageDO> {
+
+          default List<AiChatMessageDO> selectListByConversationId(Long conversationId) {
+              return selectList(new LambdaQueryWrapper<AiChatMessageDO>()
+                      .eq(AiChatMessageDO::getConversationId, conversationId)
+                      .orderByAsc(AiChatMessageDO::getId));
+          }
+      }
+
+  # AI 模型调用规范
+  ai_model_usage:
+    chat_model: |
+      // 获取 ChatModel
+      ChatModel chatModel = modelService.getChatModel(modelId);
+
+      // 同步调用
+      ChatResponse response = chatModel.call(new Prompt(messages));
+
+      // 流式调用
+      Flux<ChatResponse> stream = chatModel.stream(new Prompt(messages));
+
+    image_model: |
+      // 获取 ImageModel
+      ImageModel imageModel = modelService.getImageModel(modelId);
+
+      // 生成图片
+      ImageResponse response = imageModel.call(new ImagePrompt(prompt, options));
+
+    embedding_model: |
+      // 获取 EmbeddingModel
+      EmbeddingModel embeddingModel = modelService.getOrCreateVectorStore(modelId, metadataFields);
+
+      // 生成向量
+      EmbeddingResponse response = embeddingModel.embedForResponse(texts);
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-040-XXX-XXX"
+    examples:
+      - code: "1_040_000_000"
+        message: "API 密钥不存在"
+      - code: "1_040_001_000"
+        message: "模型不存在"
+      - code: "1_040_003_000"
+        message: "对话不存在"
+      - code: "1_040_004_001"
+        message: "对话生成异常"
+      - code: "1_040_009_000"
+        message: "知识库不存在"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "CommonResult.error(ErrorCode)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增 AI 平台提供商
+  new_platform:
+    title: "新增 AI 平台提供商"
+    steps:
+      - step: 1
+        action: "在 AiPlatformEnum 中添加新平台枚举值"
+        example: |
+          MY_PLATFORM("MyPlatform", "我的平台"),
+
+      - step: 2
+        action: "在 AiModelFactoryImpl 中添加模型创建方法"
+        example: |
+          // 在 getOrCreateChatModel 方法的 switch 中添加
+          case MY_PLATFORM:
+              return buildMyPlatformChatModel(apiKey, url);
+
+          // 新增构建方法
+          private static ChatModel buildMyPlatformChatModel(String apiKey, String url) {
+              // 参考 Spring AI 对应平台的 AutoConfiguration 实现
+              MyPlatformApi api = MyPlatformApi.builder()
+                  .apiKey(apiKey)
+                  .baseUrl(url)
+                  .build();
+              return MyPlatformChatModel.builder()
+                  .myPlatformApi(api)
+                  .toolCallingManager(getToolCallingManager())
+                  .build();
+          }
+
+      - step: 3
+        action: "如需自定义模型类，在 framework/ai/core/model/ 下创建"
+        example: |
+          // 参考 BaiChuanChatModel、GeminiChatModel 等
+
+      - step: 4
+        action: "在 YudaoAiProperties 中添加平台配置属性"
+        example: |
+          @Data
+          public static class MyPlatform {
+              private String apiKey;
+              private String baseUrl;
+          }
+
+      - step: 5
+        action: "在 AiAutoConfiguration 中添加自动配置"
+        example: |
+          @Bean
+          @ConditionalOnProperty(prefix = "yudao.ai.my-platform", name = "api-key")
+          public ChatModel myPlatformChatModel(YudaoAiProperties properties) {
+              return buildMyPlatformChatModel(properties.getMyPlatform());
+          }
+
+  # 新增 AI 能力类型
+  new_capability:
+    title: "新增 AI 能力类型"
+    steps:
+      - step: 1
+        action: "在 AiModelTypeEnum 中添加新类型"
+        example: |
+          MY_CAPABILITY(7, "新能力"),
+
+      - step: 2
+        action: "创建对应的 DO 实体类"
+        example: |
+          @TableName("ai_my_capability")
+          @Data
+          public class AiMyCapabilityDO extends BaseDO {
+              private Long id;
+              private Long userId;
+              private String prompt;
+              private String result;
+              // ...
+          }
+
+      - step: 3
+        action: "创建 Controller、Service、Mapper"
+        example: |
+          // Controller
+          @Tag(name = "管理后台 - 新能力")
+          @RestController
+          @RequestMapping("/ai/my-capability")
+          public class AiMyCapabilityController { ... }
+
+          // Service
+          public interface AiMyCapabilityService { ... }
+
+          // Mapper
+          public interface AiMyCapabilityMapper extends BaseMapperX<AiMyCapabilityDO> { ... }
+
+      - step: 4
+        action: "在 AiModelFactory 中添加对应的模型获取方法"
+        example: |
+          MyCapabilityModel getOrCreateMyCapabilityModel(AiPlatformEnum platform,
+              String apiKey, String url);
+
+  # 最佳实践
+  best_practices:
+    - "模型实例缓存：使用 Singleton.get() 缓存，避免重复创建连接"
+    - "流式响应优先：聊天推荐使用流式接口，用户体验更好"
+    - "错误处理：捕获 AI 调用异常，记录 errorMessage 字段"
+    - "向量存储选择：生产环境推荐 Milvus、Qdrant，测试可用 SimpleVectorStore"
+    - "知识库分片：根据文档特点选择分片策略（语义分片、Markdown QA 分片）"
+    - "多模态支持：ChatMessage 支持携带 attachmentUrls 实现多模态对话"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "system"
+      api: "AdminUserApi"
+      purpose: "获取用户信息"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "spring-ai-core"
+      version: "1.0.x"
+      purpose: "Spring AI 核心框架，提供统一的 AI 模型抽象"
+    - name: "spring-ai-openai"
+      version: "1.0.x"
+      purpose: "OpenAI 模型集成"
+    - name: "spring-ai-anthropic"
+      version: "1.0.x"
+      purpose: "Anthropic Claude 模型集成"
+    - name: "spring-ai-ollama"
+      version: "1.0.x"
+      purpose: "Ollama 本地模型集成"
+    - name: "spring-ai-zhipuai"
+      version: "1.0.x"
+      purpose: "智谱 AI 模型集成"
+    - name: "spring-ai-deepseek"
+      version: "1.0.x"
+      purpose: "DeepSeek 模型集成"
+    - name: "spring-ai-minimax"
+      version: "1.0.x"
+      purpose: "MiniMax 模型集成"
+    - name: "spring-ai-milvus"
+      version: "1.0.x"
+      purpose: "Milvus 向量数据库集成"
+    - name: "spring-ai-qdrant"
+      version: "1.0.x"
+      purpose: "Qdrant 向量数据库集成"
+    - name: "spring-ai-redis"
+      version: "1.0.x"
+      purpose: "Redis 向量存储集成"
+    - name: "hutool"
+      version: "5.x"
+      purpose: "Singleton 缓存、工具类"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/core/model/AiModelFactory.java"
+    purpose: "AI 模型工厂接口，定义统一的模型创建方法"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/core/model/AiModelFactoryImpl.java"
+    purpose: "AI 模型工厂实现，包含各平台模型创建逻辑"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/enums/model/AiPlatformEnum.java"
+    purpose: "AI 平台枚举，定义支持的 20+ AI 服务商"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/enums/model/AiModelTypeEnum.java"
+    purpose: "AI 模型类型枚举"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/model/AiModelService.java"
+    purpose: "模型配置服务，管理 API Key、模型配置"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/chat/AiChatMessageService.java"
+    purpose: "聊天消息服务，核心业务逻辑"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/knowledge/AiKnowledgeService.java"
+    purpose: "知识库服务"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/controller/admin/chat/AiChatMessageController.java"
+    purpose: "聊天消息 Controller，提供 HTTP 接口"
+  - path: "yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/config/AiAutoConfiguration.java"
+    purpose: "AI 自动配置类"

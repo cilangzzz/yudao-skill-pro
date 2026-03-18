@@ -6,85 +6,98 @@ skills:
   system:
     name: "系统管理模块"
     path: "skills/modules/system/skill-system.yaml"
-    status: "pending"
+    status: "completed"
     priority: 1
+    lines: 839
 
   infra:
     name: "基础设施模块"
     path: "skills/modules/infra/skill-infra.yaml"
-    status: "pending"
+    status: "completed"
     priority: 1
+    lines: 700+
 
   pay:
     name: "支付模块"
     path: "skills/modules/pay/skill-pay.yaml"
-    status: "pending"
+    status: "completed"
     priority: 1
+    lines: 654
 
   # 业务模块
   member:
     name: "会员模块"
     path: "skills/modules/member/skill-member.yaml"
-    status: "pending"
+    status: "completed"
     priority: 2
+    lines: 608
 
   mall:
     name: "商城模块"
     path: "skills/modules/mall/skill-mall.yaml"
-    status: "pending"
+    status: "completed"
     priority: 2
+    lines: 650+
 
   crm:
     name: "CRM模块"
     path: "skills/modules/crm/skill-crm.yaml"
-    status: "pending"
+    status: "completed"
     priority: 2
+    lines: 850+
 
   erp:
     name: "ERP模块"
     path: "skills/modules/erp/skill-erp.yaml"
-    status: "pending"
+    status: "completed"
     priority: 3
+    lines: 900+
 
   # 技术/平台模块
   bpm:
     name: "工作流模块"
     path: "skills/modules/bpm/skill-bpm.yaml"
-    status: "pending"
+    status: "completed"
     priority: 2
+    lines: 650+
 
   ai:
     name: "AI模块"
     path: "skills/modules/ai/skill-ai.yaml"
-    status: "pending"
+    status: "completed"
     priority: 3
+    lines: 670+
 
   iot:
     name: "物联网模块"
     path: "skills/modules/iot/skill-iot.yaml"
-    status: "pending"
+    status: "completed"
     priority: 3
+    lines: 721
 
   mp:
     name: "微信公众号模块"
     path: "skills/modules/mp/skill-mp.yaml"
-    status: "pending"
+    status: "completed"
     priority: 3
+    lines: 660+
 
   report:
     name: "报表模块"
     path: "skills/modules/report/skill-report.yaml"
-    status: "pending"
+    status: "completed"
     priority: 3
+    lines: 320+
 
 # 提取进度
 progress:
   total: 12
-  completed: 0
+  completed: 12
   in_progress: 0
-  pending: 12
+  pending: 0
 
 # 最后更新时间
 metadata:
   created_at: "2026-03-18"
   updated_at: "2026-03-18"
+  completed_at: "2026-03-18"

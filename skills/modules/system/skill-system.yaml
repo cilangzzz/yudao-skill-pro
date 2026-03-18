@@ -1,0 +1,840 @@
+# Skill 文档 - yudao-module-system 模块
+# 系统管理模块完整知识提取
+
+skill:
+  id: "skill-system"
+  name: "System Module Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-system"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    yudao-module-system 是整个平台的核心基础设施模块，负责系统级的管理功能：
+    - 用户管理：管理后台用户的增删改查、密码管理、状态控制
+    - 角色管理：基于RBAC模型的角色定义与权限分配
+    - 权限管理：菜单权限、按钮权限、数据权限的统一控制
+    - 部门管理：组织架构的树形结构管理
+    - 岗位管理：岗位信息的维护
+    - 租户管理：多租户架构的核心支撑，租户创建、套餐绑定、过期控制
+    - 字典管理：系统字典类型与字典数据的维护
+    - 通知公告：系统公告的发布与管理
+    - 短信/邮件/站内信：消息通知的三驾马车
+    - OAuth2：开放授权协议支持
+    - 社交登录：第三方登录集成（微信、钉钉等）
+
+    该模块是其他所有业务模块的基础，提供统一的用户认证、权限校验、租户隔离能力。
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - principle: "RBAC权限模型"
+      description: "采用基于角色的访问控制模型，用户-角色-菜单三层关联，支持细粒度的按钮级权限控制"
+    - principle: "多租户架构"
+      description: "通过TenantBaseDO基类实现租户数据隔离，所有业务表自动携带tenant_id字段"
+    - principle: "数据权限"
+      description: "支持5种数据权限范围：全部、自定义部门、本部门、本部门及子部门、仅本人"
+    - principle: "分层架构"
+      description: "严格遵循Controller-Service-DAL三层架构，API层提供跨模块调用能力"
+    - principle: "接口隔离"
+      description: "Service接口与实现分离，便于测试和扩展"
+    - principle: "缓存优先"
+      description: "权限数据使用Spring Cache + Redis缓存，减少数据库查询压力"
+    - principle: "统一异常处理"
+      description: "通过ErrorCodeConstants定义统一错误码，格式为1-002-XXX-XXX"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "User（用户聚合）"
+        type: "聚合根"
+        entities: ["AdminUserDO", "UserRoleDO", "UserPostDO"]
+        description: "用户是系统的核心实体，关联角色和岗位，属于租户"
+      - name: "Role（角色聚合）"
+        type: "聚合根"
+        entities: ["RoleDO", "RoleMenuDO"]
+        description: "角色是权限的载体，关联菜单实现功能权限控制"
+      - name: "Menu（菜单聚合）"
+        type: "聚合根"
+        entities: ["MenuDO"]
+        description: "菜单是权限的最小单元，支持目录、菜单、按钮三种类型"
+      - name: "Dept（部门聚合）"
+        type: "聚合根"
+        entities: ["DeptDO"]
+        description: "部门是组织架构的核心，树形结构，支持数据权限"
+      - name: "Tenant（租户聚合）"
+        type: "聚合根"
+        entities: ["TenantDO", "TenantPackageDO"]
+        description: "租户是SaaS架构的核心，绑定套餐控制功能范围"
+
+    value_objects:
+      - name: "Post（岗位）"
+        description: "岗位是用户的职位标识，不涉及复杂业务逻辑"
+      - name: "DictType/DictData（字典）"
+        description: "字典是系统配置的枚举值，全局共享不区分租户"
+      - name: "Notice（通知公告）"
+        description: "通知公告是系统级消息，简单CRUD"
+
+    services:
+      - name: "PermissionService"
+        description: "权限领域服务，处理用户-角色-菜单的关联关系"
+      - name: "AdminAuthService"
+        description: "认证领域服务，处理登录、登出、令牌刷新"
+      - name: "TenantService"
+        description: "租户领域服务，处理租户生命周期管理"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口，供其他模块RPC调用"
+      components:
+        - "PermissionApi: 权限校验接口"
+        - "AdminUserApi: 用户信息查询接口"
+        - "DeptApi: 部门信息查询接口"
+        - "PostApi: 岗位信息查询接口"
+        - "DictDataApi: 字典数据查询接口"
+        - "RoleApi: 角色信息查询接口"
+        - "SmsSendApi: 短信发送接口"
+        - "MailSendApi: 邮件发送接口"
+        - "NotifyMessageSendApi: 站内信发送接口"
+        - "SocialUserApi: 社交用户接口"
+        - "LoginLogApi: 登录日志接口"
+        - "OperateLogApi: 操作日志接口"
+
+    - name: "controller"
+      purpose: "HTTP接口，供前端调用"
+      components:
+        - "AuthController: 认证相关（登录、登出、刷新令牌）"
+        - "UserController: 用户管理"
+        - "RoleController: 角色管理"
+        - "MenuController: 菜单管理"
+        - "DeptController: 部门管理"
+        - "PostController: 岗位管理"
+        - "DictTypeController/DictDataController: 字典管理"
+        - "TenantController: 租户管理"
+        - "TenantPackageController: 租户套餐管理"
+        - "SmsChannelController/SmsTemplateController: 短信管理"
+        - "MailAccountController/MailTemplateController: 邮件管理"
+        - "NotifyTemplateController/NotifyMessageController: 站内信管理"
+        - "OAuth2ClientController: OAuth2客户端管理"
+        - "SocialClientController: 社交客户端管理"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "auth: AdminAuthService（认证服务）"
+        - "permission: PermissionService, RoleService, MenuService（权限服务）"
+        - "user: AdminUserService（用户服务）"
+        - "dept: DeptService, PostService（组织服务）"
+        - "dict: DictTypeService, DictDataService（字典服务）"
+        - "tenant: TenantService, TenantPackageService（租户服务）"
+        - "sms: SmsChannelService, SmsTemplateService, SmsSendService, SmsCodeService（短信服务）"
+        - "mail: MailAccountService, MailTemplateService, MailSendService（邮件服务）"
+        - "notify: NotifyTemplateService, NotifyMessageService, NotifySendService（站内信服务）"
+        - "oauth2: OAuth2ClientService, OAuth2TokenService, OAuth2CodeService（OAuth2服务）"
+        - "social: SocialClientService, SocialUserService（社交服务）"
+        - "logger: LoginLogService, OperateLogService（日志服务）"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject: 32个DO实体类"
+        - "mysql: MyBatis Mapper接口"
+        - "redis: Redis缓存操作"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "策略模式"
+      location: "SmsChannelService, MailSendService"
+      purpose: "不同短信/邮件渠道的发送策略切换"
+    - pattern: "模板方法模式"
+      location: "NotifySendService, SmsSendService"
+      purpose: "消息发送的统一流程，子类实现具体发送逻辑"
+    - pattern: "工厂模式"
+      location: "SmsClientFactory, MailClientFactory"
+      purpose: "根据渠道类型创建对应的客户端实例"
+    - pattern: "代理模式"
+      location: "PermissionServiceImpl.getSelf()"
+      purpose: "解决Spring AOP缓存注解生效问题"
+    - pattern: "DTO模式"
+      location: "api/dto/*"
+      purpose: "跨模块数据传输对象，隔离内部实体"
+    - pattern: "转换器模式"
+      location: "convert/*"
+      purpose: "DO与VO之间的对象转换，使用MapStruct"
+
+  # 模块间通信
+  communication:
+    apis:  # 对外暴露的API
+      - api: "PermissionApi"
+        methods: ["hasAnyPermissions", "hasAnyRoles", "getUserRoleIdListByRoleIds"]
+        consumers: ["yudao-module-infra", "yudao-module-member"]
+      - api: "AdminUserApi"
+        methods: ["getUser", "getUserList"]
+        consumers: ["yudao-module-infra", "yudao-module-pay"]
+      - api: "DeptApi"
+        methods: ["getDept", "getDeptList"]
+        consumers: ["yudao-module-infra"]
+      - api: "DictDataApi"
+        methods: ["parseDictData", "getDictDataList"]
+        consumers: ["所有模块"]
+      - api: "SmsSendApi"
+        methods: ["sendSingleSms"]
+        consumers: ["yudao-module-member"]
+      - api: "MailSendApi"
+        methods: ["sendSingleMail"]
+        consumers: ["yudao-module-member"]
+
+    consumers:  # 消费的其他模块API
+      - api: "PermissionCommonApi (framework-common)"
+        purpose: "基础权限校验能力"
+      - api: "FileApi (yudao-module-infra)"
+        purpose: "文件上传（用户头像等）"
+
+    mq: []  # 暂未使用消息队列
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO | TenantBaseDO"
+    description: |
+      - BaseDO: 包含id, creator, createTime, updater, updateTime, deleted字段
+      - TenantBaseDO: 继承BaseDO，额外包含tenantId字段，实现多租户隔离
+      - 使用@TenantIgnore注解标记不需要租户隔离的表（如system_menu, system_dict_data）
+
+  # 核心数据表
+  tables:
+    # ========== 用户相关 ==========
+    - name: "system_users"
+      comment: "用户表"
+      entity: "AdminUserDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "用户ID，主键" }
+        - { name: "username", type: "VARCHAR(30)", comment: "用户账号" }
+        - { name: "password", type: "VARCHAR(100)", comment: "加密密码" }
+        - { name: "nickname", type: "VARCHAR(30)", comment: "用户昵称" }
+        - { name: "dept_id", type: "BIGINT", comment: "部门ID" }
+        - { name: "post_ids", type: "VARCHAR(255)", comment: "岗位编号数组，JSON格式" }
+        - { name: "email", type: "VARCHAR(50)", comment: "用户邮箱" }
+        - { name: "mobile", type: "VARCHAR(20)", comment: "手机号码" }
+        - { name: "sex", type: "TINYINT", comment: "用户性别" }
+        - { name: "avatar", type: "VARCHAR(100)", comment: "用户头像" }
+        - { name: "status", type: "TINYINT", comment: "帐号状态（0正常 1停用）" }
+        - { name: "login_ip", type: "VARCHAR(50)", comment: "最后登录IP" }
+        - { name: "login_date", type: "DATETIME", comment: "最后登录时间" }
+      indexes:
+        - { name: "uk_username", columns: ["username", "tenant_id"] }
+        - { name: "uk_mobile", columns: ["mobile", "tenant_id"] }
+
+    - name: "system_user_role"
+      comment: "用户-角色关联表"
+      entity: "UserRoleDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键" }
+        - { name: "user_id", type: "BIGINT", comment: "用户ID" }
+        - { name: "role_id", type: "BIGINT", comment: "角色ID" }
+      indexes:
+        - { name: "idx_user_id", columns: ["user_id"] }
+        - { name: "idx_role_id", columns: ["role_id"] }
+
+    # ========== 角色相关 ==========
+    - name: "system_role"
+      comment: "角色表"
+      entity: "RoleDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "角色ID" }
+        - { name: "name", type: "VARCHAR(30)", comment: "角色名称" }
+        - { name: "code", type: "VARCHAR(100)", comment: "角色标识" }
+        - { name: "sort", type: "INT", comment: "角色排序" }
+        - { name: "status", type: "TINYINT", comment: "角色状态" }
+        - { name: "type", type: "TINYINT", comment: "角色类型（1系统内置 2自定义）" }
+        - { name: "data_scope", type: "TINYINT", comment: "数据范围" }
+        - { name: "data_scope_dept_ids", type: "VARCHAR(500)", comment: "数据范围部门ID数组" }
+      indexes:
+        - { name: "uk_code", columns: ["code", "tenant_id"] }
+
+    - name: "system_role_menu"
+      comment: "角色-菜单关联表"
+      entity: "RoleMenuDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键" }
+        - { name: "role_id", type: "BIGINT", comment: "角色ID" }
+        - { name: "menu_id", type: "BIGINT", comment: "菜单ID" }
+      indexes:
+        - { name: "idx_role_id", columns: ["role_id"] }
+        - { name: "idx_menu_id", columns: ["menu_id"] }
+
+    # ========== 菜单相关 ==========
+    - name: "system_menu"
+      comment: "菜单表"
+      entity: "MenuDO"
+      extends: "BaseDO"
+      annotation: "@TenantIgnore"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "菜单ID" }
+        - { name: "name", type: "VARCHAR(50)", comment: "菜单名称" }
+        - { name: "permission", type: "VARCHAR(100)", comment: "权限标识" }
+        - { name: "type", type: "TINYINT", comment: "菜单类型（1目录 2菜单 3按钮）" }
+        - { name: "sort", type: "INT", comment: "显示顺序" }
+        - { name: "parent_id", type: "BIGINT", comment: "父菜单ID" }
+        - { name: "path", type: "VARCHAR(200)", comment: "路由地址" }
+        - { name: "icon", type: "VARCHAR(100)", comment: "菜单图标" }
+        - { name: "component", type: "VARCHAR(255)", comment: "组件路径" }
+        - { name: "component_name", type: "VARCHAR(100)", comment: "组件名" }
+        - { name: "status", type: "TINYINT", comment: "菜单状态" }
+        - { name: "visible", type: "BIT", comment: "是否可见" }
+        - { name: "keep_alive", type: "BIT", comment: "是否缓存" }
+        - { name: "always_show", type: "BIT", comment: "是否总是显示" }
+
+    # ========== 部门相关 ==========
+    - name: "system_dept"
+      comment: "部门表"
+      entity: "DeptDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "部门ID" }
+        - { name: "name", type: "VARCHAR(30)", comment: "部门名称" }
+        - { name: "parent_id", type: "BIGINT", comment: "父部门ID" }
+        - { name: "sort", type: "INT", comment: "显示顺序" }
+        - { name: "leader_user_id", type: "BIGINT", comment: "负责人" }
+        - { name: "phone", type: "VARCHAR(20)", comment: "联系电话" }
+        - { name: "email", type: "VARCHAR(50)", comment: "邮箱" }
+        - { name: "status", type: "TINYINT", comment: "部门状态" }
+
+    - name: "system_post"
+      comment: "岗位表"
+      entity: "PostDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "岗位ID" }
+        - { name: "name", type: "VARCHAR(50)", comment: "岗位名称" }
+        - { name: "code", type: "VARCHAR(64)", comment: "岗位编码" }
+        - { name: "sort", type: "INT", comment: "显示顺序" }
+        - { name: "status", type: "TINYINT", comment: "状态" }
+
+    # ========== 租户相关 ==========
+    - name: "system_tenant"
+      comment: "租户表"
+      entity: "TenantDO"
+      extends: "BaseDO"
+      annotation: "@TenantIgnore"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "租户编号" }
+        - { name: "name", type: "VARCHAR(100)", comment: "租户名" }
+        - { name: "contact_user_id", type: "BIGINT", comment: "联系人的用户编号" }
+        - { name: "contact_name", type: "VARCHAR(100)", comment: "联系人" }
+        - { name: "contact_mobile", type: "VARCHAR(20)", comment: "联系手机" }
+        - { name: "status", type: "TINYINT", comment: "租户状态" }
+        - { name: "websites", type: "VARCHAR(500)", comment: "绑定域名列表" }
+        - { name: "package_id", type: "BIGINT", comment: "租户套餐编号" }
+        - { name: "expire_time", type: "DATETIME", comment: "过期时间" }
+        - { name: "account_count", type: "INT", comment: "账号数量" }
+
+    - name: "system_tenant_package"
+      comment: "租户套餐表"
+      entity: "TenantPackageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "套餐编号" }
+        - { name: "name", type: "VARCHAR(100)", comment: "套餐名" }
+        - { name: "status", type: "TINYINT", comment: "套餐状态" }
+        - { name: "menu_ids", type: "VARCHAR(2000)", comment: "关联菜单编号数组" }
+        - { name: "remark", type: "VARCHAR(255)", comment: "备注" }
+
+    # ========== 字典相关 ==========
+    - name: "system_dict_type"
+      comment: "字典类型表"
+      entity: "DictTypeDO"
+      extends: "BaseDO"
+      annotation: "@TenantIgnore"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "字典主键" }
+        - { name: "name", type: "VARCHAR(100)", comment: "字典名称" }
+        - { name: "type", type: "VARCHAR(100)", comment: "字典类型" }
+        - { name: "status", type: "TINYINT", comment: "字典状态" }
+
+    - name: "system_dict_data"
+      comment: "字典数据表"
+      entity: "DictDataDO"
+      extends: "BaseDO"
+      annotation: "@TenantIgnore"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "字典主键" }
+        - { name: "sort", type: "INT", comment: "字典排序" }
+        - { name: "label", type: "VARCHAR(100)", comment: "字典标签" }
+        - { name: "value", type: "VARCHAR(100)", comment: "字典值" }
+        - { name: "dict_type", type: "VARCHAR(100)", comment: "字典类型" }
+        - { name: "status", type: "TINYINT", comment: "状态" }
+        - { name: "color_type", type: "VARCHAR(20)", comment: "颜色类型" }
+
+    # ========== 短信相关 ==========
+    - name: "system_sms_channel"
+      comment: "短信渠道表"
+      entity: "SmsChannelDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "渠道编号" }
+        - { name: "signature", type: "VARCHAR(12)", comment: "短信签名" }
+        - { name: "code", type: "VARCHAR(63)", comment: "渠道编码" }
+        - { name: "status", type: "TINYINT", comment: "开启状态" }
+        - { name: "api_key", type: "VARCHAR(128)", comment: "短信API密钥" }
+        - { name: "callback_url", type: "VARCHAR(255)", comment: "短信回调URL" }
+
+    - name: "system_sms_template"
+      comment: "短信模板表"
+      entity: "SmsTemplateDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "模板编号" }
+        - { name: "name", type: "VARCHAR(63)", comment: "模板名称" }
+        - { name: "code", type: "VARCHAR(63)", comment: "模板编码" }
+        - { name: "content", type: "VARCHAR(255)", comment: "模板内容" }
+        - { name: "channel_id", type: "BIGINT", comment: "短信渠道编号" }
+        - { name: "channel_code", type: "VARCHAR(63)", comment: "短信渠道编码" }
+        - { name: "status", type: "TINYINT", comment: "开启状态" }
+
+    - name: "system_sms_log"
+      comment: "短信日志表"
+      entity: "SmsLogDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "日志编号" }
+        - { name: "channel_id", type: "BIGINT", comment: "短信渠道编号" }
+        - { name: "template_id", type: "BIGINT", comment: "模板编号" }
+        - { name: "template_code", type: "VARCHAR(63)", comment: "模板编码" }
+        - { name: "template_content", type: "VARCHAR(255)", comment: "模板内容" }
+        - { name: "template_params", type: "VARCHAR(255)", comment: "模板参数" }
+        - { name: "mobile", type: "VARCHAR(11)", comment: "手机号" }
+        - { name: "send_status", type: "TINYINT", comment: "发送状态" }
+        - { name: "send_time", type: "DATETIME", comment: "发送时间" }
+        - { name: "receive_status", type: "TINYINT", comment: "接收状态" }
+        - { name: "receive_time", type: "DATETIME", comment: "接收时间" }
+
+    # ========== 邮件相关 ==========
+    - name: "system_mail_account"
+      comment: "邮箱账号表"
+      entity: "MailAccountDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键" }
+        - { name: "mail", type: "VARCHAR(100)", comment: "邮箱" }
+        - { name: "username", type: "VARCHAR(100)", comment: "用户名" }
+        - { name: "password", type: "VARCHAR(100)", comment: "密码" }
+        - { name: "host", type: "VARCHAR(100)", comment: "SMTP服务器域名" }
+        - { name: "port", type: "INT", comment: "SMTP服务器端口" }
+        - { name: "ssl_enable", type: "BIT", comment: "是否开启SSL" }
+
+    - name: "system_mail_template"
+      comment: "邮件模板表"
+      entity: "MailTemplateDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键" }
+        - { name: "name", type: "VARCHAR(63)", comment: "模板名称" }
+        - { name: "code", type: "VARCHAR(63)", comment: "模板编码" }
+        - { name: "account_id", type: "BIGINT", comment: "发送的邮箱账号编号" }
+        - { name: "nickname", type: "VARCHAR(255)", comment: "发送人名称" }
+        - { name: "title", type: "VARCHAR(255)", comment: "邮件标题" }
+        - { name: "content", type: "VARCHAR(10240)", comment: "邮件内容" }
+        - { name: "status", type: "TINYINT", comment: "开启状态" }
+
+    # ========== OAuth2相关 ==========
+    - name: "system_oauth2_client"
+      comment: "OAuth2客户端表"
+      entity: "OAuth2ClientDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "client_id", type: "VARCHAR(255)", comment: "客户端编号" }
+        - { name: "secret", type: "VARCHAR(255)", comment: "客户端密钥" }
+        - { name: "name", type: "VARCHAR(255)", comment: "应用名" }
+        - { name: "logo", type: "VARCHAR(255)", comment: "应用图标" }
+        - { name: "authorized_grant_types", type: "VARCHAR(255)", comment: "授权类型" }
+        - { name: "scopes", type: "VARCHAR(255)", comment: "授权范围" }
+        - { name: "redirect_uris", type: "VARCHAR(255)", comment: "回调地址" }
+        - { name: "access_token_validity_seconds", type: "INT", comment: "访问令牌有效期" }
+        - { name: "refresh_token_validity_seconds", type: "INT", comment: "刷新令牌有效期" }
+
+    - name: "system_oauth2_access_token"
+      comment: "OAuth2访问令牌表"
+      entity: "OAuth2AccessTokenDO"
+      extends: "TenantBaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "编号" }
+        - { name: "access_token", type: "VARCHAR(255)", comment: "访问令牌" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "user_type", type: "TINYINT", comment: "用户类型" }
+        - { name: "client_id", type: "VARCHAR(255)", comment: "客户端编号" }
+        - { name: "expires_time", type: "DATETIME", comment: "过期时间" }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "system_users"
+      to: "system_dept"
+      type: "N:1"
+      foreign_key: "dept_id"
+      description: "用户属于一个部门"
+    - from: "system_users"
+      to: "system_post"
+      type: "N:N"
+      foreign_key: "post_ids (JSON数组)"
+      description: "用户可关联多个岗位"
+    - from: "system_user_role"
+      to: "system_users"
+      type: "N:1"
+      foreign_key: "user_id"
+    - from: "system_user_role"
+      to: "system_role"
+      type: "N:1"
+      foreign_key: "role_id"
+    - from: "system_role_menu"
+      to: "system_role"
+      type: "N:1"
+      foreign_key: "role_id"
+    - from: "system_role_menu"
+      to: "system_menu"
+      type: "N:1"
+      foreign_key: "menu_id"
+    - from: "system_menu"
+      to: "system_menu"
+      type: "N:1"
+      foreign_key: "parent_id"
+      description: "菜单树形结构"
+    - from: "system_dept"
+      to: "system_dept"
+      type: "N:1"
+      foreign_key: "parent_id"
+      description: "部门树形结构"
+    - from: "system_tenant"
+      to: "system_tenant_package"
+      type: "N:1"
+      foreign_key: "package_id"
+    - from: "system_dict_data"
+      to: "system_dict_type"
+      type: "N:1"
+      foreign_key: "dict_type"
+    - from: "system_sms_template"
+      to: "system_sms_channel"
+      type: "N:1"
+      foreign_key: "channel_id"
+    - from: "system_mail_template"
+      to: "system_mail_account"
+      type: "N:1"
+      foreign_key: "account_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - XXX'): OpenAPI 3.0 文档标签"
+      - "@RestController: RESTful控制器"
+      - "@RequestMapping('/system/xxx'): 路由前缀"
+      - "@Validated: 参数校验"
+      - "@Operation(summary = 'XXX'): 接口文档说明"
+      - "@PreAuthorize('@ss.hasPermission('system:xxx:add')'): 权限校验"
+      - "@PermitAll: 允许匿名访问（如登录接口）"
+    example: |
+      @Tag(name = "管理后台 - 用户")
+      @RestController
+      @RequestMapping("/system/user")
+      @Validated
+      public class UserController {
+          @PostMapping("/create")
+          @Operation(summary = "创建用户")
+          @PreAuthorize("@ss.hasPermission('system:user:create')")
+          public CommonResult<Long> createUser(@Valid @RequestBody UserSaveReqVO createReqVO) {
+              return success(userService.createUser(createReqVO));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: |
+      - 接口定义在 service 包下
+      - 方法参数使用 @Valid 注解进行校验
+      - 返回值使用具体类型或 void
+    impl_pattern: |
+      - 实现类放在 service 包下，命名为 XxxServiceImpl
+      - 使用 @Service 注解
+      - 使用 @Resource 注入 Mapper 和其他 Service
+      - 使用 @Transactional(rollbackFor = Exception.class) 标记事务方法
+      - 使用 @Cacheable/@CacheEvict 进行缓存操作
+    example: |
+      @Service
+      @Slf4j
+      public class PermissionServiceImpl implements PermissionService {
+
+          @Resource
+          private RoleMenuMapper roleMenuMapper;
+          @Resource
+          private UserRoleMapper userRoleMapper;
+
+          @Override
+          @DSTransactional // 多数据源事务
+          @Caching(evict = {
+              @CacheEvict(value = RedisKeyConstants.MENU_ROLE_ID_LIST, allEntries = true),
+              @CacheEvict(value = RedisKeyConstants.PERMISSION_MENU_ID_LIST, allEntries = true)
+          })
+          public void assignRoleMenu(Long roleId, Set<Long> menuIds) {
+              // 业务逻辑
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      - Mapper 接口继承 BaseMapperX<DO类>
+      - 使用 @Mapper 注解
+      - 复杂查询使用 MPJLambdaWrapperWrapper 或 XML
+    example: |
+      @Mapper
+      public interface UserMapper extends BaseMapperX<AdminUserDO> {
+
+          default AdminUserDO selectByUsername(String username) {
+              return selectOne(AdminUserDO::getUsername, username);
+          }
+
+          default List<AdminUserDO> selectListByDeptIds(Collection<Long> deptIds) {
+              return selectList(new LambdaQueryWrapperX<AdminUserDO>()
+                  .inIfPresent(AdminUserDO::getDeptId, deptIds));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-002-XXX-XXX"
+    format: "模块号-子模块号-序号"
+    examples:
+      - code: "1_002_000_000"
+        message: "登录失败，账号密码不正确"
+        module: "AUTH"
+      - code: "1_002_001_000"
+        message: "已经存在该名字的菜单"
+        module: "MENU"
+      - code: "1_002_002_000"
+        message: "角色不存在"
+        module: "ROLE"
+      - code: "1_002_003_000"
+        message: "用户账号已经存在"
+        module: "USER"
+      - code: "1_002_004_000"
+        message: "已经存在该名字的部门"
+        module: "DEPT"
+      - code: "1_002_015_000"
+        message: "租户不存在"
+        module: "TENANT"
+    usage: |
+      // 在Service中抛出业务异常
+      if (user == null) {
+          throw exception(USER_NOT_EXISTS);
+      }
+      // 带参数的异常
+      throw exception(ROLE_NAME_DUPLICATE, name);
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "CommonResult.error(errorCode)"
+    usage: |
+      // 成功响应
+      return success(userService.getUser(id));
+      // 失败响应（通常由全局异常处理器处理）
+      throw exception(USER_NOT_EXISTS);
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增业务功能（以新增'操作日志'功能为例）"
+    steps:
+      - step: "1. 创建DO实体类"
+        detail: |
+          在 dal/dataobject/logger/ 下创建 OperateLogDO.java
+          继承 BaseDO 或 TenantBaseDO
+          使用 @TableName 指定表名
+      - step: "2. 创建Mapper接口"
+        detail: |
+          在 dal/mysql/logger/ 下创建 OperateLogMapper.java
+          继承 BaseMapperX<OperateLogDO>
+      - step: "3. 创建Service接口和实现"
+        detail: |
+          在 service/logger/ 下创建 OperateLogService.java 接口
+          在 service/logger/ 下创建 OperateLogServiceImpl.java 实现
+          使用 @Service 和 @Resource 注解
+      - step: "4. 创建Controller"
+        detail: |
+          在 controller/admin/logger/ 下创建 OperateLogController.java
+          使用 @RestController, @RequestMapping, @Tag 等注解
+          使用 @PreAuthorize 进行权限控制
+      - step: "5. 创建VO类"
+        detail: |
+          在 controller/admin/logger/vo/ 下创建请求和响应VO
+          使用 @Data, @Valid 等注解进行参数校验
+      - step: "6. 添加错误码"
+        detail: |
+          在 enums/ErrorCodeConstants.java 中添加错误码
+          格式：ErrorCode XXX_NOT_EXISTS = new ErrorCode(1_002_XXX_000, "XXX不存在");
+      - step: "7. 添加菜单权限"
+        detail: |
+          在数据库 system_menu 表中添加菜单记录
+          配置权限标识如 system:operate-log:query
+
+  # 新增渠道/类型示例
+  new_channel:
+    title: "新增短信渠道（以新增'华为云短信'为例）"
+    steps:
+      - step: "1. 添加渠道枚举"
+        detail: |
+          在 SmsChannelEnum 中添加新渠道类型
+          HUAWEI("huawei", "华为云")
+      - step: "2. 创建客户端实现"
+        detail: |
+          在 framework/sms/core/client/impl/ 下创建 HuaweiSmsClient.java
+          继承 AbstractSmsClient 抽象类
+          实现 doSendSms() 方法
+      - step: "3. 注册到工厂"
+        detail: |
+          在 SmsClientFactory 中注册新渠道
+          clients.put(SmsChannelEnum.HUAWEI, new HuaweiSmsClient());
+      - step: "4. 添加配置类"
+        detail: |
+          创建 HuaweiSmsChannelProperties 配置类
+          继承 SmsChannelProperties 基类
+
+  # 新增字典类型
+  new_dict:
+    title: "新增字典类型"
+    steps:
+      - step: "1. 通过管理后台添加"
+        detail: |
+          登录管理后台 -> 系统管理 -> 字典管理 -> 新增字典类型
+          填写字典名称、字典类型（如 system_user_sex）
+      - step: "2. 添加字典数据"
+        detail: |
+          在字典类型下添加字典数据项
+          设置字典标签、字典值、排序、状态等
+      - step: "3. 代码中使用"
+        detail: |
+          // 获取字典数据列表
+          List<DictDataRespDTO> dictList = dictDataApi.getDictDataList("system_user_sex");
+          // 解析字典值
+          String label = dictDataApi.parseDictData("system_user_sex", "1");
+
+  # 最佳实践
+  best_practices:
+    - practice: "权限标识命名规范"
+      detail: "使用 '模块:功能:操作' 格式，如 system:user:create、system:role:update"
+    - practice: "数据权限使用"
+      detail: "在Service方法上使用 @DataPermission 注解控制数据权限，使用 enable=false 关闭"
+    - practice: "缓存使用"
+      detail: "权限相关数据使用 @Cacheable 缓存，修改时使用 @CacheEvict 清除"
+    - practice: "多租户注意"
+      detail: "不需要租户隔离的表使用 @TenantIgnore 注解，如字典表、菜单表"
+    - practice: "事务处理"
+      detail: "跨数据源操作使用 @DSTransactional，单数据源使用 @Transactional"
+    - practice: "日志记录"
+      detail: "使用 @OperateLog 注解记录操作日志，使用 Lombok 的 @Slf4j 记录调试日志"
+    - practice: "参数校验"
+      detail: "VO类使用 @Valid、@NotNull、@NotBlank 等注解进行参数校验"
+    - practice: "API设计"
+      detail: "跨模块调用通过 API 层，不要直接调用 Service 层"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-framework-common"
+      api: "CommonResult, PageResult, ErrorCode"
+      purpose: "通用响应、分页、错误码"
+    - module: "yudao-framework-security"
+      api: "SecurityFrameworkUtils, @PreAuthorize"
+      purpose: "安全框架、权限注解"
+    - module: "yudao-framework-tenant"
+      api: "TenantBaseDO, @TenantIgnore"
+      purpose: "多租户支持"
+    - module: "yudao-framework-mybatis"
+      api: "BaseMapperX, BaseDO"
+      purpose: "MyBatis增强"
+    - module: "yudao-framework-redis"
+      api: "@Cacheable, RedisKeyConstants"
+      purpose: "Redis缓存"
+    - module: "yudao-module-infra"
+      api: "FileApi"
+      purpose: "文件上传"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "spring-boot-starter-web"
+      version: "2.7.x"
+      purpose: "Web框架"
+    - name: "mybatis-plus-boot-starter"
+      version: "3.5.x"
+      purpose: "MyBatis增强"
+    - name: "spring-boot-starter-security"
+      version: "2.7.x"
+      purpose: "安全框架"
+    - name: "spring-boot-starter-validation"
+      version: "2.7.x"
+      purpose: "参数校验"
+    - name: "spring-boot-starter-cache"
+      version: "2.7.x"
+      purpose: "缓存支持"
+    - name: "mapstruct"
+      version: "1.5.x"
+      purpose: "对象转换"
+    - name: "lombok"
+      version: "1.18.x"
+      purpose: "代码简化"
+    - name: "hutool-all"
+      version: "5.8.x"
+      purpose: "工具类库"
+    - name: "knife4j-spring-boot-starter"
+      version: "3.0.x"
+      purpose: "API文档"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义，所有业务异常的统一入口"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/dal/dataobject/user/AdminUserDO.java"
+    purpose: "用户实体类，核心聚合根"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/dal/dataobject/permission/RoleDO.java"
+    purpose: "角色实体类，权限载体"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/dal/dataobject/permission/MenuDO.java"
+    purpose: "菜单实体类，权限最小单元"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/service/permission/PermissionServiceImpl.java"
+    purpose: "权限服务实现，核心业务逻辑"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/service/auth/AdminAuthServiceImpl.java"
+    purpose: "认证服务实现，登录登出逻辑"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/controller/admin/auth/AuthController.java"
+    purpose: "认证控制器，登录接口入口"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/api/permission/PermissionApi.java"
+    purpose: "权限API接口，跨模块调用入口"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/enums/permission/DataScopeEnum.java"
+    purpose: "数据权限枚举，5种数据范围定义"
+  - path: "yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/enums/permission/MenuTypeEnum.java"
+    purpose: "菜单类型枚举，目录/菜单/按钮"

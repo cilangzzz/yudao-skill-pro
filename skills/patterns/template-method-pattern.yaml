@@ -1,0 +1,119 @@
+# 模板方法模式知识库
+
+pattern:
+  id: "template-method-pattern"
+  name: "模板方法模式"
+  category: "行为型模式"
+  description: "定义一个操作中的算法骨架，将一些步骤延迟到子类中，使得子类可以不改变算法结构即可重定义算法的某些步骤"
+
+# 模式结构
+structure:
+  participants:
+    - name: "AbstractClass"
+      role: "抽象类"
+      description: "定义抽象方法和模板方法，模板方法调用抽象方法"
+    - name: "ConcreteClass"
+      role: "具体类"
+      description: "实现抽象方法，完成具体逻辑"
+
+# 项目中的应用
+applications:
+  - module: "pay"
+    location: "AbstractPayClient"
+    purpose: "统一支付流程骨架"
+    code_path: "yudao-module-pay/.../pay/core/client/impl/AbstractPayClient.java"
+    implementation: |
+      public abstract class AbstractPayClient<Config extends PayClientConfig> implements PayClient<Config> {
+
+          // 模板方法：统一下单
+          @Override
+          public final PayOrderRespDTO unifiedOrder(PayOrderUnifiedReqDTO reqDTO) {
+              ValidationUtils.validate(reqDTO);
+              try {
+                  return doUnifiedOrder(reqDTO);  // 调用子类实现
+              } catch (Throwable ex) {
+                  log.error("[unifiedOrder]异常", ex);
+                  throw buildPayException(ex);
+              }
+          }
+
+          // 抽象方法：由子类实现具体下单逻辑
+          protected abstract PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO) throws Throwable;
+
+          // 抽象方法：初始化
+          protected abstract void doInit();
+      }
+
+  - module: "infra/sms"
+    location: "AbstractSmsClient"
+    purpose: "统一短信发送流程"
+    code_path: "yudao-module-infra/.../sms/core/client/AbstractSmsClient.java"
+    implementation: |
+      public abstract class AbstractSmsClient implements SmsClient {
+          // 模板方法定义发送流程
+      }
+
+# 模板方法流程
+template_methods:
+  - name: "unifiedOrder"
+    module: "pay"
+    steps:
+      - "参数校验"
+      - "调用子类实现下单"
+      - "异常处理和转换"
+    hook_methods:
+      - "doUnifiedOrder()"
+      - "doInit()"
+
+# 使用场景
+scenarios:
+  - "多个子类有公共行为，但具体实现不同"
+  - "需要控制算法的整体流程"
+  - "需要在不同点调用不同的实现"
+
+# 优点
+advantages:
+  - "复用公共代码"
+  - "控制算法流程"
+  - "符合开闭原则"
+  - "便于维护和扩展"
+
+# 缺点
+disadvantages:
+  - "每个实现都需要定义子类"
+  - "增加了类的数量"
+
+# 扩展指南
+extension_guide:
+  title: "如何新增具体实现"
+  steps:
+    - step: 1
+      action: "创建具体类"
+      description: "继承抽象类"
+    - step: 2
+      action: "实现抽象方法"
+      description: "doUnifiedOrder(), doInit()等"
+    - step: 3
+      action: "注册到工厂"
+      description: "在工厂中添加创建逻辑"
+
+  example:
+    title: "新增支付渠道"
+    code: |
+      public class XxxPayClient extends AbstractPayClient<XxxPayClientConfig> {
+
+          @Override
+          protected void doInit() {
+              // 初始化SDK
+          }
+
+          @Override
+          protected PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO) throws Throwable {
+              // 调用第三方支付API
+          }
+
+          @Override
+          protected PayRefundRespDTO doUnifiedRefund(PayRefundUnifiedReqDTO reqDTO) throws Throwable {
+              // 调用第三方退款API
+          }
+      }

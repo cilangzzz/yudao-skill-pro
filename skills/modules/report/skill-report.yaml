@@ -1,0 +1,345 @@
+# Skill 文档 - yudao-module-report
+# 数据报表模块知识提取
+
+skill:
+  id: "skill-report"
+  name: "Report Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-report"
+  created_at: "2026-03-18"
+  updated_at: "2026-03-18"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    report 模块主要实现数据可视化报表功能，为系统提供报表设计、大屏设计、数据分析等能力。
+    核心功能包括：
+    1. 积木报表集成：基于 JimuReport 实现打印设计、报表设计、图形设计、大屏设计
+    2. GoView 大屏设计器：提供可视化大屏报表设计能力，支持 SQL 和 HTTP 数据源
+    3. 数据可视化：支持多种图表类型，满足企业数据展示需求
+    模块定位：作为企业级应用的可视化报表解决方案，与业务模块解耦，提供独立的数据展示能力。
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - "单一职责原则：GoViewProject 负责 project 管理，GoViewData 负责数据查询"
+    - "开放封闭原则：通过 JmReportTokenServiceI 接口扩展积木报表认证机制"
+    - "依赖倒置原则：Service 层依赖接口而非实现，便于测试和扩展"
+    - "策略模式：支持多种数据源查询策略（SQL、HTTP），可扩展新数据源"
+    - "适配器模式：JmReportTokenServiceImpl 适配积木报表与 yudao 认证体系"
+    - "数据源抽象：默认使用 JdbcTemplate，支持切换至 ClickHouse 等大数据引擎"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "GoViewProject"
+        type: "聚合根"
+        description: "大屏报表项目，包含项目配置、发布状态、报表内容等"
+        entities: ["GoViewProjectDO"]
+        value_objects: ["GoViewDataRespVO"]
+
+    value_objects:
+      - name: "GoViewDataRespVO"
+        type: "值对象"
+        description: "数据响应结构，包含维度(dimensions)和数据明细(source)"
+      - name: "GoViewProjectCreateReqVO"
+        type: "值对象"
+        description: "项目创建请求参数"
+      - name: "GoViewProjectUpdateReqVO"
+        type: "值对象"
+        description: "项目更新请求参数"
+
+    services:
+      - name: "GoViewProjectService"
+        type: "领域服务"
+        description: "管理大屏项目的创建、更新、删除、查询"
+      - name: "GoViewDataService"
+        type: "领域服务"
+        description: "提供数据查询能力，支持 SQL/HTTP 等数据源"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "controller"
+      purpose: "HTTP 接口层，提供 REST API"
+      components:
+        - "GoViewProjectController: 大屏项目管理接口"
+        - "GoViewDataController: 数据查询接口（SQL/HTTP）"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "GoViewProjectService/GoViewProjectServiceImpl: 项目管理业务逻辑"
+        - "GoViewDataService/GoViewDataServiceImpl: 数据查询业务逻辑"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "GoViewProjectMapper: 项目数据访问"
+        - "GoViewProjectDO: 项目实体"
+
+    - name: "convert"
+      purpose: "对象转换层"
+      components:
+        - "GoViewProjectConvert: DO/VO 对象转换（MapStruct）"
+
+    - name: "framework"
+      purpose: "框架集成层"
+      components:
+        - "JmReportConfiguration: 积木报表配置"
+        - "JmReportTokenServiceImpl: 积木报表 Token 认证适配"
+        - "JmOnlDragExternalServiceImpl: 积木仪表盘扩展服务"
+        - "SecurityConfiguration: 安全配置"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "适配器模式"
+      location: "framework/jmreport/core/service/JmReportTokenServiceImpl.java"
+      purpose: "将 yudao 的 OAuth2 认证体系适配到积木报表的 JmReportTokenServiceI 接口"
+    - pattern: "策略模式"
+      location: "controller/admin/goview/GoViewDataController.java"
+      purpose: "支持多种数据查询策略：getDataBySQL、getDataByHttp"
+    - pattern: "转换器模式"
+      location: "convert/goview/GoViewProjectConvert.java"
+      purpose: "使用 MapStruct 实现 DO 与 VO 之间的转换"
+
+  # 模块间通信
+  communication:
+    apis: []  # 对外暴露的API（通过 HTTP 接口暴露）
+    consumers:
+      - module: "system"
+        api: "OAuth2TokenCommonApi"
+        purpose: "验证 Token 获取用户信息"
+      - module: "system"
+        api: "PermissionCommonApi"
+        purpose: "权限校验，判断用户角色"
+    mq: []  # 无消息队列使用
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "report 模块实体继承 BaseDO，包含 id、creator、create_time、updater、update_time、deleted 字段"
+
+  # 核心数据表
+  tables:
+    - name: "report_go_view_project"
+      comment: "GoView 大屏项目表"
+      entity: "GoViewProjectDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "主键ID，自增" }
+        - { name: "name", type: "VARCHAR(255)", comment: "项目名称" }
+        - { name: "pic_url", type: "VARCHAR(1024)", comment: "预览图片URL" }
+        - { name: "content", type: "LONGTEXT", comment: "报表内容，JSON格式配置" }
+        - { name: "status", type: "TINYINT", comment: "发布状态：0-已发布，1-未发布" }
+        - { name: "remark", type: "VARCHAR(255)", comment: "项目备注" }
+        - { name: "creator", type: "VARCHAR(64)", comment: "创建人" }
+        - { name: "create_time", type: "DATETIME", comment: "创建时间" }
+        - { name: "updater", type: "VARCHAR(64)", comment: "更新人" }
+        - { name: "update_time", type: "DATETIME", comment: "更新时间" }
+        - { name: "deleted", type: "BIT", comment: "是否删除" }
+      indexes:
+        - { name: "idx_creator", columns: ["creator"] }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "report_go_view_project"
+      to: "system_users"
+      type: "N:1"
+      foreign_key: "creator"
+      comment: "项目创建人关联用户表"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - XXX')"
+      - "@RestController"
+      - "@RequestMapping('/report/xxx')"
+      - "@Validated"
+      - "@PreAuthorize('@ss.hasPermission(...)')"
+    example: |
+      @Tag(name = "管理后台 - GoView 项目")
+      @RestController
+      @RequestMapping("/report/go-view/project")
+      @Validated
+      public class GoViewProjectController {
+
+          @Resource
+          private GoViewProjectService goViewProjectService;
+
+          @PostMapping("/create")
+          @Operation(summary = "创建项目")
+          @PreAuthorize("@ss.hasPermission('report:go-view-project:create')")
+          public CommonResult<Long> createProject(@Valid @RequestBody GoViewProjectCreateReqVO createReqVO) {
+              return success(goViewProjectService.createProject(createReqVO));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "定义接口 + 使用 @Service 注解的实现类"
+    impl_pattern: "使用 @Validated 注解支持参数校验，依赖注入使用 @Resource"
+    example: |
+      public interface GoViewProjectService {
+          Long createProject(@Valid GoViewProjectCreateReqVO createReqVO);
+          void updateProject(@Valid GoViewProjectUpdateReqVO updateReqVO);
+          void deleteProject(Long id);
+          GoViewProjectDO getProject(Long id);
+          PageResult<GoViewProjectDO> getMyProjectPage(PageParam pageReqVO, Long userId);
+      }
+
+      @Service
+      @Validated
+      public class GoViewProjectServiceImpl implements GoViewProjectService {
+
+          @Resource
+          private GoViewProjectMapper goViewProjectMapper;
+
+          @Override
+          public Long createProject(GoViewProjectCreateReqVO createReqVO) {
+              GoViewProjectDO goViewProject = GoViewProjectConvert.INSTANCE.convert(createReqVO)
+                      .setStatus(CommonStatusEnum.DISABLE.getStatus());
+              goViewProjectMapper.insert(goViewProject);
+              return goViewProject.getId();
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: "继承 BaseMapperX<DO>，使用 default 方法实现自定义查询"
+    example: |
+      @Mapper
+      public interface GoViewProjectMapper extends BaseMapperX<GoViewProjectDO> {
+
+          default PageResult<GoViewProjectDO> selectPage(PageParam reqVO, Long userId) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<GoViewProjectDO>()
+                      .eq(GoViewProjectDO::getCreator, userId)
+                      .orderByDesc(GoViewProjectDO::getId));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1_003_000_000"
+    examples:
+      - code: "1_003_000_000"
+        message: "GoView 项目不存在"
+        constant: "GO_VIEW_PROJECT_NOT_EXISTS"
+    usage: |
+      // 使用方式
+      if (goViewProjectMapper.selectById(id) == null) {
+          throw exception(GO_VIEW_PROJECT_NOT_EXISTS);
+      }
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ERROR_CODE)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增报表功能"
+    steps:
+      - "1. 在 dal/dataobject 下创建 DO 实体类，继承 BaseDO"
+      - "2. 在 dal/mysql 下创建 Mapper 接口，继承 BaseMapperX"
+      - "3. 在 controller/admin/vo 下创建请求/响应 VO"
+      - "4. 在 convert 下创建 Convert 接口（使用 MapStruct）"
+      - "5. 在 service 下创建 Service 接口和实现类"
+      - "6. 在 controller/admin 下创建 Controller"
+      - "7. 在 enums/ErrorCodeConstants 添加错误码"
+
+  # 新增数据源类型
+  new_channel:
+    title: "新增数据源类型"
+    steps:
+      - "1. 在 GoViewDataController 中新增查询方法，如 getDataByElasticsearch"
+      - "2. 在 GoViewDataService 接口中定义新方法"
+      - "3. 在 GoViewDataServiceImpl 中实现查询逻辑"
+      - "4. 创建对应的请求 VO（如 GoViewDataGetByEsReqVO）"
+      - "5. 添加权限注解 @PreAuthorize('@ss.hasPermission(...)')"
+    example: |
+      // 新增 Elasticsearch 数据源查询
+      @RequestMapping("/get-by-es")
+      @Operation(summary = "使用 Elasticsearch 查询数据")
+      @PreAuthorize("@ss.hasPermission('report:go-view-data:get-by-es')")
+      public CommonResult<GoViewDataRespVO> getDataByEs(@Valid @RequestBody GoViewDataGetByEsReqVO reqVO) {
+          return success(goViewDataService.getDataByEs(reqVO));
+      }
+
+  # 最佳实践
+  best_practices:
+    - "数据查询时考虑性能，大数据量场景建议使用 ClickHouse 等列式数据库"
+    - "报表内容使用 JSON 格式存储，前端负责解析渲染"
+    - "项目创建时默认状态为未发布(status=1)，需手动发布"
+    - "使用 creator 字段实现数据隔离，用户只能看到自己创建的项目"
+    - "积木报表集成时需注意 Token 传递，通过 customApiHeader 方法处理"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "system"
+      api: "OAuth2TokenCommonApi"
+      purpose: "积木报表 Token 验证"
+    - module: "system"
+      api: "PermissionCommonApi"
+      purpose: "积木报表权限校验"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "jimureport-spring-boot-starter"
+      version: "管理在父 POM"
+      purpose: "积木报表核心依赖，提供报表设计器"
+    - name: "jimubi-spring-boot-starter"
+      version: "管理在父 POM"
+      purpose: "积木仪表盘/大屏设计器"
+    - name: "spring-boot-starter-jdbc"
+      version: "Spring Boot 管理"
+      purpose: "JdbcTemplate 数据源查询"
+    - name: "mapstruct"
+      version: "管理在父 POM"
+      purpose: "对象转换"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/dal/dataobject/goview/GoViewProjectDO.java"
+    purpose: "GoView 项目实体类，对应 report_go_view_project 表"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/service/goview/GoViewProjectService.java"
+    purpose: "项目管理服务接口"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/service/goview/GoViewDataServiceImpl.java"
+    purpose: "数据查询服务实现，核心 SQL 查询逻辑"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/controller/admin/goview/GoViewProjectController.java"
+    purpose: "项目管理 HTTP 接口"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/controller/admin/goview/GoViewDataController.java"
+    purpose: "数据查询 HTTP 接口"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/framework/jmreport/config/JmReportConfiguration.java"
+    purpose: "积木报表配置类"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/framework/jmreport/core/service/JmReportTokenServiceImpl.java"
+    purpose: "积木报表 Token 认证适配器"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/enums/ErrorCodeConstants.java"
+    purpose: "错误码定义"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/dal/mysql/goview/GoViewProjectMapper.java"
+    purpose: "项目数据访问 Mapper"
+  - path: "yudao-module-report/src/main/java/cn/iocoder/yudao/module/report/convert/goview/GoViewProjectConvert.java"
+    purpose: "对象转换器（MapStruct）"

@@ -1,0 +1,91 @@
+# 工厂模式知识库
+
+pattern:
+  id: "factory-pattern"
+  name: "工厂模式"
+  category: "创建型模式"
+  description: "定义一个创建对象的接口，让子类决定实例化哪一个类，使一个类的实例化延迟到其子类"
+
+# 模式结构
+structure:
+  participants:
+    - name: "Factory"
+      role: "抽象工厂接口"
+      description: "声明创建产品对象的抽象方法"
+    - name: "ConcreteFactory"
+      role: "具体工厂"
+      description: "实现抽象工厂接口，创建具体产品"
+    - name: "Product"
+      role: "抽象产品"
+      description: "定义产品的共同接口"
+    - name: "ConcreteProduct"
+      role: "具体产品"
+      description: "实现抽象产品接口的具体类"
+
+# 项目中的应用
+applications:
+  - module: "pay"
+    location: "PayClientFactory"
+    purpose: "创建支付客户端实例"
+    code_path: "yudao-module-pay/.../pay/core/client/PayClientFactory.java"
+    implementation: |
+      public interface PayClientFactory {
+          PayClient getPayClient(Long channelId);
+          <Config extends PayClientConfig> PayClient createOrUpdatePayClient(
+              Long channelId, String channelCode, Config config);
+      }
+
+  - module: "infra/sms"
+    location: "SmsClientFactory"
+    purpose: "创建短信客户端实例"
+    code_path: "yudao-module-infra/.../sms/core/client/SmsClientFactory.java"
+    implementation: |
+      public class SmsClientFactoryImpl implements SmsClientFactory {
+          private final ConcurrentMap<Long, AbstractSmsClient> channelIdClients = new ConcurrentHashMap<>();
+
+          @Override
+          public SmsClient createOrUpdateSmsClient(SmsChannelProperties properties) {
+              AbstractSmsClient client = channelIdClients.get(properties.getId());
+              if (client == null) {
+                  client = this.createSmsClient(properties);
+                  client.init();
+                  channelIdClients.put(client.getId(), client);
+              } else {
+                  client.refresh(properties);
+              }
+              return client;
+          }
+      }
+
+# 使用场景
+scenarios:
+  - "需要根据配置动态创建不同类型的客户端"
+  - "需要管理多个同类对象的实例（如缓存）"
+  - "创建逻辑复杂，需要封装"
+  - "需要支持扩展新的产品类型"
+
+# 优点
+advantages:
+  - "解耦创建逻辑和使用逻辑"
+  - "便于扩展新产品类型"
+  - "可以缓存和复用对象实例"
+  - "统一管理对象生命周期"
+
+# 缺点
+disadvantages:
+  - "增加了类的数量"
+  - "需要维护工厂类的实现"
+
+# 扩展指南
+extension_guide:
+  title: "如何新增产品类型"
+  steps:
+    - step: 1
+      action: "创建具体产品类"
+      description: "实现Product接口"
+    - step: 2
+      action: "修改工厂创建逻辑"
+      description: "在工厂中添加新类型的创建分支"
+    - step: 3
+      action: "配置支持"
+      description: "添加配置枚举或配置项"
