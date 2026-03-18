@@ -20,27 +20,31 @@ _project_dir = Path(__file__).parent
 sys.path.insert(0, str(_project_dir))
 
 # 使用绝对导入
-from config.config_loader import get_config
+from config.config_loader import ConfigLoader, get_config
 from services.release_service import ReleaseService
 from services.history_service import HistoryService
 from services.doc_service import DocService
 from utils.logger import init_logger
 
 
-def init():
-    """初始化"""
-    config = get_config()
-    init_logger(config.get('logging', {}))
-    return config
-
-
 @click.group()
 @click.option('--config', '-c', help='配置文件路径')
+@click.option('--project', '-p', help='项目 ID')
 @click.pass_context
-def cli(ctx, config):
+def cli(ctx, config, project):
     """SQL 发版工具"""
     ctx.ensure_object(dict)
-    ctx.obj['config'] = init()
+
+    # 优先级：config > project > 默认
+    if config:
+        cfg = get_config(config_path=config)
+    elif project:
+        cfg = ConfigLoader.get_instance(project)
+    else:
+        cfg = get_config()
+
+    init_logger(cfg.get('logging', {}))
+    ctx.obj['config'] = cfg
 
 
 @cli.command()
@@ -161,6 +165,46 @@ def status(ctx):
         click.echo(f"建议本次开始日期: {suggested_start}")
     else:
         click.echo("暂无发版记录")
+
+
+@cli.command()
+@click.pass_context
+def info(ctx):
+    """显示当前项目信息"""
+    config = ctx.obj['config']
+
+    click.echo("\n当前项目信息")
+    click.echo("-" * 50)
+    click.echo(f"  项目 ID:     {config.get('project.id', 'default')}")
+    click.echo(f"  项目名称:    {config.get('project.name', '-')}")
+    click.echo(f"  项目描述:    {config.get('project.description', '-')}")
+    click.echo(f"  目录结构:    {config.get_structure_mode()}")
+    click.echo(f"  发版模式:    {config.get_release_mode()}")
+    click.echo(f"  命名模式:    {config.get_naming_mode()}")
+    click.echo(f"  源目录:      {config.get_path('paths.master_root')}")
+    click.echo(f"  输出目录:    {config.get_path('paths.output_root')}")
+    click.echo(f"  历史目录:    {config.get_path('paths.history_root')}")
+
+
+@cli.command()
+@click.pass_context
+def projects(ctx):  # noqa: ARG001
+    """列出所有已注册项目"""
+    registered = ConfigLoader.list_projects()
+
+    click.echo("\n已注册项目")
+    click.echo("-" * 60)
+
+    if not registered:
+        click.echo("  暂无已注册项目")
+        click.echo("\n  使用 ConfigLoader.register_project() 注册项目")
+        return
+
+    for pid in registered:
+        cfg = ConfigLoader.get_instance(pid)
+        name = cfg.get('project.name', pid)
+        desc = cfg.get('project.description', '')
+        click.echo(f"  {pid:20} | {name:15} | {desc}")
 
 
 @cli.command()

@@ -22,14 +22,26 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# 目录名到分类的映射
-DIR_CATEGORY_MAP = {
+# 目录名到分类的映射：按操作类型
+OPERATION_CATEGORY_MAP = {
     'create': 'table_create',
     'update': 'table_update',
     'index': 'index',
     'seq': 'sequence',
     'data': 'data_init',
     'view': 'view',
+}
+
+# 目录名到分类的映射：按数据库类型
+DATABASE_CATEGORY_MAP = {
+    'postgresql': 'postgresql',
+    'mysql': 'mysql',
+    'oracle': 'oracle',
+    'kingbase': 'kingbase',
+    'dm': 'dm',
+    'db2': 'db2',
+    'opengauss': 'opengauss',
+    'sqlserver': 'sqlserver',
 }
 
 
@@ -51,6 +63,7 @@ class SqlScanner:
         source_dirs: List[str],
         exclude_files: List[str] = None,
         exclude_dirs: List[str] = None,
+        structure_mode: str = "by_operation",
     ):
         """
         初始化扫描器
@@ -59,10 +72,12 @@ class SqlScanner:
             source_dirs: 源目录列表
             exclude_files: 排除的文件模式列表
             exclude_dirs: 排除的目录名列表
+            structure_mode: 目录结构模式 (by_operation | by_database | flat)
         """
         self.source_dirs = [Path(d) for d in source_dirs]
         self.exclude_files = set(exclude_files or [])
         self.exclude_dirs = set(exclude_dirs or [])
+        self.structure_mode = structure_mode
 
     def _get_category_from_dir(self, dir_path: Path) -> str:
         """
@@ -76,13 +91,23 @@ class SqlScanner:
         """
         path_parts = dir_path.parts
 
-        # 从路径中查找分类关键词
-        for part in reversed(path_parts):
-            if part in DIR_CATEGORY_MAP:
-                return DIR_CATEGORY_MAP[part]
+        if self.structure_mode == "by_operation":
+            # 从路径中查找操作类型关键词
+            for part in reversed(path_parts):
+                if part in OPERATION_CATEGORY_MAP:
+                    return OPERATION_CATEGORY_MAP[part]
+            return dir_path.name
 
-        # 默认返回目录名
-        return dir_path.name
+        elif self.structure_mode == "by_database":
+            # 从路径中查找数据库名称
+            for part in reversed(path_parts):
+                if part in DATABASE_CATEGORY_MAP:
+                    return DATABASE_CATEGORY_MAP[part]
+            return dir_path.name
+
+        else:
+            # flat 模式：直接使用目录名
+            return dir_path.name
 
     def scan(
         self,

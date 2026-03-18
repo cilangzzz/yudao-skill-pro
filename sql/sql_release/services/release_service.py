@@ -55,6 +55,9 @@ class ReleaseService:
         self.exclude_files = self.config.get('filters.exclude_files', [])
         self.exclude_dirs = self.config.get('filters.exclude_dirs', [])
 
+        # 目录结构模式
+        self.structure_mode = self.config.get_structure_mode()
+
         # 输出配置
         self.subfolder = self.config.get('output.subfolder', True)
         self.add_timestamp = self.config.get('output.add_timestamp', True)
@@ -64,6 +67,7 @@ class ReleaseService:
             source_dirs=self.source_dirs,
             exclude_files=self.exclude_files,
             exclude_dirs=self.exclude_dirs,
+            structure_mode=self.structure_mode,
         )
 
         # merger 延迟初始化

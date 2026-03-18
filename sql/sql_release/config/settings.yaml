@@ -1,8 +1,20 @@
 # SQL 发版工具配置文件
-# Version: 2.0
+# Version: 3.0 - 多项目支持
 
-# 路径配置
+# ==================== 项目元信息 ====================
+project:
+  id: "gaxx-pro"                    # 项目唯一标识
+  name: "法制系统"                   # 项目名称
+  description: "法制办信件管理系统"   # 项目描述
+
+# ==================== 路径配置 ====================
 paths:
+  # 目录结构模式: by_operation | by_database | flat
+  # by_operation: 按操作类型分类 (table/create, index, seq, data)
+  # by_database: 按数据库类型分类 (postgresql, mysql, oracle)
+  # flat: 扁平结构
+  structure_mode: "by_operation"
+
   # SQL 源文件根目录（相对于 sql_release 目录）
   master_root: "../master"
 
@@ -23,6 +35,12 @@ paths:
 
 # 文件命名规则
 naming:
+  # 命名模式: date_prefix | simple | version_prefix
+  # date_prefix: {YYYY_MM_DD}_{表名}_{操作类型}.sql
+  # simple: 表名.sql 或 功能名.sql
+  # version_prefix: v{版本号}_{功能}.sql
+  mode: "date_prefix"
+
   # 日期格式
   date_format: "%Y_%m_%d"
 
@@ -72,6 +90,12 @@ logging:
 
 # 发版配置
 release:
+  # 发版模式: incremental | full | version
+  # incremental: 增量发版，按日期范围筛选
+  # full: 全量发版，不按日期筛选
+  # version: 版本号管理
+  mode: "incremental"
+
   # 自动更新开始日期
   auto_update_start_date: true
 

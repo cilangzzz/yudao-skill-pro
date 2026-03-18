@@ -7,6 +7,7 @@
 1. 加载 YAML 配置文件
 2. 支持环境变量覆盖
 3. 提供配置项访问接口
+4. 支持多项目配置实例
 """
 
 import os
@@ -17,29 +18,58 @@ import yaml
 
 
 class ConfigLoader:
-    """配置加载器"""
+    """配置加载器 - 支持多项目"""
 
-    _instance: Optional['ConfigLoader'] = None
-    _config: Optional[Dict] = None
+    # 实例缓存：project_id -> ConfigLoader 实例
+    _instances: Dict[str, 'ConfigLoader'] = {}
+    # 项目注册表：project_id -> config_path
+    _project_registry: Dict[str, Path] = {}
 
-    def __new__(cls, config_path: str = None):
-        """单例模式"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
+    def __new__(cls, config_path: str = None, project_id: str = None):
+        """
+        支持多项目配置实例
 
-    def __init__(self, config_path: str = None):
+        Args:
+            config_path: 配置文件路径
+            project_id: 项目 ID（可从配置文件读取）
+
+        Returns:
+            ConfigLoader 实例
+        """
+        # 如果指定了配置文件路径
+        if config_path:
+            # 从配置文件读取 project_id
+            pid = cls._read_project_id(config_path)
+            if pid and pid in cls._instances:
+                return cls._instances[pid]
+            # 创建新实例
+            instance = super().__new__(cls)
+            if pid:
+                cls._instances[pid] = instance
+            return instance
+
+        # 如果指定了 project_id
+        if project_id and project_id in cls._instances:
+            return cls._instances[project_id]
+
+        # 默认创建新实例
+        return super().__new__(cls)
+
+    def __init__(self, config_path: str = None, project_id: str = None):  # noqa: ARG002
         """
         初始化配置加载器
 
         Args:
             config_path: 配置文件路径（默认为 config/settings.yaml）
+            project_id: 项目 ID
         """
-        if self._config is not None:
+        # 避免重复初始化（实例已存在时）
+        if hasattr(self, '_config') and self._config is not None:
             return
 
         self.config_path = self._find_config(config_path)
         self._load()
+        self.project_id = self._config.get('project', {}).get('id', 'default')
 
     def _find_config(self, config_path: str = None) -> Path:
         """
@@ -164,6 +194,89 @@ class ConfigLoader:
     def reload(self) -> None:
         """重新加载配置"""
         self._load()
+
+    # ==================== 类方法：多项目管理 ====================
+
+    @classmethod
+    def _read_project_id(cls, config_path: str) -> Optional[str]:
+        """
+        从配置文件读取项目 ID
+
+        Args:
+            config_path: 配置文件路径
+
+        Returns:
+            项目 ID 或 None
+        """
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+            return data.get('project', {}).get('id', None)
+        except Exception:
+            return None
+
+    @classmethod
+    def register_project(cls, project_id: str, config_path: str) -> None:
+        """
+        注册项目配置路径
+
+        Args:
+            project_id: 项目 ID
+            config_path: 配置文件路径
+        """
+        cls._project_registry[project_id] = Path(config_path)
+
+    @classmethod
+    def get_instance(cls, project_id: str) -> 'ConfigLoader':
+        """
+        获取指定项目的配置实例
+
+        Args:
+            project_id: 项目 ID
+
+        Returns:
+            ConfigLoader 实例
+
+        Raises:
+            ValueError: 项目未注册
+        """
+        if project_id in cls._instances:
+            return cls._instances[project_id]
+
+        if project_id in cls._project_registry:
+            config_path = str(cls._project_registry[project_id])
+            return ConfigLoader(config_path=config_path)
+
+        raise ValueError(f"未找到项目配置: {project_id}")
+
+    @classmethod
+    def list_projects(cls) -> list:
+        """
+        列出所有已注册项目
+
+        Returns:
+            项目 ID 列表
+        """
+        return list(cls._project_registry.keys())
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        """清除实例缓存（用于测试）"""
+        cls._instances.clear()
+
+    # ==================== 便捷方法 ====================
+
+    def get_structure_mode(self) -> str:
+        """获取目录结构模式"""
+        return self.get('paths.structure_mode', 'by_operation')
+
+    def get_release_mode(self) -> str:
+        """获取发版模式"""
+        return self.get('release.mode', 'incremental')
+
+    def get_naming_mode(self) -> str:
+        """获取命名模式"""
+        return self.get('naming.mode', 'date_prefix')
 
 
 # 全局配置实例

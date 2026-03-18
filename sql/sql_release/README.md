@@ -1,6 +1,7 @@
 # SQL 发版工具
 
 > 重构版本 - 基于 Python 的 SQL 文件管理和发版工具
+> Version: 3.0 - 支持多项目
 
 ## 快速开始
 
@@ -12,6 +13,9 @@
 # 查看帮助
 run.bat --help
 
+# 查看项目信息
+run.bat info
+
 # 查看状态
 run.bat status
 
@@ -20,6 +24,18 @@ run.bat merge --preview --start 2026_03_01
 
 # 执行合并
 run.bat merge --start 2026_03_01 --end 2026_03_18 --notes "发版说明"
+```
+
+### 多项目使用
+
+支持在多个项目间切换：
+
+```bash
+# 使用指定配置文件
+python sql_release_cli.py -c /path/to/settings.yaml info
+
+# 使用项目 ID（需先注册）
+python sql_release_cli.py -p ruoyi-vue-pro info
 ```
 
 ### 命令行用户
@@ -52,12 +68,21 @@ pip install -r requirements.txt
 
 | 命令 | 说明 | 示例 |
 |------|------|------|
+| `info` | 显示当前项目信息 | `run.bat info` |
 | `status` | 显示当前状态 | `run.bat status` |
 | `merge --preview` | 预览要发布的文件 | `run.bat merge --preview --start 2026_03_01` |
 | `merge` | 执行合并发版 | `run.bat merge --start 2026_03_01 --end 2026_03_18` |
 | `history` | 查看发版历史 | `run.bat history` |
 | `report` | 生成时间段报告 | `run.bat report --start 2026_01 --end 2026_03` |
 | `init-history` | 初始化历史记录 | `run.bat init-history` |
+| `projects` | 列出已注册项目 | `run.bat projects` |
+
+## 全局选项
+
+| 选项 | 说明 |
+|------|------|
+| `-c, --config` | 指定配置文件路径 |
+| `-p, --project` | 指定项目 ID |
 
 ## merge 命令选项
 
@@ -273,20 +298,28 @@ sql/master/
 编辑 `config/settings.yaml` 文件:
 
 ```yaml
+# 项目元信息
+project:
+  id: "gaxx-pro"              # 项目唯一标识
+  name: "法制系统"             # 项目名称
+  description: "法制办信件管理系统"
+
 # 路径配置
 paths:
   master_root: "../master"    # SQL 源文件目录
   output_root: "./output"     # 输出目录
 
+  # 目录结构模式: by_operation | by_database | flat
+  structure_mode: "by_operation"
+
+# 发版模式: incremental | full
+release:
+  mode: "incremental"         # 增量发版
+
 # 过滤配置
 filters:
   exclude_dirs:
     - "mysql"                 # 排除 MySQL 目录
-
-# 历史记录配置
-history:
-  yaml_file: "releases.yaml"
-  markdown_file: "release_history.md"
 ```
 
 ## 发版流程
@@ -331,7 +364,56 @@ history:
 - 自动文件分类和识别
 - 时间段整合报告生成
 - 模块化架构，易于扩展
+- **v3.0**: 支持多项目配置
+
+## 多项目支持
+
+### 新项目接入步骤
+
+1. 复制 `sql_release/` 目录到新项目
+
+2. 修改 `config/settings.yaml`：
+
+```yaml
+project:
+  id: "new-project"           # 项目唯一标识
+  name: "新项目名称"
+  description: "项目描述"
+
+paths:
+  master_root: "../master"
+  structure_mode: "by_database"  # 根据项目结构调整
+
+  # 按数据库类型分类时
+  categories:
+    postgresql: "postgresql"
+    mysql: "mysql"
+    oracle: "oracle"
+```
+
+3. 测试配置：
+
+```bash
+python sql_release_cli.py info
+python sql_release_cli.py merge --preview
+```
+
+### 目录结构模式
+
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| `by_operation` | 按操作类型分类 | gaxx-pro 等 |
+| `by_database` | 按数据库类型分类 | ruoyi-vue-pro 等 |
+| `flat` | 扁平结构 | 简单项目 |
+
+### 发版模式
+
+| 模式 | 说明 |
+|------|------|
+| `incremental` | 增量发版，按日期范围筛选 |
+| `full` | 全量发版，不按日期筛选 |
 
 ## 版本历史
 
+- v3.0.0 (2026-03-18): 多项目支持，支持多种目录结构
 - v2.0.0 (2026-03-18): 重构版本，全新架构
