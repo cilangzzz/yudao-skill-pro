@@ -1,0 +1,105 @@
+version: '2.0'
+updated: '2026-03-18T21:55:52.283875'
+releases:
+- id: 284e24ec
+  release_date: '2026-03-18 21:55:52'
+  date_range: 2026_03_01 ~ 2026_03_20
+  start_date: '2026_03_01'
+  end_date: '2026_03_20'
+  statistics:
+    file_count: 5
+    by_category:
+      index: 3
+      table_update: 2
+    by_table:
+      fz_warning_sign_rel: 1
+      fz_letter_handle: 1
+  files:
+  - name: 2026_2_07_fz_letter_reply_idx.sql
+    table: null
+    category: index
+  - name: 2025_1_05_fz_petition_visit_idx.sql
+    table: null
+    category: index
+  - name: 2025_12_30_2025_12_30_idx.sql
+    table: null
+    category: index
+  - name: 2026_03_06_fz_warning_sign_rel_update.sql
+    table: fz_warning_sign_rel
+    category: table_update
+  - name: 2026_03_09_fz_letter_handle_update.sql
+    table: fz_letter_handle
+    category: table_update
+  notes: DirCategoryTest
+- id: a2055f8b
+  release_date: '2026-03-18 21:43:39'
+  date_range: 2026_03_19 ~ 2026_03_19
+  start_date: '2026_03_19'
+  end_date: '2026_03_19'
+  statistics:
+    file_count: 3
+    by_category:
+      unknown: 3
+    by_table: {}
+  files:
+  - name: 2026_2_07_fz_letter_reply_idx.sql
+    table: null
+    category: unknown
+  - name: 2025_1_05_fz_petition_visit_idx.sql
+    table: null
+    category: unknown
+  - name: 2025_12_30_2025_12_30_idx.sql
+    table: null
+    category: unknown
+  notes: AppendTest
+- id: f2187e54
+  release_date: '2026-03-18 21:42:55'
+  date_range: 2026_03_19 ~ 2026_03_19
+  start_date: '2026_03_19'
+  end_date: '2026_03_19'
+  statistics:
+    file_count: 3
+    by_category:
+      unknown: 3
+    by_table: {}
+  files:
+  - name: 2026_2_07_fz_letter_reply_idx.sql
+    table: null
+    category: unknown
+  - name: 2025_1_05_fz_petition_visit_idx.sql
+    table: null
+    category: unknown
+  - name: 2025_12_30_2025_12_30_idx.sql
+    table: null
+    category: unknown
+  notes: TestNewFeatures
+- id: 79bcc7d8
+  release_date: '2026-03-18 21:19:29'
+  date_range: 2026_03_01 ~ 2026_03_18
+  start_date: '2026_03_01'
+  end_date: '2026_03_18'
+  statistics:
+    file_count: 5
+    by_category:
+      unknown: 3
+      table_update: 2
+    by_table:
+      fz_warning_sign_rel: 1
+      fz_letter_handle: 1
+  files:
+  - name: 2026_2_07_fz_letter_reply_idx.sql
+    table: null
+    category: unknown
+  - name: 2025_1_05_fz_petition_visit_idx.sql
+    table: null
+    category: unknown
+  - name: 2025_12_30_2025_12_30_idx.sql
+    table: null
+    category: unknown
+  - name: 2026_03_06_fz_warning_sign_rel_update.sql
+    table: null
+    category: table_update
+  - name: 2026_03_09_fz_letter_handle_update.sql
+    table: null
+    category: table_update
+  notes: Test release
