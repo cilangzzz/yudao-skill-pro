@@ -1,0 +1,161 @@
+# Skill 模板文件
+# 用于提取模块知识的标准格式
+
+skill:
+  id: "skill-{module}"
+  name: "{模块名称} Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-{module}"
+  created_at: ""
+  updated_at: ""
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: ""
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles: []
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates: []
+      # - name: "聚合根名称"
+      #   type: "聚合根"
+      #   entities: ["关联实体"]
+
+    value_objects: []
+    services: []
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间API接口"
+      components: []
+
+    - name: "controller"
+      purpose: "HTTP接口"
+      components: []
+
+    - name: "service"
+      purpose: "业务逻辑"
+      components: []
+
+    - name: "dal"
+      purpose: "数据访问"
+      components: []
+
+  # 设计模式应用
+  design_patterns: []
+    # - pattern: "Factory"
+    #   location: "具体文件路径"
+    #   purpose: "模式用途说明"
+
+  # 模块间通信
+  communication:
+    apis: []        # 对外暴露的API
+    consumers: []   # 消费的其他模块API
+    mq: []          # 消息队列使用
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO | TenantBaseDO"
+    description: ""
+
+  # 核心数据表
+  tables: []
+    # - name: "表名"
+    #   comment: "表说明"
+    #   entity: "DO类名"
+    #   extends: "BaseDO/TenantBaseDO"
+    #   columns:
+    #     - { name: "字段名", type: "类型", comment: "说明" }
+    #   indexes:
+    #     - { name: "索引名", columns: ["字段"] }
+
+  # 表关系（ER关系）
+  relationships: []
+    # - from: "表A"
+    #   to: "表B"
+    #   type: "1:N | N:1 | N:N"
+    #   foreign_key: "外键字段"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations: []  # 常用注解
+    example: ""
+
+  # Service层规范
+  service:
+    interface_pattern: ""
+    impl_pattern: ""
+    example: ""
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: ""
+    example: ""
+
+  # 异常处理
+  error_handling:
+    code_prefix: ""
+    examples: []
+
+  # 统一响应
+  response:
+    success_pattern: ""
+    error_pattern: ""
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增功能步骤
+  new_feature:
+    title: "新增业务功能"
+    steps: []
+
+  # 新增渠道/类型示例
+  new_channel:
+    title: "新增渠道/类型"
+    steps: []
+
+  # 最佳实践
+  best_practices: []
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal: []
+    # - module: "模块名"
+    #   api: "API接口名"
+    #   purpose: "依赖用途"
+
+  # 外部依赖（第三方库）
+  external: []
+    # - name: "库名"
+    #   version: "版本"
+    #   purpose: "用途"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: ""
+    purpose: ""
