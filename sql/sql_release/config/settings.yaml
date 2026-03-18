@@ -1,0 +1,87 @@
+# SQL 发版工具配置文件
+# Version: 2.0
+
+# 路径配置
+paths:
+  # SQL 源文件根目录（相对于 sql_release 目录）
+  master_root: "../master"
+
+  # 输出目录
+  output_root: "./output"
+
+  # 历史记录目录
+  history_root: "./history"
+
+  # SQL 分类目录映射
+  categories:
+    table_create: "table/create"
+    table_update: "table/update"
+    index: "index"
+    sequence: "seq"
+    data_init: "data"
+    view: "view"
+
+# 文件命名规则
+naming:
+  # 日期格式
+  date_format: "%Y_%m_%d"
+
+  # 文件名正则模式
+  # 捕获组: (日期)_(表名)_(操作类型).sql
+  pattern: "^(\\d{4}_\\d{2}_\\d{2})_(.+?)(_[a-z]+)?(_pg)?\\.sql$"
+
+  # 操作类型后缀映射
+  suffixes:
+    _create: "table_create"
+    _update: "table_update"
+    _idx: "index"
+    _seq: "sequence"
+    _pg: "postgresql"  # 数据库版本后缀
+
+# 过滤配置
+filters:
+  # 排除的文件名模式
+  exclude_files:
+    - "_ignore_"
+    - "_test.sql"
+
+  # 排除的目录
+  exclude_dirs:
+    - "mysql"
+
+  # 包含的文件扩展名
+  include_extensions:
+    - ".sql"
+
+# 历史记录配置
+history:
+  # YAML 格式历史文件（主存储）
+  yaml_file: "releases.yaml"
+
+  # Markdown 格式历史文件（视图）
+  markdown_file: "release_history.md"
+
+# 日志配置
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  # 日志文件路径（为空则不输出到文件）
+  file: ""
+  max_size: 10MB
+  backup_count: 5
+
+# 发版配置
+release:
+  # 自动更新开始日期
+  auto_update_start_date: true
+
+  # 默认发版说明
+  default_notes: ""
+
+# 输出配置
+output:
+  # 是否按日期创建子文件夹 (output/20260318/)
+  subfolder: true
+
+  # 文件名是否添加时间戳 (table_update_merged_143052.sql)
+  add_timestamp: true

@@ -1,0 +1,5 @@
+# SQL 发版工具依赖
+click>=8.0.0
+pyyaml>=6.0
+jinja2>=3.0
+rich>=13.0
