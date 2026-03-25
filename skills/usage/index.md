@@ -43,6 +43,7 @@
 | 了解项目结构 | 刚接触项目，需要快速了解整体架构 | `skills/index.yaml` | 查看 12 个核心模块的技术规范索引 |
 | 系统模块入门 | 需要了解用户、角色、权限等基础功能 | [skill-system.yaml](../modules/system/skill-system.yaml) | 系统管理模块完整开发指南 |
 | 基础设施入门 | 需要了解文件、配置、任务等基础服务 | [skill-infra.yaml](../modules/infra/skill-infra.yaml) | 基础设施模块完整开发指南 |
+| **实体类实现** | 需要从 SQL 到实体类创建完整 CRUD 功能 | [entity-implementation.md](entity-implementation.md) | 从建表到完整接口的端到端指南 |
 
 **推荐使用流程**：
 
@@ -310,10 +311,22 @@ system (系统管理) <-- 几乎所有模块都依赖
 | 公众号模块 | [skill-mp.yaml](../modules/mp/skill-mp.yaml) | 660+ | 已完成 |
 | 报表模块 | [skill-report.yaml](../modules/report/skill-report.yaml) | 320+ | 已完成 |
 
+### 使用指南文档索引
+
+| 文档 | 适用场景 | 一句话描述 |
+|-----|---------|-----------|
+| [quick-start.md](quick-start.md) | 快速上手 | Skill 文档快速使用指南和常用提示词模板 |
+| [entity-implementation.md](entity-implementation.md) | 实体类开发 | 从 SQL 建表到完整 CRUD 接口的端到端指南 |
+| [extend-module.md](extend-module.md) | 扩展模块 | 在现有模块基础上添加新功能 |
+| [new-module.md](new-module.md) | 新增模块 | 创建全新的业务模块 |
+| [refactor-module.md](refactor-module.md) | 改造模块 | 修改现有功能或重构代码 |
+| [pattern-usage.md](pattern-usage.md) | 设计模式 | 常用设计模式的使用场景和实现方法 |
+
 ### 更新记录
 
 | 日期 | 版本 | 说明 |
 |-----|------|------|
+| 2026-03-25 | v1.1 | 新增实体类实现完整流程指南 |
 | 2026-03-18 | v1.0 | 初始版本，创建使用指南索引 |
 
 ---
