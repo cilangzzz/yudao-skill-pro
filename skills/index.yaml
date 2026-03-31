@@ -89,13 +89,31 @@ skills:
     priority: 3
     lines: 320+
 
-# 开发规范
-conventions:
-  sql:
-    name: "SQL 文件规范"
-    path: "skills/skill-sql-convention.yaml"
-    description: "SQL 文件目录结构、命名规范、编写规范"
+# 设计规范
+design:
+  db:
+    name: "数据库设计"
+    path: "skills/design/db-designer.yaml"
     status: "completed"
+    description: "数据库表结构设计规范、SQL文件规范、编写规范"
+    lines: 450
+  entity:
+    name: "实体类设计"
+    path: "skills/design/entity-designer.yaml"
+    status: "completed"
+    description: "yudao 实体类(DO)设计规范，包括继承体系、注解规范、命名转换"
+    lines: 520
+  api:
+    name: "API 设计"
+    path: "skills/design/api-designer.yaml"
+    status: "completed"
+    description: "REST API 设计规范、注解、请求响应格式、权限标识"
+  crud:
+    name: "CRUD 代码生成"
+    path: "skills/design/crud-designer.yaml"
+    status: "completed"
+    description: "根据数据库表结构自动生成完整CRUD功能代码"
+    lines: 517
 
 # 提取进度
 progress:
@@ -107,5 +125,5 @@ progress:
 # 最后更新时间
 metadata:
   created_at: "2026-03-18"
-  updated_at: "2026-03-25"
+  updated_at: "2026-03-31"
   completed_at: "2026-03-18"

@@ -1,0 +1,835 @@
+# 实体类设计 Skill
+# 根据数据库表结构生成符合 yudao-vue-pro 规范的实体类(DO)
+
+skill:
+  id: "design-entity"
+  name: "实体类设计 Skill"
+  version: "1.0.0"
+  category: "design"
+  description: "根据数据库表结构自动生成符合 yudao 项目规范的实体类(DO)，支持多租户、审计字段、JSON字段等特性"
+  created_at: "2026-03-31"
+  updated_at: "2026-03-31"
+
+# ============================================
+# 触发条件
+# ============================================
+trigger:
+  # 命令触发
+  commands:
+    - "/entity-design"
+    - "/design-entity"
+    - "/entity-generator"
+
+  # 自然语言触发
+  keywords:
+    - "生成实体类"
+    - "创建DO"
+    - "生成DO实体"
+    - "实体类设计"
+    - "数据对象"
+
+  # 事件触发
+  events:
+    - name: "db_design_completed"
+      condition: "数据库表结构设计完成"
+    - name: "sql_created"
+      condition: "建表 SQL 文件创建完成"
+
+# ============================================
+# 输入参数
+# ============================================
+input:
+  parameters:
+    - name: "module_code"
+      type: "string"
+      required: true
+      description: "模块编码（如 mes、erp、crm、system）"
+      examples: ["mes", "erp", "crm", "system", "pay"]
+
+    - name: "table_name"
+      type: "string"
+      required: true
+      description: "表名（含前缀，如 mes_work_order）"
+      examples: ["mes_work_order", "erp_product", "system_user"]
+
+    - name: "table_comment"
+      type: "string"
+      required: true
+      description: "表注释/描述"
+
+    - name: "business_fields"
+      type: "array"
+      required: true
+      description: "业务字段列表（不含通用字段）"
+      schema:
+        - name: "字段名"
+          type: "数据类型"
+          required: "是否必填"
+          comment: "字段注释"
+          enum_ref: "枚举引用（可选）"
+          json_field: "是否JSON字段（可选）"
+          java_type: "JSON字段的Java类型（可选，如 Set<Long>）"
+
+    - name: "tenant_type"
+      type: "string"
+      required: false
+      default: "multi"
+      description: "租户类型：single-单租户，multi-多租户，ignore-忽略租户"
+      examples: ["single", "multi", "ignore"]
+
+    - name: "entity_name"
+      type: "string"
+      required: false
+      default: "auto"
+      description: "实体类名称（默认根据表名自动生成）"
+
+    - name: "feature"
+      type: "string"
+      required: false
+      default: "auto"
+      description: "功能子目录名（默认根据实体名推断）"
+
+# ============================================
+# 设计理念
+# ============================================
+philosophy:
+  business_position: "实体类(DO)是数据库表与业务逻辑之间的桥梁，将关系型数据映射为对象"
+
+  design_principles:
+    - "继承体系：多租户继承 TenantBaseDO，单租户继承 BaseDO"
+    - "审计字段：由基类提供，业务实体不重复定义"
+    - "字段注释：使用 JavaDoc 格式，不使用 Swagger 注解"
+    - "JSON 字段：使用 JacksonTypeHandler 处理复杂类型"
+    - "命名规范：实体类以 DO 结尾，与表名保持映射关系"
+    - "枚举引用：在注释中说明枚举类，字段使用 Integer 类型"
+
+  inheritance_model:
+    base_hierarchy:
+      BaseDO:
+        package: "cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO"
+        fields: ["createTime", "updateTime", "creator", "updater", "deleted"]
+        use_case: "单租户业务表"
+        note: "deleted 字段为 Boolean 类型"
+      TenantBaseDO:
+        package: "cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO"
+        parent: "BaseDO"
+        extra_fields: ["tenantId"]
+        use_case: "多租户业务表（绝大多数场景）"
+      special_annotation:
+        TenantIgnore:
+          package: "cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore"
+          use_case: "租户表、套餐表等需要忽略多租户过滤的实体"
+
+# ============================================
+# 命名转换规则
+# ============================================
+naming:
+  # 表名 -> 实体类名转换
+  table_to_class:
+    rules:
+      - "去除表前缀（如 mes_、erp_、system_、crm_、bpm_、pay_）"
+      - "snake_case 转 PascalCase"
+      - "添加 DO 后缀"
+      - "特殊表名特殊处理"
+    examples:
+      - table: "mes_work_order"
+        class: "WorkOrderDO"
+      - table: "erp_product"
+        class: "ProductDO"
+      - table: "system_users"
+        class: "AdminUserDO"
+      - table: "system_role"
+        class: "RoleDO"
+      - table: "crm_customer"
+        class: "CustomerDO"
+
+  # 字段名 -> 属性名转换
+  column_to_field:
+    rules:
+      - "snake_case 转 camelCase"
+      - "保持与数据库字段映射"
+    examples:
+      - column: "work_order_no"
+        field: "workOrderNo"
+      - column: "create_time"
+        field: "createTime"
+      - column: "tenant_id"
+        field: "tenantId"
+
+  # 特殊表名映射
+  special_mappings:
+    system_users: "AdminUserDO"
+    system_menu: "MenuDO"
+    system_tenant: "TenantDO"
+    system_dict_data: "DictDataDO"
+    system_dict_type: "DictTypeDO"
+
+  # 表前缀映射（模块编码）
+  prefix_mapping:
+    sys: "system"
+    mes: "mes"
+    erp: "erp"
+    crm: "crm"
+    bpm: "bpm"
+    pay: "pay"
+    member: "member"
+    infra: "infra"
+
+# ============================================
+# 类型映射规则
+# ============================================
+type_mapping:
+  mysql_to_java:
+    - mysql: "BIGINT"
+      java: "Long"
+      note: "主键、外键、数量类字段"
+
+    - mysql: "INT / INTEGER"
+      java: "Integer"
+      note: "状态、排序、计数类字段"
+
+    - mysql: "TINYINT"
+      java: "Integer"
+      note: "枚举字段、开关字段"
+
+    - mysql: "SMALLINT"
+      java: "Integer"
+      note: "小范围数值"
+
+    - mysql: "DECIMAL(p,s)"
+      java: "BigDecimal"
+      note: "金额、精确数值"
+      import: "java.math.BigDecimal"
+
+    - mysql: "FLOAT / DOUBLE"
+      java: "Double"
+      note: "浮点数"
+
+    - mysql: "VARCHAR / CHAR"
+      java: "String"
+      note: "字符串"
+
+    - mysql: "TEXT / LONGTEXT"
+      java: "String"
+      note: "大文本"
+
+    - mysql: "DATETIME / TIMESTAMP"
+      java: "LocalDateTime"
+      note: "日期时间"
+      import: "java.time.LocalDateTime"
+
+    - mysql: "DATE"
+      java: "LocalDate"
+      note: "日期"
+      import: "java.time.LocalDate"
+
+    - mysql: "TIME"
+      java: "LocalTime"
+      note: "时间"
+      import: "java.time.LocalTime"
+
+    - mysql: "BIT(1) / BOOLEAN"
+      java: "Boolean"
+      note: "布尔值"
+
+    - mysql: "BLOB / LONGBLOB"
+      java: "byte[]"
+      note: "二进制数据"
+
+    - mysql: "JSON"
+      java: "复杂类型"
+      handler: "JacksonTypeHandler"
+      note: "JSON 数据，需特殊处理"
+
+  # JSON 字段类型映射
+  json_type_mapping:
+    - pattern: "ID数组"
+      java_type: "Set<Long>"
+      import: "java.util.Set"
+    - pattern: "字符串数组"
+      java_type: "List<String>"
+      import: "java.util.List"
+    - pattern: "键值对对象"
+      java_type: "Map<String, Object>"
+      import: "java.util.Map"
+
+# ============================================
+# 注解规范
+# ============================================
+annotations:
+  # 类级别注解
+  class_annotations:
+    required:
+      - annotation: "@TableName"
+        format: "@TableName(value = \"{table_name}\", autoResultMap = true)"
+        import: "com.baomidou.mybatisplus.annotation.TableName"
+        note: "autoResultMap = true 用于支持 TypeHandler"
+
+      - annotation: "@KeySequence"
+        format: "@KeySequence(\"{table_name}_seq\")"
+        import: "com.baomidou.mybatisplus.annotation.KeySequence"
+        note: "Oracle/PostgreSQL 主键自增，MySQL 可省略但建议保留"
+
+      - annotation: "@Data"
+        import: "lombok.Data"
+        note: "Lombok getter/setter"
+
+      - annotation: "@EqualsAndHashCode"
+        format: "@EqualsAndHashCode(callSuper = true)"
+        import: "lombok.EqualsAndHashCode"
+        note: "必须 callSuper = true 以包含基类字段"
+
+    optional:
+      - annotation: "@Builder"
+        import: "lombok.Builder"
+        note: "构建器模式"
+
+      - annotation: "@NoArgsConstructor"
+        import: "lombok.NoArgsConstructor"
+        note: "无参构造（与 Builder 配合）"
+
+      - annotation: "@AllArgsConstructor"
+        import: "lombok.AllArgsConstructor"
+        note: "全参构造（与 Builder 配合）"
+
+      - annotation: "@TenantIgnore"
+        import: "cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore"
+        note: "忽略多租户过滤（仅用于租户表等特殊场景）"
+
+  # 字段级别注解
+  field_annotations:
+    primary_key:
+      - annotation: "@TableId"
+        import: "com.baomidou.mybatisplus.annotation.TableId"
+        note: "主键字段，默认使用雪花算法"
+
+    json_field:
+      - annotation: "@TableField"
+        format: "@TableField(typeHandler = JacksonTypeHandler.class)"
+        import: "com.baomidou.mybatisplus.annotation.TableField"
+        handler_import: "com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"
+        note: "JSON 类型字段，需要 @TableName 包含 autoResultMap = true"
+
+# ============================================
+# 代码模板
+# ============================================
+templates:
+  # 多租户实体模板（最常用）
+  tenant_entity:
+    description: "多租户业务表实体类"
+    base_class: "TenantBaseDO"
+    code: |
+      package cn.iocoder.yudao.module.{module}.dal.dataobject.{feature};
+
+      import cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO;
+      import com.baomidou.mybatisplus.annotation.KeySequence;
+      import com.baomidou.mybatisplus.annotation.TableId;
+      import com.baomidou.mybatisplus.annotation.TableName;
+      import lombok.*;
+      {additional_imports}
+
+      /**
+       * {table_comment} DO
+       *
+       * @author {author}
+       */
+      @TableName(value = "{table_name}", autoResultMap = true)
+      @KeySequence("{table_name}_seq")
+      @Data
+      @EqualsAndHashCode(callSuper = true)
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class {EntityName}DO extends TenantBaseDO {
+
+          /**
+           * 主键ID
+           */
+          @TableId
+          private Long id;
+
+          {business_fields}
+
+      }
+
+  # 单租户实体模板
+  single_entity:
+    description: "单租户业务表实体类"
+    base_class: "BaseDO"
+    code: |
+      package cn.iocoder.yudao.module.{module}.dal.dataobject.{feature};
+
+      import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
+      import com.baomidou.mybatisplus.annotation.KeySequence;
+      import com.baomidou.mybatisplus.annotation.TableId;
+      import com.baomidou.mybatisplus.annotation.TableName;
+      import lombok.*;
+      {additional_imports}
+
+      /**
+       * {table_comment} DO
+       *
+       * @author {author}
+       */
+      @TableName(value = "{table_name}", autoResultMap = true)
+      @KeySequence("{table_name}_seq")
+      @Data
+      @EqualsAndHashCode(callSuper = true)
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class {EntityName}DO extends BaseDO {
+
+          /**
+           * 主键ID
+           */
+          @TableId
+          private Long id;
+
+          {business_fields}
+
+      }
+
+  # 忽略多租户实体模板
+  tenant_ignore_entity:
+    description: "需要忽略多租户过滤的实体类（如租户表、套餐表）"
+    base_class: "BaseDO"
+    extra_annotation: "@TenantIgnore"
+    code: |
+      package cn.iocoder.yudao.module.{module}.dal.dataobject.{feature};
+
+      import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
+      import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+      import com.baomidou.mybatisplus.annotation.KeySequence;
+      import com.baomidou.mybatisplus.annotation.TableId;
+      import com.baomidou.mybatisplus.annotation.TableName;
+      import lombok.*;
+      {additional_imports}
+
+      /**
+       * {table_comment} DO
+       *
+       * @author {author}
+       */
+      @TenantIgnore
+      @TableName(value = "{table_name}", autoResultMap = true)
+      @KeySequence("{table_name}_seq")
+      @Data
+      @EqualsAndHashCode(callSuper = true)
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class {EntityName}DO extends BaseDO {
+
+          /**
+           * 主键ID
+           */
+          @TableId
+          private Long id;
+
+          {business_fields}
+
+      }
+
+  # 业务字段模板
+  business_field:
+    normal: |
+      /**
+       * {字段注释}
+       {enum_reference}
+       */
+      private {JavaType} {fieldName};
+
+    json_field: |
+      /**
+       * {字段注释}
+       */
+      @TableField(typeHandler = JacksonTypeHandler.class)
+      private {JavaType} {fieldName};
+
+# ============================================
+# 输出规范
+# ============================================
+output:
+  # 文件输出位置
+  file_location:
+    path_pattern: "yudao-module-{module}/src/main/java/cn/iocoder/yudao/module/{module}/dal/dataobject/{feature}/{EntityName}DO.java"
+    example: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/dal/dataobject/workorder/WorkOrderDO.java"
+
+  # 导入语句规范
+  imports:
+    base_imports:
+      - "com.baomidou.mybatisplus.annotation.TableName"
+      - "com.baomidou.mybatisplus.annotation.TableId"
+      - "com.baomidou.mybatisplus.annotation.KeySequence"
+      - "lombok.Data"
+      - "lombok.EqualsAndHashCode"
+
+    tenant_imports:
+      - "cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO"
+
+    single_imports:
+      - "cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO"
+
+    json_handler_import:
+      - "com.baomidou.mybatisplus.annotation.TableField"
+      - "com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler"
+
+    builder_imports:
+      - "lombok.Builder"
+      - "lombok.NoArgsConstructor"
+      - "lombok.AllArgsConstructor"
+
+  # 产物清单
+  artifacts:
+    - name: "实体类文件"
+      type: "code"
+      path: "dal/dataobject/{feature}/{EntityName}DO.java"
+
+# ============================================
+# 执行流程
+# ============================================
+workflow:
+  phases:
+    - name: "表结构解析"
+      description: "解析数据库表结构，提取元数据"
+      steps:
+        - "识别表名、表前缀、表注释"
+        - "提取业务字段列表（排除通用字段：id, tenant_id, creator, create_time, updater, update_time, deleted）"
+        - "识别主键、索引信息"
+        - "识别 JSON 字段、枚举字段"
+
+    - name: "命名转换"
+      description: "将数据库命名转换为 Java 命名"
+      steps:
+        - "表名 -> 实体类名（去除前缀 + PascalCase + DO 后缀）"
+        - "字段名 -> 属性名（camelCase）"
+        - "处理特殊表名映射"
+
+    - name: "类型映射"
+      description: "将 MySQL 类型映射为 Java 类型"
+      steps:
+        - "标准类型映射（BIGINT -> Long 等）"
+        - "JSON 字段识别和处理"
+        - "枚举字段处理（Integer + 注释引用）"
+
+    - name: "继承选择"
+      description: "确定实体类继承的基类"
+      steps:
+        - "判断租户类型（multi/single/ignore）"
+        - "选择对应基类（TenantBaseDO/BaseDO）"
+        - "判断是否需要 @TenantIgnore"
+
+    - name: "代码生成"
+      description: "生成实体类代码"
+      steps:
+        - "生成类注释和注解"
+        - "生成主键字段"
+        - "生成业务字段（含 JavaDoc 注释）"
+        - "生成导入语句（按规范分组排序）"
+        - "格式化代码"
+
+    - name: "质量检查"
+      description: "验证生成的实体类"
+      steps:
+        - "检查注解完整性"
+        - "检查字段注释格式"
+        - "检查继承正确性"
+        - "检查命名规范"
+
+# ============================================
+# 质量检查清单
+# ============================================
+quality_check:
+  before_generate:
+    - "确认表名符合命名规范"
+    - "确认业务字段列表完整"
+    - "确认租户类型选择正确"
+    - "确认字段类型映射正确"
+
+  after_generate:
+    - "实体类名称以 DO 结尾"
+    - "@TableName 注解包含 autoResultMap = true"
+    - "@EqualsAndHashCode 包含 callSuper = true"
+    - "继承正确的基类"
+    - "主键字段使用 @TableId 注解"
+    - "所有字段使用 JavaDoc 注释格式"
+    - "JSON 字段使用 JacksonTypeHandler"
+    - "枚举字段注释包含枚举引用"
+    - "不包含 Swagger @Schema 注解"
+    - "不重复定义审计字段（已在基类中）"
+
+# ============================================
+# 示例
+# ============================================
+examples:
+  # 多租户实体示例
+  work_order:
+    input:
+      module_code: "mes"
+      table_name: "mes_work_order"
+      table_comment: "生产工单"
+      tenant_type: "multi"
+      business_fields:
+        - name: "order_no"
+          type: "VARCHAR(64)"
+          comment: "工单编号"
+          unique: true
+        - name: "product_id"
+          type: "BIGINT"
+          comment: "产品ID"
+        - name: "status"
+          type: "TINYINT"
+          comment: "状态"
+          enum_ref: "WorkOrderStatusEnum"
+        - name: "plan_qty"
+          type: "INT"
+          comment: "计划数量"
+
+    output_class_name: "WorkOrderDO"
+    output_file: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/dal/dataobject/workorder/WorkOrderDO.java"
+
+    output_code: |
+      package cn.iocoder.yudao.module.mes.dal.dataobject.workorder;
+
+      import cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO;
+      import cn.iocoder.yudao.module.mes.enums.WorkOrderStatusEnum;
+      import com.baomidou.mybatisplus.annotation.KeySequence;
+      import com.baomidou.mybatisplus.annotation.TableId;
+      import com.baomidou.mybatisplus.annotation.TableName;
+      import lombok.*;
+
+      /**
+       * 生产工单 DO
+       *
+       * @author yudao
+       */
+      @TableName(value = "mes_work_order", autoResultMap = true)
+      @KeySequence("mes_work_order_seq")
+      @Data
+      @EqualsAndHashCode(callSuper = true)
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class WorkOrderDO extends TenantBaseDO {
+
+          /**
+           * 主键ID
+           */
+          @TableId
+          private Long id;
+
+          /**
+           * 工单编号
+           */
+          private String orderNo;
+
+          /**
+           * 产品ID
+           */
+          private Long productId;
+
+          /**
+           * 状态
+           *
+           * 枚举 {@link WorkOrderStatusEnum}
+           */
+          private Integer status;
+
+          /**
+           * 计划数量
+           */
+          private Integer planQty;
+
+      }
+
+  # JSON 字段实体示例
+  role_entity:
+    input:
+      module_code: "system"
+      table_name: "system_role"
+      table_comment: "角色"
+      tenant_type: "multi"
+      business_fields:
+        - name: "name"
+          type: "VARCHAR(100)"
+          comment: "角色名称"
+        - name: "code"
+          type: "VARCHAR(50)"
+          comment: "角色标识"
+        - name: "data_scope_dept_ids"
+          type: "JSON"
+          comment: "数据范围部门ID数组"
+          json_field: true
+          java_type: "Set<Long>"
+
+    output_code: |
+      package cn.iocoder.yudao.module.system.dal.dataobject.permission;
+
+      import cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO;
+      import com.baomidou.mybatisplus.annotation.KeySequence;
+      import com.baomidou.mybatisplus.annotation.TableField;
+      import com.baomidou.mybatisplus.annotation.TableId;
+      import com.baomidou.mybatisplus.annotation.TableName;
+      import com.baomidou.mybatisplus.extension.handlers.JacksonTypeHandler;
+      import lombok.*;
+
+      import java.util.Set;
+
+      /**
+       * 角色 DO
+       *
+       * @author yudao
+       */
+      @TableName(value = "system_role", autoResultMap = true)
+      @KeySequence("system_role_seq")
+      @Data
+      @EqualsAndHashCode(callSuper = true)
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class RoleDO extends TenantBaseDO {
+
+          /**
+           * 主键ID
+           */
+          @TableId
+          private Long id;
+
+          /**
+           * 角色名称
+           */
+          private String name;
+
+          /**
+           * 角色标识
+           */
+          private String code;
+
+          /**
+           * 数据范围(指定部门数组)
+           */
+          @TableField(typeHandler = JacksonTypeHandler.class)
+          private Set<Long> dataScopeDeptIds;
+
+      }
+
+  # 忽略租户实体示例
+  tenant_entity:
+    input:
+      module_code: "system"
+      table_name: "system_tenant"
+      table_comment: "租户"
+      tenant_type: "ignore"
+      business_fields:
+        - name: "name"
+          type: "VARCHAR(100)"
+          comment: "租户名称"
+        - name: "contact_name"
+          type: "VARCHAR(50)"
+          comment: "联系人"
+        - name: "status"
+          type: "TINYINT"
+          comment: "状态"
+          enum_ref: "CommonStatusEnum"
+
+    output_code: |
+      package cn.iocoder.yudao.module.system.dal.dataobject.tenant;
+
+      import cn.iocoder.yudao.framework.common.enums.CommonStatusEnum;
+      import cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO;
+      import cn.iocoder.yudao.framework.tenant.core.aop.TenantIgnore;
+      import com.baomidou.mybatisplus.annotation.KeySequence;
+      import com.baomidou.mybatisplus.annotation.TableId;
+      import com.baomidou.mybatisplus.annotation.TableName;
+      import lombok.*;
+
+      /**
+       * 租户 DO
+       *
+       * @author yudao
+       */
+      @TenantIgnore
+      @TableName(value = "system_tenant", autoResultMap = true)
+      @KeySequence("system_tenant_seq")
+      @Data
+      @EqualsAndHashCode(callSuper = true)
+      @Builder
+      @NoArgsConstructor
+      @AllArgsConstructor
+      public class TenantDO extends BaseDO {
+
+          /**
+           * 主键ID
+           */
+          @TableId
+          private Long id;
+
+          /**
+           * 租户名称
+           */
+          private String name;
+
+          /**
+           * 联系人
+           */
+          private String contactName;
+
+          /**
+           * 状态
+           *
+           * 枚举 {@link CommonStatusEnum}
+           */
+          private Integer status;
+
+      }
+
+# ============================================
+# 与其他 Skill 的关系
+# ============================================
+related_skills:
+  upstream:
+    - skill: "db-designer"
+      relationship: "依赖"
+      description: "依赖数据库表结构设计，从 SQL 解析表信息"
+      path: "skills/design/db-designer.yaml"
+
+  downstream:
+    - skill: "api-designer"
+      relationship: "输出"
+      description: "实体类作为 API 设计的输入"
+      path: "skills/design/api-designer.yaml"
+
+  collaboration:
+    - path: "skills/usage/entity-implementation.md"
+      relationship: "协同"
+      description: "entity-designer 专注实体类设计规范，entity-implementation 提供完整实现流程（含 Mapper、Service 等）"
+
+# ============================================
+# 错误处理
+# ============================================
+error_handling:
+  errors:
+    - code: "ENT001"
+      message: "表名不符合命名规范"
+      solution: "检查表名前缀和格式，确保包含模块前缀（如 mes_、erp_）"
+
+    - code: "ENT002"
+      message: "缺少必需的表注释"
+      solution: "提供 table_comment 参数"
+
+    - code: "ENT003"
+      message: "字段类型无法映射"
+      solution: "使用默认 String 类型，手动调整"
+
+    - code: "ENT004"
+      message: "JSON 字段缺少 java_type"
+      solution: "为 JSON 字段指定 java_type，如 Set<Long>"
+
+    - code: "ENT005"
+      message: "租户类型选择错误"
+      solution: "multi 使用 TenantBaseDO，single 使用 BaseDO，ignore 使用 @TenantIgnore"
+
+    - code: "ENT006"
+      message: "枚举字段缺少 enum_ref"
+      solution: "为枚举字段提供 enum_ref 参数，在注释中引用枚举类"

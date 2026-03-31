@@ -1,0 +1,518 @@
+# CRUD 代码生成 Skill
+# 整合性入口指南 - 引用已有的模板文档
+
+skill:
+  id: "crud-generator"
+  name: "CRUD 代码生成"
+  version: "1.0.0"
+  category: "design"
+  description: "根据数据库表结构自动生成符合yudao项目规范的完整CRUD功能代码"
+  created_at: "2026-03-31"
+  updated_at: "2026-03-31"
+
+# ============================================
+# 第一部分：触发条件
+# ============================================
+trigger:
+  commands:
+    - "/crud-gen"
+    - "/generate-crud"
+  keywords:
+    - "生成CRUD"
+    - "创建实体代码"
+    - "生成增删改查"
+    - "实体类实现"
+  events:
+    - name: "table_created"
+      condition: "数据库表创建完成"
+
+# ============================================
+# 第二部分：输入参数
+# ============================================
+input:
+  parameters:
+    - name: "module"
+      type: "string"
+      required: true
+      description: "模块编码（system/infra/pay/mes等）"
+      examples: ["system", "infra", "pay", "mes"]
+
+    - name: "feature"
+      type: "string"
+      required: true
+      description: "功能编码（user/order/process等）"
+      examples: ["user", "order", "process"]
+
+    - name: "entity_name"
+      type: "string"
+      required: true
+      description: "实体名称（中文）"
+      examples: ["用户", "订单", "工序"]
+
+    - name: "entity_class"
+      type: "string"
+      required: true
+      description: "实体类名（英文，首字母大写）"
+      examples: ["User", "Order", "Process"]
+
+    - name: "table_name"
+      type: "string"
+      required: true
+      description: "数据库表名"
+      examples: ["system_user", "pay_order", "mes_process"]
+
+    - name: "is_tenant"
+      type: "boolean"
+      required: false
+      default: true
+      description: "是否多租户实体（true使用TenantBaseDO，false使用BaseDO）"
+
+    - name: "fields"
+      type: "array"
+      required: true
+      description: "业务字段列表"
+      item_schema:
+        name: "string"
+        type: "string"
+        required: "boolean"
+        description: "string"
+
+    - name: "enable_export"
+      type: "boolean"
+      required: false
+      default: false
+      description: "是否启用Excel导出功能"
+
+    - name: "enable_import"
+      type: "boolean"
+      required: false
+      default: false
+      description: "是否启用Excel导入功能"
+
+    - name: "enable_batch"
+      type: "boolean"
+      required: false
+      default: true
+      description: "是否启用批量删除功能"
+
+# ============================================
+# 第三部分：执行流程（5阶段）
+# ============================================
+workflow:
+  description: "CRUD代码生成按以下5个阶段顺序执行"
+
+  phases:
+    # 阶段1：结构分析
+    - name: "结构分析"
+      description: "分析表结构，确定实体属性和生成范围"
+      duration: "5min"
+      steps:
+        - step: "解析表名和字段定义"
+          action: "读取表结构信息，提取字段列表"
+        - step: "确定DO基类"
+          action: "根据is_tenant参数选择BaseDO或TenantBaseDO"
+          rules:
+            - "is_tenant=true → TenantBaseDO（含tenantId）"
+            - "is_tenant=false → BaseDO"
+        - step: "生成文件清单"
+          action: "根据参数确定需要创建的文件列表"
+          decision_table:
+            - condition: "默认"
+              files: ["DO", "Mapper", "Service", "ServiceImpl", "Controller", "SaveReqVO", "PageReqVO", "RespVO"]
+            - condition: "enable_export=true"
+              add_files: ["ExcelVO", "export-excel接口"]
+            - condition: "enable_import=true"
+              add_files: ["ImportExcelVO", "ImportRespVO", "import接口"]
+            - condition: "enable_batch=true"
+              add_files: ["delete-list接口"]
+        - step: "分配错误码编号"
+          action: "根据模块编号分配错误码段"
+          reference: "api-designer.yaml 第六部分 module_codes"
+
+    # 阶段2：VO生成
+    - name: "VO生成"
+      description: "生成请求和响应VO类"
+      duration: "5min"
+      reference: "entity-implementation.md 第3.6节"
+      steps:
+        - step: "生成 SaveReqVO"
+          description: "新增/修改共用请求对象"
+          template_path: "entity-implementation.md 第621-657行"
+          rules:
+            - "包含id字段（修改时必填）"
+            - "包含所有可创建/更新字段"
+            - "排除：creator, createTime, updater, updateTime, deleted, tenantId"
+            - "添加校验注解（@NotBlank/@NotNull/@Size）"
+        - step: "生成 PageReqVO"
+          description: "分页查询请求对象"
+          template_path: "entity-implementation.md 第661-695行"
+          rules:
+            - "继承 PageParam"
+            - "包含常用查询条件字段"
+            - "时间字段使用 @DateTimeFormat"
+        - step: "生成 RespVO"
+          description: "响应对象"
+          template_path: "entity-implementation.md 第699-733行"
+          rules:
+            - "包含所有展示字段"
+            - "包含 createTime 等只读字段"
+        - step: "生成 ExcelVO（可选）"
+          condition: "enable_export=true 或 enable_import=true"
+          template_path: "entity-implementation.md 第737-773行"
+
+    # 阶段3：DAL生成
+    - name: "DAL生成"
+      description: "生成数据访问层代码"
+      duration: "3min"
+      reference: "entity-implementation.md 第3.2-3.3节"
+      steps:
+        - step: "生成 DO实体类"
+          template_path: "entity-implementation.md 第128-180行"
+          rules:
+            - "@TableName 指定表名"
+            - "@TableId 标注主键"
+            - "继承正确基类"
+            - "枚举字段添加引用注释"
+        - step: "生成 Mapper接口"
+          template_path: "entity-implementation.md 第234-281行"
+          rules:
+            - "继承 BaseMapperX<EntityDO>"
+            - "定义 selectPage 分页查询方法"
+            - "使用 LambdaQueryWrapperX 构建条件"
+            - "使用 xxxIfPresent() 方法链"
+
+    # 阶段4：Service生成
+    - name: "Service生成"
+      description: "生成业务逻辑层代码"
+      duration: "5min"
+      reference: "entity-implementation.md 第3.4节"
+      steps:
+        - step: "生成 Service接口"
+          template_path: "entity-implementation.md 第313-377行"
+          methods:
+            - "createXxx(SaveReqVO) → Long"
+            - "updateXxx(SaveReqVO) → void"
+            - "deleteXxx(Long id) → void"
+            - "getXxx(Long id) → XxxDO"
+            - "getXxxPage(PageReqVO) → PageResult<XxxDO>"
+        - step: "生成 ServiceImpl实现"
+          template_path: "entity-implementation.md 第382-485行"
+          rules:
+            - "@Service + @Validated 注解"
+            - "新增方法校验唯一性"
+            - "更新/删除方法校验存在性"
+            - "使用 exception(ERROR_CODE) 抛异常"
+            - "使用 BeanUtils.toBean() 转换对象"
+
+    # 阶段5：Controller生成
+    - name: "Controller生成"
+      description: "生成HTTP接口层代码"
+      duration: "7min"
+      reference: "api-designer.yaml 第七部分"
+      steps:
+        - step: "生成 Controller类"
+          template_path: "api-designer.yaml 第420-511行"
+          annotations:
+            - "@Tag(name = '管理后台 - {实体名称}')"
+            - "@RestController"
+            - "@RequestMapping('/{module}/{feature}')"
+            - "@Validated"
+        - step: "生成标准端点"
+          endpoints:
+            - endpoint: "/create"
+              method: "POST"
+              template_path: "api-designer.yaml 第67-72行"
+            - endpoint: "/update"
+              method: "PUT"
+              template_path: "api-designer.yaml 第74-79行"
+            - endpoint: "/delete"
+              method: "DELETE"
+              template_path: "api-designer.yaml 第81-87行"
+            - endpoint: "/get"
+              method: "GET"
+              template_path: "api-designer.yaml 第97-103行"
+            - endpoint: "/page"
+              method: "GET"
+              template_path: "api-designer.yaml 第105-110行"
+        - step: "生成扩展端点（可选）"
+          conditionals:
+            - condition: "enable_batch=true"
+              endpoint: "/delete-list"
+              template_path: "api-designer.yaml 第523-531行"
+            - condition: "enable_export=true"
+              endpoint: "/export-excel"
+              template_path: "api-designer.yaml 第119-126行"
+            - condition: "enable_import=true"
+              endpoints: ["/get-import-template", "/import"]
+              template_path: "api-designer.yaml 第534-557行"
+        - step: "生成权限SQL"
+          template_path: "api-designer.yaml 第333-344行"
+
+# ============================================
+# 第四部分：输出产物
+# ============================================
+output:
+  base_path: "yudao-module-{module}-biz/src/main/java/cn/iocoder/yudao/module/{module}"
+
+  artifacts:
+    # DAL层
+    - name: "DO实体类"
+      path: "dal/dataobject/{feature}/{Entity}DO.java"
+      description: "数据库实体映射类"
+    - name: "Mapper接口"
+      path: "dal/mysql/{feature}/{Entity}Mapper.java"
+      description: "数据访问接口"
+
+    # Service层
+    - name: "Service接口"
+      path: "service/{feature}/{Entity}Service.java"
+      description: "业务服务接口"
+    - name: "Service实现"
+      path: "service/{feature}/{Entity}ServiceImpl.java"
+      description: "业务服务实现类"
+
+    # Controller层
+    - name: "Controller"
+      path: "controller/admin/{feature}/{Entity}Controller.java"
+      description: "HTTP API控制器"
+
+    # VO类
+    - name: "SaveReqVO"
+      path: "controller/admin/{feature}/vo/{Entity}SaveReqVO.java"
+      description: "新增/修改请求对象"
+    - name: "PageReqVO"
+      path: "controller/admin/{feature}/vo/{Entity}PageReqVO.java"
+      description: "分页查询请求对象"
+    - name: "RespVO"
+      path: "controller/admin/{feature}/vo/{Entity}RespVO.java"
+      description: "响应对象"
+
+    # 可选产物
+    - name: "ExcelVO"
+      path: "controller/admin/{feature}/vo/{Entity}ExcelVO.java"
+      condition: "enable_export=true"
+      description: "Excel导出对象"
+    - name: "ImportExcelVO"
+      path: "controller/admin/{feature}/vo/{Entity}ImportExcelVO.java"
+      condition: "enable_import=true"
+      description: "Excel导入对象"
+    - name: "ImportRespVO"
+      path: "controller/admin/{feature}/vo/{Entity}ImportRespVO.java"
+      condition: "enable_import=true"
+      description: "导入结果响应"
+
+    # 配置文件
+    - name: "错误码定义"
+      path: "enums/ErrorCodeConstants.java"
+      action: "追加"
+      description: "业务错误码定义"
+    - name: "权限配置SQL"
+      path: "sql/menu/{module}_{feature}_menu.sql"
+      description: "菜单和按钮权限SQL"
+
+# ============================================
+# 第五部分：命名规范速查
+# ============================================
+naming_standards:
+  # 文件命名
+  files:
+    do: "{Entity}DO"
+    mapper: "{Entity}Mapper"
+    service: "{Entity}Service"
+    service_impl: "{Entity}ServiceImpl"
+    controller: "{Entity}Controller"
+    vo_save: "{Entity}SaveReqVO"
+    vo_page: "{Entity}PageReqVO"
+    vo_resp: "{Entity}RespVO"
+    vo_excel: "{Entity}ExcelVO"
+    vo_import: "{Entity}ImportExcelVO"
+
+  # 权限标识
+  permission:
+    format: "{module}:{feature}:{operation}"
+    operations:
+      - "query"
+      - "create"
+      - "update"
+      - "delete"
+      - "export"
+      - "import"
+    example: "system:user:create"
+
+  # 错误码
+  error_code:
+    format: "1_{module_code}_{feature_code}_{seq}"
+    module_codes:
+      infra: "001"
+      system: "002"
+      member: "003"
+      pay: "007"
+      product: "008"
+      trade: "011"
+      promotion: "013"
+    example: "1_002_001_000"
+
+  # 数据库表名
+  table:
+    format: "{module}_{feature}"
+    example: "system_user"
+
+# ============================================
+# 第六部分：关联文档引用
+# ============================================
+references:
+  primary:
+    - path: "skills/design/api-designer.yaml"
+      description: "API设计规范、Controller模板、权限标识、错误码体系"
+      sections:
+        - "第二部分：接口规范（标准端点定义）"
+        - "第五部分：权限标识规范"
+        - "第六部分：错误码体系"
+        - "第七部分：Controller模板"
+
+    - path: "skills/usage/entity-implementation.md"
+      description: "实体类实现完整流程、各层代码模板"
+      sections:
+        - "3.2节：DO实体类模板"
+        - "3.3节：Mapper层模板"
+        - "3.4节：Service层模板"
+        - "3.5节：Controller层模板"
+        - "3.6节：VO类模板"
+        - "3.7节：错误码定义"
+        - "3.8节：权限配置SQL"
+
+    - path: "skills/design/db-designer.yaml"
+      relationship: "前置依赖"
+      description: "数据库表结构设计规范"
+
+  secondary:
+    - path: "skills/modules/{module}/skill-{module}.yaml"
+      relationship: "模块参考"
+      description: "具体模块的技术规范和扩展指南"
+      example: "skills/modules/system/skill-system.yaml"
+
+# ============================================
+# 第七部分：质量检查清单
+# ============================================
+checklist:
+  before_generate:
+    - item: "确认模块编码正确"
+      check: "module参数在module_codes中有对应编号"
+    - item: "确认表名符合命名规范"
+      check: "表名格式为 {module}_{feature}"
+    - item: "阅读对应模块的skill文档"
+      reference: "skills/modules/{module}/skill-{module}.yaml"
+    - item: "确认字段类型映射正确"
+      check: "数据库类型与Java类型对应"
+
+  during_generate:
+    - item: "DO类继承正确的基类"
+      check: "TenantBaseDO（多租户）或 BaseDO（单租户）"
+    - item: "Mapper使用BaseMapperX和LambdaQueryWrapperX"
+      check: "继承BaseMapperX，条件构建使用xxxIfPresent()"
+    - item: "Service包含业务校验方法"
+      check: "新增校验唯一性，更新/删除校验存在性"
+    - item: "Controller注解完整"
+      check: "@Tag/@RestController/@RequestMapping/@Validated"
+    - item: "接口方法注解完整"
+      check: "@Operation/@PreAuthorize/@Parameter"
+
+  after_generate:
+    - item: "错误码编号符合规范"
+      format: "1_{module_code}_{feature_code}_{seq}"
+    - item: "权限标识格式正确"
+      format: "{module}:{feature}:{operation}"
+    - item: "所有文件包路径正确"
+      base: "cn.iocoder.yudao.module.{module}"
+    - item: "VO类添加@Schema注解"
+      check: "所有字段有description"
+    - item: "导入语句无缺失"
+      check: "所有注解有对应import"
+
+# ============================================
+# 第八部分：与原skill的差异调整
+# ============================================
+migration_notes:
+  # 命名规范调整
+  naming_adjustments:
+    - original: "CreateDTO"
+      target: "XxxSaveReqVO"
+      reason: "yudao系统新增/修改共用一个VO"
+    - original: "UpdateDTO"
+      target: "XxxSaveReqVO"
+      reason: "与CreateDTO合并，通过id字段区分"
+    - original: "QueryDTO"
+      target: "XxxPageReqVO"
+      reason: "yudao系统分页查询VO继承PageParam"
+    - original: "VO"
+      target: "XxxRespVO"
+      reason: "响应对象命名规范"
+    - original: "ListVO"
+      target: "XxxRespVO"
+      reason: "分页列表使用同一响应VO"
+
+  # 技术栈调整
+  tech_adjustments:
+    - original: "BaseMapper<Entity>"
+      target: "BaseMapperX<XxxDO>"
+      reason: "yudao扩展的Mapper基类"
+    - original: "LambdaQueryWrapper"
+      target: "LambdaQueryWrapperX"
+      reason: "支持xxxIfPresent()简化条件构建"
+    - original: "Result<T>"
+      target: "CommonResult<T>"
+      reason: "yudao统一响应包装类"
+    - original: "Page<T>"
+      target: "PageResult<T>"
+      reason: "yudao分页结果类"
+    - original: "@Api (Swagger 2)"
+      target: "@Tag (OpenAPI 3)"
+      reason: "Swagger版本升级"
+    - original: "@ApiOperation"
+      target: "@Operation"
+      reason: "OpenAPI 3.0注解"
+
+  # 目录结构调整
+  path_adjustments:
+    - original: "controller/{Entity}Controller.java"
+      target: "controller/admin/{feature}/{Entity}Controller.java"
+    - original: "dto/{Entity}DTO.java"
+      target: "controller/admin/{feature}/vo/{Entity}VO.java"
+    - original: "mapper/{Entity}Mapper.java"
+      target: "dal/mysql/{feature}/{Entity}Mapper.java"
+    - original: "entity/{Entity}.java"
+      target: "dal/dataobject/{feature}/{Entity}DO.java"
+
+# ============================================
+# 快速参考
+# ============================================
+quick_reference:
+  standard_endpoints:
+    POST_create: "创建 → CommonResult<Long>"
+    PUT_update: "更新 → CommonResult<Boolean>"
+    DELETE_delete: "删除 → CommonResult<Boolean>"
+    GET_get: "详情 → CommonResult<XxxRespVO>"
+    GET_page: "分页 → CommonResult<PageResult<XxxRespVO>>"
+    DELETE_delete-list: "批量删除 → CommonResult<Boolean>"
+    GET_export-excel: "导出 → void"
+    POST_import: "导入 → CommonResult<XxxImportRespVO>"
+
+  permission_operations:
+    query: "查询（get/page/list）"
+    create: "新增"
+    update: "修改"
+    delete: "删除"
+    export: "导出"
+    import: "导入"
+
+  base_classes:
+    BaseDO: "单租户场景 - creator/createTime/updater/updateTime/deleted"
+    TenantBaseDO: "多租户场景 - 额外含tenantId"
+
+  mapper_methods:
+    selectPage: "分页查询"
+    selectOne: "查询单条"
+    selectList: "查询列表"
+    insert: "插入"
+    updateById: "更新"
+    deleteById: "删除"

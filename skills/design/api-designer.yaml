@@ -1,0 +1,709 @@
+# API 设计规范知识库
+
+convention:
+  id: "api-designer"
+  name: "API 设计规范"
+  category: "设计规范"
+  description: "定义项目 REST API 的设计规范，包括接口命名、请求响应格式、权限控制、文档注解等，确保 API 设计的统一性和规范性"
+
+# ============================================
+# 第一部分：设计原则
+# ============================================
+philosophy:
+  design_principles:
+    - principle: "操作式 URL 设计"
+      description: "使用动词表达操作意图，而非 RESTful 资源式命名"
+      example: "/system/user/create 而非 POST /users"
+    - principle: "统一响应格式"
+      description: "所有接口使用 CommonResult 包装，确保响应格式一致"
+    - principle: "权限分级控制"
+      description: "通过 @PermitAll 和 @PreAuthorize 实现公开接口与权限接口的分离"
+    - principle: "文档即代码"
+      description: "使用 OpenAPI 3.0 注解，接口文档与代码同步维护"
+
+# ============================================
+# 第二部分：接口规范
+# ============================================
+interface_conventions:
+  # URL 命名规范
+  url_naming:
+    format: "/{模块}/{功能}/{操作}"
+    rules:
+      - "模块名与功能名使用小写字母"
+      - "操作名使用动词或动词短语"
+      - "多词使用连字符分隔（如 update-status）"
+    examples:
+      - path: "/system/user/create"
+        description: "创建用户"
+      - path: "/system/user/page"
+        description: "用户分页列表"
+      - path: "/pay/order/get"
+        description: "获取订单详情"
+      - path: "/system/user/update-status"
+        description: "更新用户状态"
+
+  # HTTP 方法映射
+  http_methods:
+    - method: "POST"
+      operations: ["create", "import", "send", "login", "logout"]
+      description: "创建类操作"
+      idempotent: false
+    - method: "PUT"
+      operations: ["update", "update-status", "update-password"]
+      description: "更新类操作"
+      idempotent: true
+    - method: "DELETE"
+      operations: ["delete", "delete-list"]
+      description: "删除类操作"
+      idempotent: true
+    - method: "GET"
+      operations: ["get", "page", "list", "export-excel", "get-import-template"]
+      description: "查询类操作"
+      idempotent: true
+      safe: true
+
+  # 标准端点定义
+  standard_endpoints:
+    - endpoint: "/create"
+      method: "POST"
+      purpose: "创建单个实体"
+      request: "@RequestBody @Valid XxxSaveReqVO"
+      response: "CommonResult<Long>"
+      permission: "{模块}:{功能}:create"
+
+    - endpoint: "/update"
+      method: "PUT"
+      purpose: "更新单个实体"
+      request: "@RequestBody @Valid XxxSaveReqVO"
+      response: "CommonResult<Boolean>"
+      permission: "{模块}:{功能}:update"
+
+    - endpoint: "/delete"
+      method: "DELETE"
+      purpose: "删除单个实体"
+      request: "@RequestParam(\"id\") Long id"
+      response: "CommonResult<Boolean>"
+      permission: "{模块}:{功能}:delete"
+      parameter_annotation: "@Parameter(name = \"id\", description = \"编号\", required = true)"
+
+    - endpoint: "/delete-list"
+      method: "DELETE"
+      purpose: "批量删除实体"
+      request: "@RequestParam(\"ids\") List<Long> ids"
+      response: "CommonResult<Boolean>"
+      permission: "{模块}:{功能}:delete"
+      parameter_annotation: "@Parameter(name = \"ids\", description = \"编号列表\", required = true)"
+
+    - endpoint: "/get"
+      method: "GET"
+      purpose: "获取单个实体详情"
+      request: "@RequestParam(\"id\") Long id"
+      response: "CommonResult<XxxRespVO>"
+      permission: "{模块}:{功能}:query"
+      parameter_annotation: "@Parameter(name = \"id\", description = \"编号\", required = true)"
+
+    - endpoint: "/page"
+      method: "GET"
+      purpose: "分页查询列表"
+      request: "@Valid XxxPageReqVO"
+      response: "CommonResult<PageResult<XxxRespVO>>"
+      permission: "{模块}:{功能}:query"
+
+    - endpoint: "/list"
+      method: "GET"
+      purpose: "列表查询（不分页）"
+      request: "@RequestParam(\"ids\") List<Long> ids 或无参数"
+      response: "CommonResult<List<XxxRespVO>>"
+      permission: "{模块}:{功能}:query"
+
+    - endpoint: "/export-excel"
+      method: "GET"
+      purpose: "导出 Excel"
+      request: "@Valid XxxPageReqVO"
+      response: "void（直接写入 HttpServletResponse）"
+      permission: "{模块}:{功能}:export"
+      special_annotation: "@ApiAccessLog(operateType = EXPORT)"
+
+    - endpoint: "/get-import-template"
+      method: "GET"
+      purpose: "获取导入模板"
+      request: "无参数"
+      response: "void（直接写入 HttpServletResponse）"
+      permission: "通常无需权限或 {模块}:{功能}:import"
+
+    - endpoint: "/import"
+      method: "POST"
+      purpose: "导入 Excel"
+      request: "@RequestParam(\"file\") MultipartFile file, @RequestParam(\"updateSupport\") Boolean updateSupport"
+      response: "CommonResult<XxxImportRespVO>"
+      permission: "{模块}:{功能}:import"
+      parameter_annotation: "@Parameters({...})"
+
+# ============================================
+# 第三部分：注解规范
+# ============================================
+annotation_standards:
+  # Controller 类注解
+  class_annotations:
+    - annotation: "@Tag"
+      format: "@Tag(name = \"管理后台 - {模块名}\")"
+      purpose: "OpenAPI 3.0 文档分组"
+      import: "io.swagger.v3.oas.annotations.tags.Tag"
+    - annotation: "@RestController"
+      purpose: "REST 控制器"
+      import: "org.springframework.web.bind.annotation.RestController"
+    - annotation: "@RequestMapping"
+      format: "@RequestMapping(\"/{模块}/{功能}\")"
+      purpose: "路由前缀"
+      import: "org.springframework.web.bind.annotation.RequestMapping"
+    - annotation: "@Validated"
+      purpose: "参数校验支持"
+      import: "org.springframework.validation.annotation.Validated"
+
+  # 方法注解
+  method_annotations:
+    - annotation: "@Operation"
+      format: "@Operation(summary = \"{操作描述}\")"
+      purpose: "接口文档说明"
+      import: "io.swagger.v3.oas.annotations.Operation"
+      examples:
+        - "@Operation(summary = \"创建用户\")"
+        - "@Operation(summary = \"获得用户分页列表\")"
+        - "@Operation(summary = \"导出用户 Excel\")"
+
+    - annotation: "@PermitAll"
+      purpose: "公开接口（无需登录）"
+      import: "cn.iocoder.yudao.framework.security.core.annotations.PermitAll"
+      when_to_use: "登录、登出、注册、验证码等无需认证的接口"
+
+    - annotation: "@PreAuthorize"
+      format: "@PreAuthorize(\"@ss.hasPermission('{模块}:{功能}:{操作}')\")"
+      purpose: "权限控制"
+      import: "org.springframework.security.access.prepost.PreAuthorize"
+      examples:
+        - "@PreAuthorize(\"@ss.hasPermission('system:user:create')\")"
+        - "@PreAuthorize(\"@ss.hasPermission('pay:order:query')\")"
+
+    - annotation: "@Parameter"
+      format: "@Parameter(name = \"{参数名}\", description = \"{描述}\", required = {是否必填}, example = \"{示例}\")"
+      purpose: "单参数文档"
+      import: "io.swagger.v3.oas.annotations.Parameter"
+      when_to_use: "单个 @RequestParam 参数时使用"
+
+    - annotation: "@Parameters"
+      format: "@Parameters({ @Parameter(name = \"xxx\", ...), @Parameter(name = \"yyy\", ...) })"
+      purpose: "多参数文档"
+      import: "io.swagger.v3.oas.annotations.Parameters"
+      when_to_use: "多个 @RequestParam 参数时使用"
+
+    - annotation: "@ApiAccessLog"
+      format: "@ApiAccessLog(operateType = EXPORT)"
+      purpose: "操作日志记录"
+      import: "cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog"
+      when_to_use: "导出、导入等需要记录日志的操作"
+      constants_import: "static cn.iocoder.yudao.framework.apilog.core.enums.OperateTypeEnum.EXPORT"
+
+  # 参数注解
+  parameter_annotations:
+    - annotation: "@RequestBody"
+      purpose: "接收 JSON 请求体"
+      import: "org.springframework.web.bind.annotation.RequestBody"
+      usage: "@RequestBody @Valid XxxReqVO reqVO"
+    - annotation: "@RequestParam"
+      purpose: "接收 URL 查询参数"
+      import: "org.springframework.web.bind.annotation.RequestParam"
+      usage: "@RequestParam(\"id\") Long id"
+    - annotation: "@Valid"
+      purpose: "参数校验"
+      import: "javax.validation.Valid"
+      usage: "@Valid @RequestBody XxxReqVO reqVO"
+
+# ============================================
+# 第四部分：请求响应规范
+# ============================================
+request_response:
+  # 统一响应结构
+  common_result:
+    class: "cn.iocoder.yudao.framework.common.pojo.CommonResult<T>"
+    structure:
+      code: "Integer（0 表示成功）"
+      msg: "String（错误提示信息）"
+      data: "T（返回数据）"
+    usage:
+      success: "return success(data)"
+      success_boolean: "return success(true)"
+      success_id: "return success(id)"
+    import: "static cn.iocoder.yudao.framework.common.pojo.CommonResult.success"
+
+  # 分页响应结构
+  page_result:
+    class: "cn.iocoder.yudao.framework.common.pojo.PageResult<T>"
+    structure:
+      total: "Long（总记录数）"
+      list: "List<T>（当前页数据列表）"
+    usage: "CommonResult<PageResult<XxxRespVO>> getXxxPage(...)"
+    empty: "new PageResult<>(pageResult.getTotal())"
+
+  # 分页请求参数
+  page_param:
+    class: "cn.iocoder.yudao.framework.common.pojo.PageParam"
+    fields:
+      pageNo: "Integer（页码，从 1 开始，默认 1，最小值 1）"
+      pageSize: "Integer（每页条数，默认 10，范围 1-200）"
+    constants:
+      PAGE_NO: "1"
+      PAGE_SIZE: "10"
+      PAGE_SIZE_NONE: "-1（不分页，用于导出等场景）"
+    usage: "分页查询 VO 继承 PageParam"
+
+  # 请求 VO 类型
+  request_vo_types:
+    - type: "SaveReqVO"
+      purpose: "新增/修改请求"
+      naming: "XxxSaveReqVO"
+      features:
+        - "修改时包含 id 字段"
+        - "包含 @NotBlank/@NotNull 校验注解"
+        - "使用 @Schema 注解描述字段"
+    - type: "PageReqVO"
+      purpose: "分页查询请求"
+      naming: "XxxPageReqVO"
+      features:
+        - "继承 PageParam"
+        - "包含查询条件字段"
+        - "时间字段使用 @DateTimeFormat"
+    - type: "ImportReqVO"
+      purpose: "导入请求"
+      naming: "XxxImportReqVO 或使用 @RequestParam 接收 file"
+      features:
+        - "包含 file 和 updateSupport 参数"
+    - type: "RespVO"
+      purpose: "响应对象"
+      naming: "XxxRespVO"
+      features:
+        - "包含 @Schema 注解描述字段"
+        - "包含 createTime 等只读字段"
+
+  # VO 注解规范
+  vo_annotations:
+    - annotation: "@Schema"
+      purpose: "OpenAPI 3.0 字段描述"
+      format: "@Schema(description = \"{字段描述}\", requiredMode = Schema.RequiredMode.REQUIRED, example = \"{示例}\")"
+      import: "io.swagger.v3.oas.annotations.media.Schema"
+    - annotation: "@ExcelProperty"
+      purpose: "Excel 导出字段"
+      format: "@ExcelProperty(\"{列名}\")"
+      import: "com.alibaba.excel.annotation.ExcelProperty"
+    - annotation: "@DictFormat"
+      purpose: "字典转换"
+      format: "@DictFormat(\"{字典类型}\")"
+
+# ============================================
+# 第五部分：权限标识规范
+# ============================================
+permission_naming:
+  format: "{模块}:{功能}:{操作}"
+  rules:
+    - "模块名与功能名使用小写字母"
+    - "操作名使用标准动词"
+  standard_operations:
+    - operation: "query"
+      description: "查询权限（包括 get、page、list）"
+    - operation: "create"
+      description: "新增权限"
+    - operation: "update"
+      description: "修改权限"
+    - operation: "delete"
+      description: "删除权限"
+    - operation: "export"
+      description: "导出权限"
+    - operation: "import"
+      description: "导入权限"
+  examples:
+    - "system:user:query"
+    - "system:user:create"
+    - "system:user:update"
+    - "system:user:delete"
+    - "system:user:export"
+    - "system:user:import"
+    - "pay:order:query"
+    - "pay:order:create"
+
+  # 权限 SQL 配置
+  permission_sql:
+    menu_format: |
+      INSERT INTO system_menu (name, permission, type, sort, parent_id, path, icon, component, status)
+      VALUES ('{功能名称}管理', '', 2, 0, {父菜单ID}, '{功能}', 'ep:document', '{模块}/{功能}/index', 0);
+
+    button_format: |
+      INSERT INTO system_menu (name, permission, type, sort, parent_id, status) VALUES
+      ('{功能名称}查询', '{模块}:{功能}:query', 3, 1, @menuId, 0),
+      ('{功能名称}新增', '{模块}:{功能}:create', 3, 2, @menuId, 0),
+      ('{功能名称}修改', '{模块}:{功能}:update', 3, 3, @menuId, 0),
+      ('{功能名称}删除', '{模块}:{功能}:delete', 3, 4, @menuId, 0),
+      ('{功能名称}导出', '{模块}:{功能}:export', 3, 5, @menuId, 0);
+
+# ============================================
+# 第六部分：错误码体系
+# ============================================
+error_codes:
+  format: "1_模块编号_功能编号_错误序号"
+  success_code: 0
+
+  # 全局错误码
+  global_errors:
+    - code: 0
+      message: "成功"
+    - code: 400
+      message: "请求参数不正确"
+    - code: 401
+      message: "账号未登录"
+    - code: 403
+      message: "没有该操作权限"
+    - code: 404
+      message: "请求未找到"
+    - code: 405
+      message: "请求方法不正确"
+    - code: 423
+      message: "请求失败，请稍后重试"
+    - code: 429
+      message: "请求过于频繁"
+    - code: 500
+      message: "系统异常"
+    - code: 501
+      message: "功能未实现/未开启"
+    - code: 502
+      message: "错误的配置项"
+    - code: 900
+      message: "重复请求"
+    - code: 901
+      message: "演示模式，禁止写操作"
+    - code: 999
+      message: "未知错误"
+
+  # 模块编号速查
+  module_codes:
+    - module: "infra"
+      code_prefix: "1_001"
+      description: "基础设施模块"
+    - module: "system"
+      code_prefix: "1_002"
+      description: "系统管理模块"
+    - module: "member"
+      code_prefix: "1_003"
+      description: "会员模块"
+    - module: "pay"
+      code_prefix: "1_007"
+      description: "支付模块"
+    - module: "product"
+      code_prefix: "1_008"
+      description: "商品模块"
+    - module: "trade"
+      code_prefix: "1_011"
+      description: "交易模块"
+    - module: "promotion"
+      code_prefix: "1_013"
+      description: "促销模块"
+
+  # 错误码定义模板
+  error_code_template: |
+    // ========== {实体名称} 相关错误码 1_XXX_XXX_XXX ==========
+    ErrorCode XXX_NOT_EXISTS = new ErrorCode(1_002_001_000, "{实体名称}不存在");
+    ErrorCode XXX_CODE_DUPLICATE = new ErrorCode(1_002_001_001, "已存在该编码的{实体名称}");
+    ErrorCode XXX_NAME_DUPLICATE = new ErrorCode(1_002_001_002, "已存在该名称的{实体名称}");
+    ErrorCode XXX_CAN_NOT_DELETE = new ErrorCode(1_002_001_003, "{实体名称}不能删除，原因：{}");
+    ErrorCode XXX_STATUS_ERROR = new ErrorCode(1_002_001_004, "{实体名称}状态不正确");
+
+# ============================================
+# 第七部分：Controller 模板
+# ============================================
+controller_template:
+  # 基础 CRUD 模板
+  basic_crud: |
+    package cn.iocoder.yudao.module.{模块}.controller.admin.{功能};
+
+    import cn.iocoder.yudao.framework.apilog.core.annotation.ApiAccessLog;
+    import cn.iocoder.yudao.framework.common.pojo.CommonResult;
+    import cn.iocoder.yudao.framework.common.pojo.PageParam;
+    import cn.iocoder.yudao.framework.common.pojo.PageResult;
+    import cn.iocoder.yudao.framework.common.util.object.BeanUtils;
+    import cn.iocoder.yudao.framework.excel.core.util.ExcelUtils;
+    import cn.iocoder.yudao.module.{模块}.controller.admin.{功能}.vo.*;
+    import cn.iocoder.yudao.module.{模块}.dal.dataobject.{功能}.XxxDO;
+    import cn.iocoder.yudao.module.{模块}.service.{功能}.XxxService;
+    import io.swagger.v3.oas.annotations.Operation;
+    import io.swagger.v3.oas.annotations.Parameter;
+    import io.swagger.v3.oas.annotations.tags.Tag;
+    import org.springframework.security.access.prepost.PreAuthorize;
+    import org.springframework.validation.annotation.Validated;
+    import org.springframework.web.bind.annotation.*;
+
+    import javax.annotation.Resource;
+    import javax.servlet.http.HttpServletResponse;
+    import javax.validation.Valid;
+    import java.io.IOException;
+    import java.util.List;
+
+    import static cn.iocoder.yudao.framework.apilog.core.enums.OperateTypeEnum.EXPORT;
+    import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
+
+    @Tag(name = "管理后台 - {实体名称}")
+    @RestController
+    @RequestMapping("/{模块}/{功能}")
+    @Validated
+    public class XxxController {
+
+        @Resource
+        private XxxService xxxService;
+
+        @PostMapping("/create")
+        @Operation(summary = "创建{实体名称}")
+        @PreAuthorize("@ss.hasPermission('{模块}:{功能}:create')")
+        public CommonResult<Long> createXxx(@Valid @RequestBody XxxSaveReqVO createReqVO) {
+            return success(xxxService.createXxx(createReqVO));
+        }
+
+        @PutMapping("/update")
+        @Operation(summary = "更新{实体名称}")
+        @PreAuthorize("@ss.hasPermission('{模块}:{功能}:update')")
+        public CommonResult<Boolean> updateXxx(@Valid @RequestBody XxxSaveReqVO updateReqVO) {
+            xxxService.updateXxx(updateReqVO);
+            return success(true);
+        }
+
+        @DeleteMapping("/delete")
+        @Operation(summary = "删除{实体名称}")
+        @Parameter(name = "id", description = "编号", required = true)
+        @PreAuthorize("@ss.hasPermission('{模块}:{功能}:delete')")
+        public CommonResult<Boolean> deleteXxx(@RequestParam("id") Long id) {
+            xxxService.deleteXxx(id);
+            return success(true);
+        }
+
+        @GetMapping("/get")
+        @Operation(summary = "获得{实体名称}")
+        @Parameter(name = "id", description = "编号", required = true)
+        @PreAuthorize("@ss.hasPermission('{模块}:{功能}:query')")
+        public CommonResult<XxxRespVO> getXxx(@RequestParam("id") Long id) {
+            XxxDO xxx = xxxService.getXxx(id);
+            return success(BeanUtils.toBean(xxx, XxxRespVO.class));
+        }
+
+        @GetMapping("/page")
+        @Operation(summary = "获得{实体名称}分页")
+        @PreAuthorize("@ss.hasPermission('{模块}:{功能}:query')")
+        public CommonResult<PageResult<XxxRespVO>> getXxxPage(@Valid XxxPageReqVO pageReqVO) {
+            PageResult<XxxDO> pageResult = xxxService.getXxxPage(pageReqVO);
+            return success(BeanUtils.toBean(pageResult, XxxRespVO.class));
+        }
+
+        @GetMapping("/export-excel")
+        @Operation(summary = "导出{实体名称} Excel")
+        @PreAuthorize("@ss.hasPermission('{模块}:{功能}:export')")
+        @ApiAccessLog(operateType = EXPORT)
+        public void exportXxxExcel(@Valid XxxPageReqVO pageReqVO,
+                                   HttpServletResponse response) throws IOException {
+            pageReqVO.setPageSize(PageParam.PAGE_SIZE_NONE);
+            List<XxxDO> list = xxxService.getXxxPage(pageReqVO).getList();
+            List<XxxExcelVO> excelList = BeanUtils.toBean(list, XxxExcelVO.class);
+            ExcelUtils.write(response, "{实体名称}.xls", "数据", XxxExcelVO.class, excelList);
+        }
+    }
+
+  # 公开接口模板
+  public_endpoint: |
+    @PostMapping("/login")
+    @PermitAll
+    @Operation(summary = "使用账号密码登录")
+    public CommonResult<AuthLoginRespVO> login(@RequestBody @Valid AuthLoginReqVO reqVO) {
+        return success(authService.login(reqVO));
+    }
+
+  # 批量操作模板
+  batch_operations: |
+    @DeleteMapping("/delete-list")
+    @Parameter(name = "ids", description = "编号列表", required = true)
+    @Operation(summary = "批量删除{实体名称}")
+    @PreAuthorize("@ss.hasPermission('{模块}:{功能}:delete')")
+    public CommonResult<Boolean> deleteXxxList(@RequestParam("ids") List<Long> ids) {
+        xxxService.deleteXxxList(ids);
+        return success(true);
+    }
+
+  # 导入导出模板
+  import_export: |
+    @GetMapping("/get-import-template")
+    @Operation(summary = "获得导入{实体名称}模板")
+    public void importTemplate(HttpServletResponse response) throws IOException {
+        // 手动创建导出 demo
+        List<XxxImportExcelVO> list = Arrays.asList(
+            XxxImportExcelVO.builder().name("示例1").code("TEST1").build(),
+            XxxImportExcelVO.builder().name("示例2").code("TEST2").build()
+        );
+        ExcelUtils.write(response, "{实体名称}导入模板.xls", "数据", XxxImportExcelVO.class, list);
+    }
+
+    @PostMapping("/import")
+    @Operation(summary = "导入{实体名称}")
+    @Parameters({
+        @Parameter(name = "file", description = "Excel 文件", required = true),
+        @Parameter(name = "updateSupport", description = "是否支持更新，默认为 false", example = "true")
+    })
+    @PreAuthorize("@ss.hasPermission('{模块}:{功能}:import')")
+    public CommonResult<XxxImportRespVO> importExcel(@RequestParam("file") MultipartFile file,
+                                                      @RequestParam(value = "updateSupport", required = false, defaultValue = "false") Boolean updateSupport) throws Exception {
+        List<XxxImportExcelVO> list = ExcelUtils.read(file, XxxImportExcelVO.class);
+        return success(xxxService.importXxxList(list, updateSupport));
+    }
+
+# ============================================
+# 第八部分：设计流程
+# ============================================
+design_workflow:
+  steps:
+    - step: 1
+      name: "实体分析"
+      action: "分析数据库设计或 PRD，确定实体字段和业务含义"
+      input: ["db_design_file", "prd_file", "模块 skill 文档"]
+      output: "实体字段清单"
+      checklist:
+        - "确认实体所属模块"
+        - "阅读对应模块的 skill 文档"
+        - "确定需要哪些标准端点"
+
+    - step: 2
+      name: "端点设计"
+      action: "根据业务需求确定需要的 API 端点"
+      considerations:
+        - "是否需要完整 CRUD（create/update/delete/get/page）"
+        - "是否需要批量操作（delete-list）"
+        - "是否需要导入导出（export-excel/import）"
+        - "是否需要状态切换（update-status）"
+        - "是否有公开接口需求（使用 @PermitAll）"
+
+    - step: 3
+      name: "请求响应设计"
+      action: "设计各端点的请求参数和响应格式"
+      templates:
+        - "使用 SaveReqVO 处理新增/修改"
+        - "使用 PageReqVO 处理分页查询（继承 PageParam）"
+        - "使用 RespVO 处理响应"
+        - "使用 CommonResult 包装响应"
+
+    - step: 4
+      name: "权限设计"
+      action: "确定各端点的权限标识"
+      rules:
+        - "公开接口使用 @PermitAll"
+        - "权限接口使用 @PreAuthorize"
+        - "权限标识格式：模块:功能:操作"
+        - "查询类接口统一使用 query 权限"
+
+    - step: 5
+      name: "错误码设计"
+      action: "定义业务错误码"
+      rules:
+        - "格式：1_模块编号_功能编号_错误序号"
+        - "常见错误：不存在、重复、状态错误、操作限制"
+
+    - step: 6
+      name: "文档生成"
+      action: "生成 Controller 代码和 API 文档"
+      output: ["Controller.java", "VO classes", "错误码定义", "权限 SQL"]
+
+# ============================================
+# 第九部分：检查清单
+# ============================================
+checklist:
+  before_design:
+    - "确认实体所属模块"
+    - "阅读对应模块的 skill 文档"
+    - "了解现有类似接口的设计模式"
+    - "准备表结构设计"
+
+  during_design:
+    - "URL 命名符合规范（/{模块}/{功能}/{操作}）"
+    - "HTTP 方法与操作类型匹配"
+    - "请求 VO 类型选择正确"
+    - "响应格式使用 CommonResult"
+    - "权限标识命名正确"
+    - "注解使用完整"
+
+  after_design:
+    - "所有接口添加 @Operation 注解"
+    - "参数添加 @Parameter 或 @Parameters 注解"
+    - "权限接口添加 @PreAuthorize 注解"
+    - "公开接口添加 @PermitAll 注解"
+    - "导出接口添加 @ApiAccessLog 注解"
+    - "错误码定义完整"
+
+# ============================================
+# 第十部分：与 entity-implementation.md 协同
+# ============================================
+collaboration:
+  relationship:
+    - doc: "api-designer.yaml"
+      role: "API 设计阶段规范指导"
+      focus: "设计决策、端点规划、权限标识"
+    - doc: "entity-implementation.md"
+      role: "完整实现流程指导"
+      focus: "实现细节、模板代码、各层规范"
+  usage_flow:
+    - "1. 使用 api-designer.yaml 进行 API 设计决策"
+    - "2. 参考 entity-implementation.md 进行完整实现"
+    - "3. 两者 Controller 模板保持一致"
+
+# ============================================
+# 快速参考
+# ============================================
+quick_reference:
+  http_methods:
+    POST: "创建类操作（create, import, send）"
+    PUT: "更新类操作（update, update-status）"
+    DELETE: "删除类操作（delete, delete-list）"
+    GET: "查询类操作（get, page, list, export-excel）"
+
+  standard_endpoints:
+    /create: "创建 → CommonResult<Long>"
+    /update: "更新 → CommonResult<Boolean>"
+    /delete: "删除 → CommonResult<Boolean>"
+    /delete-list: "批量删除 → CommonResult<Boolean>"
+    /get: "详情 → CommonResult<XxxRespVO>"
+    /page: "分页 → CommonResult<PageResult<XxxRespVO>>"
+    /list: "列表 → CommonResult<List<XxxRespVO>>"
+    /export-excel: "导出 → void"
+    /import: "导入 → CommonResult<XxxImportRespVO>"
+
+  permission_operations:
+    query: "查询（get/page/list）"
+    create: "新增"
+    update: "修改"
+    delete: "删除"
+    export: "导出"
+    import: "导入"
+
+  response_types:
+    CommonResult<Long>: "创建类响应"
+    CommonResult<Boolean>: "操作类响应"
+    CommonResult<XxxRespVO>: "详情类响应"
+    CommonResult<PageResult<XxxRespVO>>: "分页类响应"
+    CommonResult<List<XxxRespVO>>: "列表类响应"
+
+  vo_types:
+    XxxSaveReqVO: "新增/修改请求"
+    XxxPageReqVO: "分页查询请求（继承 PageParam）"
+    XxxRespVO: "响应对象"
+    XxxExcelVO: "Excel 导出对象"
+    XxxImportExcelVO: "Excel 导入对象"
+    XxxImportRespVO: "导入结果响应"
+
+  imports:
+    controller_common:
+      - "io.swagger.v3.oas.annotations.tags.Tag"
+      - "io.swagger.v3.oas.annotations.Operation"
+      - "io.swagger.v3.oas.annotations.Parameter"
+      - "io.swagger.v3.oas.annotations.Parameters"
+      - "org.springframework.security.access.prepost.PreAuthorize"
+      - "cn.iocoder.yudao.framework.common.pojo.CommonResult"
+      - "cn.iocoder.yudao.framework.common.pojo.PageResult"
+      - "static cn.iocoder.yudao.framework.common.pojo.CommonResult.success"
