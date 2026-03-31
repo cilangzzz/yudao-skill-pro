@@ -4,6 +4,35 @@
 
 ---
 
+## 自动引用机制说明
+
+**从 2026-03-31 起，使用样例支持自动引用设计规范**：
+
+每个使用样例文档头部包含 YAML front matter 配置，声明该场景需要引用的规范文件：
+
+```yaml
+---
+references:
+  design:                    # 设计规范（全局约束）
+    - skills/design/db-designer.yaml
+    - skills/design/entity-designer.yaml
+  module_guide:              # 模块引用提示
+    prompt: "请指定目标模块"
+    mapping:
+      mes: skills/modules/mes/skill-mes.yaml
+  patterns:                  # 设计模式引用
+    - skills/patterns/factory-pattern.yaml
+---
+```
+
+**使用方式**：
+1. AI 读取使用样例时自动识别 `references` 配置
+2. AI 自动加载引用的设计规范文件内容
+3. 用户在提示词中指定模块名后，AI 加载对应模块 skill
+4. 生成的代码符合所有规范定义的标准
+
+---
+
 ## 目录
 
 1. [使用指南概述](#使用指南概述)

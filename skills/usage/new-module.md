@@ -1,3 +1,29 @@
+---
+# Skills 自动引用配置
+# AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
+references:
+  design:
+    - path: skills/design/db-designer.yaml
+      reason: "数据库表设计规范 - 建表 SQL、字段命名、索引设计"
+    - path: skills/design/entity-designer.yaml
+      reason: "实体类(DO)设计规范 - 继承体系、注解规范、命名转换"
+    - path: skills/design/api-designer.yaml
+      reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
+    - path: skills/design/crud-designer.yaml
+      reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
+  templates:
+    - path: skills/templates/skill-template.yaml
+      reason: "Skill 文档模板 - 创建新模块 Skill 文档的模板"
+  reference_modules:
+    - path: skills/modules/system/skill-system.yaml
+      reason: "系统模块参考 - 基础模块结构、多租户、树形结构"
+    - path: skills/modules/pay/skill-pay.yaml
+      reason: "支付模块参考 - 设计模式应用（工厂+策略+模板方法）"
+    - path: skills/modules/mall/skill-mall.yaml
+      reason: "商城模块参考 - 复杂业务模块结构"
+  usage_hint: "新增模块时可参考已有模块的 Skill 文档结构"
+---
+
 # Skill 使用指南 - 新增模块场景
 
 本文档提供从零开始创建新模块的完整提示词模板，基于 ruoyi-vue-pro 项目的模块化架构规范。

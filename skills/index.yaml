@@ -115,6 +115,29 @@ design:
     description: "根据数据库表结构自动生成完整CRUD功能代码"
     lines: 517
 
+# 使用样例自动引用说明
+# 使用样例文档（usage/目录）通过 YAML front matter 声明需要引用的规范文件
+# AI 读取使用样例时会自动加载相关规范，确保生成的代码符合项目标准
+usage_auto_reference:
+  description: "使用样例通过 YAML front matter 自动引用设计规范"
+  mechanism: |
+    每个使用样例文档头部包含 references 配置，声明该场景需要引用的规范文件：
+    - design: 设计规范（db-designer, entity-designer, api-designer, crud-designer）
+    - module_guide: 模块引用提示（用户指定模块后加载对应 skill）
+    - patterns: 设计模式引用（factory, strategy, template-method）
+    - templates: 模板文件引用
+  example: |
+    ---
+    references:
+      design:
+        - skills/design/db-designer.yaml
+        - skills/design/entity-designer.yaml
+      module_guide:
+        prompt: "请指定目标模块"
+        mapping:
+          mes: skills/modules/mes/skill-mes.yaml
+    ---
+
 # 提取进度
 progress:
   total: 12

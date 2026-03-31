@@ -1,3 +1,24 @@
+---
+# Skills 自动引用配置
+# AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
+references:
+  patterns:
+    - path: skills/patterns/factory-pattern.yaml
+      reason: "工厂模式 - 对象创建的统一管理"
+    - path: skills/patterns/strategy-pattern.yaml
+      reason: "策略模式 - 算法族的统一接口"
+    - path: skills/patterns/template-method-pattern.yaml
+      reason: "模板方法模式 - 算法骨架的固定结构"
+  reference_modules:
+    - path: skills/modules/pay/skill-pay.yaml
+      reason: "支付模块 - 工厂+策略+模板方法模式组合案例"
+    - path: skills/modules/ai/skill-ai.yaml
+      reason: "AI 模块 - 工厂+策略模式案例"
+    - path: skills/modules/infra/skill-infra.yaml
+      reason: "基础设施模块 - 文件存储策略模式案例"
+  usage_hint: "设计模式通常组合使用，参考 pay 模块的完整案例"
+---
+
 # 设计模式应用场景提示词指南
 
 > 本文档提供设计模式应用的标准化提示词模板，帮助开发者快速选择和应用合适的设计模式。

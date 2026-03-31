@@ -1,3 +1,37 @@
+---
+# Skills 自动引用配置
+# AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
+references:
+  design:
+    - path: skills/design/api-designer.yaml
+      reason: "API 接口设计规范 - 改造时需保持接口兼容性"
+    - path: skills/design/entity-designer.yaml
+      reason: "实体类设计规范 - 改造 DO 需遵循规范"
+    - path: skills/design/db-designer.yaml
+      reason: "数据库设计规范 - 表结构变更需遵循规范"
+  module_guide:
+    prompt: "请指定要改造的模块，AI 将加载对应模块的 skill 文档"
+    mapping:
+      system: skills/modules/system/skill-system.yaml
+      infra: skills/modules/infra/skill-infra.yaml
+      pay: skills/modules/pay/skill-pay.yaml
+      member: skills/modules/member/skill-member.yaml
+      mall: skills/modules/mall/skill-mall.yaml
+      crm: skills/modules/crm/skill-crm.yaml
+      erp: skills/modules/erp/skill-erp.yaml
+      bpm: skills/modules/bpm/skill-bpm.yaml
+      ai: skills/modules/ai/skill-ai.yaml
+      iot: skills/modules/iot/skill-iot.yaml
+      mp: skills/modules/mp/skill-mp.yaml
+      report: skills/modules/report/skill-report.yaml
+  patterns:
+    - path: skills/patterns/strategy-pattern.yaml
+      reason: "策略模式 - 重构时可引入策略模式解耦"
+    - path: skills/patterns/factory-pattern.yaml
+      reason: "工厂模式 - 重构时可引入工厂模式管理对象"
+  usage_hint: "改造前请务必阅读目标模块的 Skill 文档，了解现有架构"
+---
+
 # 改造模块场景提示词指南
 
 > 本文档提供完整的提示词模板，用于指导 AI 改造现有模块的架构或逻辑。

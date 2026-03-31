@@ -1,3 +1,35 @@
+---
+# Skills 自动引用配置
+# AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
+references:
+  design:
+    - path: skills/design/api-designer.yaml
+      reason: "API 接口设计规范 - 扩展接口需遵循现有规范"
+    - path: skills/design/entity-designer.yaml
+      reason: "实体类设计规范 - 新增实体需遵循 DO 规范"
+  module_guide:
+    prompt: "请指定要扩展的模块，AI 将加载对应模块的 skill 文档"
+    mapping:
+      system: skills/modules/system/skill-system.yaml
+      infra: skills/modules/infra/skill-infra.yaml
+      pay: skills/modules/pay/skill-pay.yaml
+      member: skills/modules/member/skill-member.yaml
+      mall: skills/modules/mall/skill-mall.yaml
+      crm: skills/modules/crm/skill-crm.yaml
+      erp: skills/modules/erp/skill-erp.yaml
+      bpm: skills/modules/bpm/skill-bpm.yaml
+      ai: skills/modules/ai/skill-ai.yaml
+      iot: skills/modules/iot/skill-iot.yaml
+      mp: skills/modules/mp/skill-mp.yaml
+      report: skills/modules/report/skill-report.yaml
+  patterns:
+    - path: skills/patterns/factory-pattern.yaml
+      reason: "工厂模式 - 渠道/平台扩展时注册到工厂"
+    - path: skills/patterns/strategy-pattern.yaml
+      reason: "策略模式 - 新增策略实现"
+  usage_hint: "使用时请在提示词中指定模块名，如：'目标模块：pay'"
+---
+
 # Skill 使用指南 - 扩展模块场景
 
 本文档提供完整的提示词模板，用于指导 AI 扩展现有模块功能。基于项目中 12 个模块的 Skill 文档提炼，覆盖最常见的扩展场景。

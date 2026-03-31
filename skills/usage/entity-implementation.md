@@ -1,3 +1,34 @@
+---
+# Skills 自动引用配置
+# AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
+references:
+  design:
+    - path: skills/design/db-designer.yaml
+      reason: "数据库表设计规范 - 建表 SQL、字段命名、索引设计"
+    - path: skills/design/entity-designer.yaml
+      reason: "实体类(DO)设计规范 - 继承体系、注解规范、命名转换"
+    - path: skills/design/api-designer.yaml
+      reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
+    - path: skills/design/crud-designer.yaml
+      reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
+  module_guide:
+    prompt: "请指定目标模块，AI 将加载对应模块的 skill 文档"
+    mapping:
+      system: skills/modules/system/skill-system.yaml
+      infra: skills/modules/infra/skill-infra.yaml
+      pay: skills/modules/pay/skill-pay.yaml
+      member: skills/modules/member/skill-member.yaml
+      mall: skills/modules/mall/skill-mall.yaml
+      crm: skills/modules/crm/skill-crm.yaml
+      erp: skills/modules/erp/skill-erp.yaml
+      bpm: skills/modules/bpm/skill-bpm.yaml
+      ai: skills/modules/ai/skill-ai.yaml
+      iot: skills/modules/iot/skill-iot.yaml
+      mp: skills/modules/mp/skill-mp.yaml
+      report: skills/modules/report/skill-report.yaml
+  usage_hint: "使用时请在提示词中指定模块名，如：'目标模块：mes'"
+---
+
 # Skill 使用指南 - 实体类实现完整流程
 
 本文档提供从 SQL 建表到实体类实现的完整流程提示词，帮助开发者快速创建符合项目规范的业务实体功能。
