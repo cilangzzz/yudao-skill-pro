@@ -42,7 +42,7 @@ public class IotDeviceApiImpl implements IotDeviceCommonApi {
         IotGatewayProperties.RpcProperties rpc = gatewayProperties.getRpc();
         restTemplate = new RestTemplateBuilder()
                 .rootUri(rpc.getUrl())
-                .setReadTimeout(rpc.getReadTimeout())
+                .setConnectTimeout(rpc.getReadTimeout())
                 .setConnectTimeout(rpc.getConnectTimeout())
                 .build();
     }
@@ -64,12 +64,12 @@ public class IotDeviceApiImpl implements IotDeviceCommonApi {
 
     @Override
     public CommonResult<IotDeviceRegisterRespDTO> registerDevice(IotDeviceRegisterReqDTO reqDTO) {
-        return doPost("/register", reqDTO, new ParameterizedTypeReference<CommonResult<IotDeviceRegisterRespDTO>>() { });
+        return doPost("/rpc-api/iot/device/register", reqDTO, new ParameterizedTypeReference<CommonResult<IotDeviceRegisterRespDTO>>() { });
     }
 
     @Override
     public CommonResult<List<IotSubDeviceRegisterRespDTO>> registerSubDevices(IotSubDeviceRegisterFullReqDTO reqDTO) {
-        return doPost("/register-sub", reqDTO, new ParameterizedTypeReference<CommonResult<List<IotSubDeviceRegisterRespDTO>>>() { });
+        return doPost("/rpc-api/iot/device/register-sub", reqDTO, new ParameterizedTypeReference<CommonResult<List<IotSubDeviceRegisterRespDTO>>>() { });
     }
 
     private <T, R> CommonResult<R> doPost(String url, T body,

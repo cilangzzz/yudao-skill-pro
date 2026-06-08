@@ -236,6 +236,23 @@ public class LocalDateTimeUtils {
         return LocalDateTime.now().with(TemporalAdjusters.firstDayOfYear()).with(LocalTime.MIN);
     }
 
+    /**
+     * 获取最近 N 天的 0 点时刻序列（升序，含今天）
+     * <p>
+     * 例：getLatestDays(3) 返回 [前天 00:00, 昨天 00:00, 今天 00:00]
+     *
+     * @param days 天数（含今天）
+     * @return 升序的 LocalDateTime 列表
+     */
+    public static List<LocalDateTime> getLatestDays(int days) {
+        LocalDateTime today = getToday();
+        List<LocalDateTime> dates = new ArrayList<>(days);
+        for (int i = days - 1; i >= 0; i--) {
+            dates.add(today.minusDays(i));
+        }
+        return dates;
+    }
+
     public static List<LocalDateTime[]> getDateRangeList(LocalDateTime startTime,
                                                          LocalDateTime endTime,
                                                          Integer interval) {
@@ -303,6 +320,21 @@ public class LocalDateTimeUtils {
     }
 
     /**
+     * 获取从开始日期起的日期列表
+     *
+     * @param startDate 开始日期
+     * @param days 天数
+     * @return 日期列表，包含开始日期
+     */
+    public static List<LocalDate> getDateList(LocalDate startDate, int days) {
+        List<LocalDate> dateList = new ArrayList<>(days);
+        for (int i = 0; i < days; i++) {
+            dateList.add(startDate.plusDays(i));
+        }
+        return dateList;
+    }
+
+    /**
      * 格式化时间范围
      *
      * @param startTime 开始时间
@@ -333,6 +365,27 @@ public class LocalDateTimeUtils {
             default:
                 throw new IllegalArgumentException("Invalid interval: " + interval);
         }
+    }
+
+    /**
+     * 获取指定日期所在季度的第一天
+     *
+     * @param date 日期
+     * @return 所在季度的第一天
+     */
+    public static LocalDate getQuarterStart(LocalDate date) {
+        Month firstMonthOfQuarter = date.getMonth().firstMonthOfQuarter();
+        return LocalDate.of(date.getYear(), firstMonthOfQuarter, 1);
+    }
+
+    /**
+     * 获取指定日期所在周的第一天（周一）
+     *
+     * @param date 日期
+     * @return 所在周的周一
+     */
+    public static LocalDate getWeekStart(LocalDate date) {
+        return date.with(DayOfWeek.MONDAY);
     }
 
     /**

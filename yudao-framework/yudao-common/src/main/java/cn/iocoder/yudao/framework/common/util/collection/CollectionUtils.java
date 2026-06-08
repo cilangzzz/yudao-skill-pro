@@ -124,6 +124,22 @@ public class CollectionUtils {
         return from.stream().filter(filter).map(func).filter(Objects::nonNull).collect(Collectors.toSet());
     }
 
+    public static <T, U> Set<U> convertLinkedSet(Collection<T> from, Function<T, U> func) {
+        if (CollUtil.isEmpty(from)) {
+            return new LinkedHashSet<>();
+        }
+        return from.stream().map(func).filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    public static <T, U> Set<U> convertLinkedSet(Collection<T> from, Function<T, U> func, Predicate<T> filter) {
+        if (CollUtil.isEmpty(from)) {
+            return new LinkedHashSet<>();
+        }
+        return from.stream().filter(filter).map(func).filter(Objects::nonNull)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
     public static <T, K> Map<K, T> convertMapByFilter(Collection<T> from, Predicate<T> filter, Function<T, K> keyFunc) {
         if (CollUtil.isEmpty(from)) {
             return new HashMap<>();
@@ -347,6 +363,39 @@ public class CollectionUtils {
     @SuppressWarnings("unchecked")
     public static <T> LinkedHashSet<T> toLinkedHashSet(Class<T> elementType, Object value) {
         return (LinkedHashSet<T>) toCollection(LinkedHashSet.class, elementType, value);
+    }
+
+    public static boolean dfs(Long node, Map<Long, Set<Long>> graph) {
+        return dfs(node, graph, new HashSet<>(), new HashSet<>());
+    }
+
+    private static boolean dfs(Long node, Map<Long, Set<Long>> graph, Set<Long> visited, Set<Long> inStack) {
+        if (inStack.contains(node)) {
+            return true;
+        }
+        if (visited.contains(node)) {
+            return false;
+        }
+        visited.add(node);
+        inStack.add(node);
+        Set<Long> neighbors = graph.getOrDefault(node, Collections.emptySet());
+        for (Long neighbor : neighbors) {
+            if (dfs(neighbor, graph, visited, inStack)) {
+                return true;
+            }
+        }
+        inStack.remove(node);
+        return false;
+    }
+
+    /**
+     * 把单元素 head 与集合 tail 合并成新 List（head 在前，tail 顺序保留）
+     */
+    public static <T> List<T> of(T head, Collection<T> tail) {
+        List<T> list = new ArrayList<>();
+        list.add(head);
+        CollUtil.addAll(list, tail);
+        return list;
     }
 
 }
