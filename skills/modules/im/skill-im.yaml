@@ -1,0 +1,748 @@
+# Skill 文件 - yudao-module-im 模块
+# 即时通讯模块知识提取
+
+skill:
+  id: "skill-im"
+  name: "Instant Messaging Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-im"
+  created_at: "2026-06-08"
+  updated_at: "2026-06-08"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    im 模块是系统的"即时通讯层"，提供全链路即时通讯能力：
+    1. 好友关系管理 - 双向好友关系，支持拉黑、免打扰、置顶、备注名
+    2. 群组管理 - 创建/解散群组，三级角色体系（群主/管理员/普通成员），审批入群
+    3. 私聊消息 - 一对一聊天，支持多种消息类型，clientMessageId 幂等发送
+    4. 群聊消息 - 群组聊天，支持 @提醒、已读回执统计、消息置顶
+    5. 频道广播 - 单向广播频道，管理员发布素材推送给指定用户
+    6. RTC 实时通话 - 音视频通话，集成 LiveKit，支持呼叫/接听/拒绝/取消/挂断
+    7. 表情系统 - 系统表情包 + 用户私人表情
+    8. 敏感词过滤 - 基于 Trie 树的敏感词检测和替换
+
+    定位：面向终端用户的即时通讯模块，支持单聊、群聊、频道广播及 RTC 音视频通话。
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - principle: "双层 Controller 模式"
+      description: "用户端 Controller（无 RBAC，通过登录态鉴权）+ Manager 端 Controller（RBAC 权限控制），分离普通用户操作和管理后台操作"
+    - principle: "双向好友模型"
+      description: "每对好友在 im_friend 表中存储 2 行记录（A->B 和 B->A），各自拥有独立的 silent/pinned/blocked/displayName 属性"
+    - principle: "幂等消息发送"
+      description: "通过 clientMessageId 字段实现客户端消息去重，避免网络重试导致重复消息"
+    - principle: "事务感知异步推送"
+      description: "消息推送使用 afterCommit 回调，确保数据库事务提交后再推送，避免读到未提交数据"
+    - principle: "Redis 已读游标"
+      description: "使用 Redis 存储每个用户在每个会话中的最大已读消息 ID，避免频繁更新数据库"
+    - principle: "LiveKit Webhook 安全"
+      description: "LiveKit Webhook 接口使用 JWT + SHA256 签名验证，同时标记 @PermitAll + @TenantIgnore"
+    - principle: "Trie 树敏感词过滤"
+      description: "使用 sensitive-word 库实现基于 Trie 树的高效敏感词检测和替换"
+    - principle: "OpenIM 兼容消息类型"
+      description: "消息类型编号兼容 OpenIM 协议，便于与 OpenIM 生态对接"
+    - principle: "配置驱动"
+      description: "模块配置统一在 yudao.im.* 命名空间下，通过 ImProperties 类管理"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "频道聚合"
+        type: "聚合根"
+        entities: ["ChannelDO", "ChannelMaterialDO", "ChannelMessageDO"]
+        description: "ChannelDO 是频道聚合根，ChannelMaterialDO 是频道素材，ChannelMessageDO 是频道广播消息"
+      - name: "表情聚合"
+        type: "聚合根"
+        entities: ["FacePackDO", "FacePackItemDO", "FaceUserItemDO"]
+        description: "FacePackDO 是表情包聚合根，FacePackItemDO 是表情项，FaceUserItemDO 是用户私人表情"
+      - name: "好友聚合"
+        type: "聚合根"
+        entities: ["FriendDO", "FriendRequestDO"]
+        description: "FriendDO 是好友关系记录（双向 2 行），FriendRequestDO 是好友请求记录"
+      - name: "群组聚合"
+        type: "聚合根"
+        entities: ["GroupDO", "GroupMemberDO", "GroupRequestDO"]
+        description: "GroupDO 是群组聚合根，GroupMemberDO 是群成员，GroupRequestDO 是入群请求"
+      - name: "消息聚合"
+        type: "聚合根"
+        entities: ["PrivateMessageDO", "GroupMessageDO"]
+        description: "PrivateMessageDO 是私聊消息，GroupMessageDO 是群聊消息"
+      - name: "RTC 通话聚合"
+        type: "聚合根"
+        entities: ["RtcCallDO", "RtcParticipantDO"]
+        description: "RtcCallDO 是通话会话聚合根，RtcParticipantDO 是通话参与者"
+
+    value_objects:
+      - name: "ImProperties"
+        description: "IM 模块配置属性，yudao.im.* 命名空间下的配置项"
+      - name: "GroupMemberRoleEnum"
+        description: "群成员角色枚举：OWNER/ADMIN/NORMAL"
+      - name: "MessageTypeEnum"
+        description: "消息类型枚举，兼容 OpenIM 协议编号"
+
+    services:
+      - name: "FriendService"
+        description: "好友关系服务，管理好友的增删改查、拉黑/取消拉黑"
+      - name: "FriendRequestService"
+        description: "好友请求服务，管理申请、同意、拒绝流程"
+      - name: "GroupService"
+        description: "群组核心服务，管理群组生命周期"
+      - name: "GroupMemberService"
+        description: "群成员服务，管理成员的加入/退出/角色变更"
+      - name: "GroupRequestService"
+        description: "入群请求服务，管理申请和审批流程"
+      - name: "PrivateMessageService"
+        description: "私聊消息服务，管理消息的发送、拉取、已读、撤回"
+      - name: "GroupMessageService"
+        description: "群聊消息服务，管理群消息的发送、拉取、已读、撤回"
+      - name: "ChannelService"
+        description: "频道管理服务，管理频道的 CRUD 和状态"
+      - name: "ChannelMaterialService"
+        description: "素材管理服务，管理素材的创建、编辑、查询"
+      - name: "ChannelMessageService"
+        description: "频道消息服务，管理广播消息的发送和拉取"
+      - name: "RtcService"
+        description: "RTC 通话核心服务，管理通话生命周期"
+      - name: "LiveKitService"
+        description: "LiveKit 集成服务，管理房间和 Token 生成"
+      - name: "FacePackService"
+        description: "表情包服务，管理表情包的 CRUD 和状态"
+      - name: "FaceUserItemService"
+        description: "用户表情服务，管理用户的私人表情"
+      - name: "SensitiveWordService"
+        description: "敏感词服务，管理敏感词库的 CRUD"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间 API 接口，供其他模块 RPC 调用"
+      components: []
+
+    - name: "controller"
+      purpose: "HTTP 接口层，提供 RESTful API"
+      components:
+        - "admin/friend - 好友管理接口（用户端）"
+        - "admin/friend-request - 好友请求接口（用户端）"
+        - "admin/group - 群组管理接口（用户端）"
+        - "admin/group-member - 群成员管理接口（用户端）"
+        - "admin/group-request - 群组请求接口（用户端）"
+        - "admin/message/private - 私聊消息接口（用户端）"
+        - "admin/message/group - 群聊消息接口（用户端）"
+        - "admin/message/channel - 频道消息接口（用户端）"
+        - "admin/channel/material - 频道素材接口（用户端）"
+        - "admin/face-pack - 表情包接口（用户端）"
+        - "admin/face-user-item - 用户表情接口（用户端）"
+        - "admin/rtc - RTC 通话接口（用户端）"
+        - "admin/livekit - LiveKit Webhook 接口"
+        - "admin/manager/* - 管理后台接口（RBAC 保护）"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "friend - 好友服务（FriendService, FriendRequestService）"
+        - "group - 群组服务（GroupService, GroupMemberService, GroupRequestService）"
+        - "message - 消息服务（PrivateMessageService, GroupMessageService, ChannelMessageService）"
+        - "channel - 频道服务（ChannelService, ChannelMaterialService）"
+        - "face - 表情服务（FacePackService, FacePackItemService, FaceUserItemService）"
+        - "rtc - RTC 服务（RtcService, LiveKitService）"
+        - "sensitive - 敏感词服务（SensitiveWordService）"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject - DO 实体类定义"
+        - "mysql - MyBatis Mapper 接口"
+
+    - name: "framework"
+      purpose: "框架层，模块内部基础设施"
+      components:
+        - "config - 模块配置（ImProperties）"
+        - "redis - Redis 已读游标操作"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "双层 Controller 模式 (Two-Tier Controller)"
+      location: "controller/admin/ + controller/admin/manager/"
+      purpose: "用户端 Controller 通过登录态鉴权，管理端 Controller 通过 @PreAuthorize 进行 RBAC 权限校验"
+    - pattern: "幂等模式 (Idempotency Pattern)"
+      location: "service/message/"
+      purpose: "通过 clientMessageId 字段和数据库唯一索引实现消息幂等发送"
+    - pattern: "事务感知异步推送"
+      location: "service/message/"
+      purpose: "使用 TransactionSynchronizationManager.registerSynchronization(afterCommit) 确保事务提交后再推送"
+    - pattern: "游标模式 (Cursor Pattern)"
+      location: "service/message/ + framework/redis/"
+      purpose: "Redis 存储每个用户在每个会话中的最大已读消息 ID，支持增量拉取"
+    - pattern: "安全验证模式"
+      location: "controller/admin/livekit/"
+      purpose: "LiveKit Webhook 使用 JWT + SHA256 签名验证，@PermitAll + @TenantIgnore 组合"
+    - pattern: "Trie 树过滤模式"
+      location: "service/sensitive/"
+      purpose: "基于 sensitive-word 库的 Trie 树实现高效敏感词检测"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "AdminUserApi"
+        method: "getUser()"
+        description: "查询用户基本信息，用于好友信息、群成员信息展示"
+      - name: "AdminUserApi"
+        method: "getUsers()"
+        description: "批量查询用户信息，用于消息列表中展示发送者信息"
+      - name: "FileApi"
+        method: "createFile()"
+        description: "上传文件（头像、图片消息、文件消息）"
+    consumers:
+      - module: "yudao-module-system"
+        api: "AdminUserApi"
+        purpose: "查询用户信息（好友、群成员、消息发送者）"
+      - module: "yudao-module-infra"
+        api: "FileApi"
+        purpose: "上传头像、图片消息、文件消息"
+    mq: []
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有 DO 继承 BaseDO，包含 creator, createTime, updater, updateTime, deleted 字段。"
+
+  # 核心数据表
+  tables:
+    # ========== 频道相关 ==========
+    - name: "im_channel"
+      comment: "频道表"
+      entity: "ChannelDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "频道编号，主键" }
+        - { name: "code", type: "VARCHAR", comment: "频道编码，唯一" }
+        - { name: "name", type: "VARCHAR", comment: "频道名称" }
+        - { name: "avatar", type: "VARCHAR", comment: "频道头像 URL" }
+        - { name: "sort", type: "INT", comment: "排序值" }
+        - { name: "status", type: "TINYINT", comment: "频道状态（启用/禁用）" }
+      indexes:
+        - { name: "uk_code", columns: ["code"], unique: true }
+
+    - name: "im_channel_material"
+      comment: "频道素材表"
+      entity: "ChannelMaterialDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "素材编号，主键" }
+        - { name: "title", type: "VARCHAR", comment: "素材标题" }
+        - { name: "cover_url", type: "VARCHAR", comment: "封面图片 URL" }
+        - { name: "summary", type: "VARCHAR", comment: "内容摘要" }
+        - { name: "content", type: "TEXT", comment: "内容 HTML" }
+        - { name: "url", type: "VARCHAR", comment: "原文链接" }
+
+    - name: "im_channel_message"
+      comment: "频道消息表"
+      entity: "ChannelMessageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "消息编号，主键" }
+        - { name: "channel_id", type: "BIGINT", comment: "频道编号" }
+        - { name: "material_id", type: "BIGINT", comment: "关联素材编号" }
+        - { name: "receiver_user_ids", type: "VARCHAR", comment: "接收用户 ID 列表（JSON 数组）" }
+        - { name: "send_time", type: "DATETIME", comment: "发送时间" }
+      indexes:
+        - { name: "idx_channel_id", columns: ["channel_id"] }
+
+    # ========== 表情相关 ==========
+    - name: "im_face_pack"
+      comment: "表情包表"
+      entity: "FacePackDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "表情包编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "表情包名称" }
+        - { name: "icon", type: "VARCHAR", comment: "表情包图标 URL" }
+        - { name: "sort", type: "INT", comment: "排序值" }
+        - { name: "status", type: "TINYINT", comment: "启用状态" }
+
+    - name: "im_face_pack_item"
+      comment: "表情项表"
+      entity: "FacePackItemDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "表情项编号，主键" }
+        - { name: "pack_id", type: "BIGINT", comment: "所属表情包编号" }
+        - { name: "url", type: "VARCHAR", comment: "表情图片 URL" }
+        - { name: "name", type: "VARCHAR", comment: "表情名称" }
+        - { name: "width", type: "INT", comment: "图片宽度" }
+        - { name: "height", type: "INT", comment: "图片高度" }
+      indexes:
+        - { name: "idx_pack_id", columns: ["pack_id"] }
+
+    - name: "im_face_user_item"
+      comment: "用户表情表"
+      entity: "FaceUserItemDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "表情编号，主键" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "url", type: "VARCHAR", comment: "表情图片 URL" }
+        - { name: "name", type: "VARCHAR", comment: "表情名称" }
+        - { name: "width", type: "INT", comment: "图片宽度" }
+        - { name: "height", type: "INT", comment: "图片高度" }
+      indexes:
+        - { name: "idx_user_id", columns: ["user_id"] }
+
+    # ========== 好友相关 ==========
+    - name: "im_friend"
+      comment: "好友关系表"
+      entity: "FriendDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "关系编号，主键" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "friend_id", type: "BIGINT", comment: "好友用户编号" }
+        - { name: "silent", type: "BIT", comment: "是否免打扰" }
+        - { name: "pinned", type: "BIT", comment: "是否置顶" }
+        - { name: "blocked", type: "BIT", comment: "是否拉黑" }
+        - { name: "display_name", type: "VARCHAR", comment: "好友备注名" }
+      indexes:
+        - { name: "uk_user_friend", columns: ["user_id", "friend_id"], unique: true }
+
+    - name: "im_friend_request"
+      comment: "好友请求表"
+      entity: "FriendRequestDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "请求编号，主键" }
+        - { name: "user_id", type: "BIGINT", comment: "申请人用户编号" }
+        - { name: "friend_id", type: "BIGINT", comment: "目标用户编号" }
+        - { name: "apply_content", type: "VARCHAR", comment: "申请附言" }
+        - { name: "display_name", type: "VARCHAR", comment: "对好友的备注名" }
+        - { name: "add_source", type: "TINYINT", comment: "添加来源" }
+        - { name: "handle_result", type: "TINYINT", comment: "处理结果" }
+        - { name: "handle_time", type: "DATETIME", comment: "处理时间" }
+        - { name: "handle_user_id", type: "BIGINT", comment: "处理人用户编号" }
+      indexes:
+        - { name: "idx_user_id", columns: ["user_id"] }
+        - { name: "idx_friend_id", columns: ["friend_id"] }
+
+    # ========== 群组相关 ==========
+    - name: "im_group"
+      comment: "群组表"
+      entity: "GroupDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "群组编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "群组名称" }
+        - { name: "owner_id", type: "BIGINT", comment: "群主用户编号" }
+        - { name: "avatar", type: "VARCHAR", comment: "群组头像 URL" }
+        - { name: "notice", type: "VARCHAR", comment: "群公告" }
+        - { name: "join_approval", type: "BIT", comment: "是否开启入群审批" }
+        - { name: "banned", type: "BIT", comment: "是否被封禁" }
+        - { name: "muted_all", type: "BIT", comment: "是否全员禁言" }
+        - { name: "pinned_message_ids", type: "VARCHAR", comment: "置顶消息 ID 列表（JSON 数组）" }
+      indexes:
+        - { name: "idx_owner_id", columns: ["owner_id"] }
+
+    - name: "im_group_member"
+      comment: "群成员表"
+      entity: "GroupMemberDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "成员编号，主键" }
+        - { name: "group_id", type: "BIGINT", comment: "群组编号" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "role", type: "TINYINT", comment: "角色（OWNER/ADMIN/NORMAL）" }
+        - { name: "nickname", type: "VARCHAR", comment: "群内昵称" }
+        - { name: "mute_end_time", type: "DATETIME", comment: "禁言结束时间" }
+        - { name: "add_source", type: "TINYINT", comment: "加入来源" }
+        - { name: "inviter", type: "BIGINT", comment: "邀请人用户编号" }
+      indexes:
+        - { name: "uk_group_user", columns: ["group_id", "user_id"], unique: true }
+
+    - name: "im_group_request"
+      comment: "群组请求表"
+      entity: "GroupRequestDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "请求编号，主键" }
+        - { name: "group_id", type: "BIGINT", comment: "群组编号" }
+        - { name: "user_id", type: "BIGINT", comment: "申请人/被邀请人用户编号" }
+        - { name: "type", type: "TINYINT", comment: "请求类型（用户申请/成员邀请）" }
+        - { name: "apply_content", type: "VARCHAR", comment: "申请附言" }
+        - { name: "handle_result", type: "TINYINT", comment: "处理结果" }
+        - { name: "handle_time", type: "DATETIME", comment: "处理时间" }
+        - { name: "handle_user_id", type: "BIGINT", comment: "处理人用户编号" }
+      indexes:
+        - { name: "idx_group_id", columns: ["group_id"] }
+        - { name: "idx_user_id", columns: ["user_id"] }
+
+    # ========== 消息相关 ==========
+    - name: "im_private_message"
+      comment: "私聊消息表"
+      entity: "PrivateMessageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "消息编号，主键" }
+        - { name: "client_message_id", type: "VARCHAR", comment: "客户端消息 ID（幂等键）" }
+        - { name: "sender_id", type: "BIGINT", comment: "发送者用户编号" }
+        - { name: "receiver_id", type: "BIGINT", comment: "接收者用户编号" }
+        - { name: "type", type: "TINYINT", comment: "消息类型" }
+        - { name: "content", type: "VARCHAR", comment: "消息内容（JSON 格式）" }
+        - { name: "status", type: "TINYINT", comment: "消息状态（正常/已撤回）" }
+      indexes:
+        - { name: "uk_client_message_id", columns: ["client_message_id"], unique: true }
+        - { name: "idx_sender_id", columns: ["sender_id"] }
+        - { name: "idx_receiver_id", columns: ["receiver_id"] }
+
+    - name: "im_group_message"
+      comment: "群聊消息表"
+      entity: "GroupMessageDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "消息编号，主键" }
+        - { name: "client_message_id", type: "VARCHAR", comment: "客户端消息 ID（幂等键）" }
+        - { name: "sender_id", type: "BIGINT", comment: "发送者用户编号" }
+        - { name: "group_id", type: "BIGINT", comment: "群组编号" }
+        - { name: "type", type: "TINYINT", comment: "消息类型" }
+        - { name: "content", type: "VARCHAR", comment: "消息内容（JSON 格式）" }
+        - { name: "at_user_ids", type: "VARCHAR", comment: "@的用户 ID 列表（JSON 数组）" }
+        - { name: "status", type: "TINYINT", comment: "消息状态（正常/已撤回）" }
+        - { name: "receipt_status", type: "TINYINT", comment: "已读回执状态" }
+        - { name: "read_count", type: "INT", comment: "已读人数" }
+      indexes:
+        - { name: "uk_client_message_id", columns: ["client_message_id"], unique: true }
+        - { name: "idx_group_id", columns: ["group_id"] }
+        - { name: "idx_sender_id", columns: ["sender_id"] }
+
+    # ========== RTC 相关 ==========
+    - name: "im_rtc_call"
+      comment: "RTC 通话表"
+      entity: "RtcCallDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "通话编号，主键" }
+        - { name: "room_id", type: "VARCHAR", comment: "LiveKit 房间 UUID" }
+        - { name: "conversation_type", type: "TINYINT", comment: "会话类型（私聊/群聊）" }
+        - { name: "media_type", type: "TINYINT", comment: "媒体类型（音频/视频）" }
+        - { name: "inviter_uid", type: "BIGINT", comment: "发起者用户编号" }
+        - { name: "status", type: "TINYINT", comment: "通话状态" }
+        - { name: "start_time", type: "DATETIME", comment: "开始时间" }
+        - { name: "accept_time", type: "DATETIME", comment: "接听时间" }
+        - { name: "end_time", type: "DATETIME", comment: "结束时间" }
+      indexes:
+        - { name: "uk_room_id", columns: ["room_id"], unique: true }
+        - { name: "idx_inviter_uid", columns: ["inviter_uid"] }
+
+    - name: "im_rtc_participant"
+      comment: "RTC 参与者表"
+      entity: "RtcParticipantDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "参与者编号，主键" }
+        - { name: "call_id", type: "BIGINT", comment: "通话编号" }
+        - { name: "user_id", type: "BIGINT", comment: "用户编号" }
+        - { name: "role", type: "TINYINT", comment: "角色（发起者/参与者）" }
+        - { name: "status", type: "TINYINT", comment: "状态（INVITING/JOINED/LEFT/REJECTED/NO_ANSWER）" }
+        - { name: "join_time", type: "DATETIME", comment: "加入时间" }
+        - { name: "leave_time", type: "DATETIME", comment: "离开时间" }
+      indexes:
+        - { name: "idx_call_id", columns: ["call_id"] }
+        - { name: "idx_user_id", columns: ["user_id"] }
+
+    # ========== 敏感词相关 ==========
+    - name: "im_sensitive_word"
+      comment: "敏感词表"
+      entity: "SensitiveWordDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "敏感词编号，主键" }
+        - { name: "word", type: "VARCHAR", comment: "敏感词内容" }
+        - { name: "status", type: "TINYINT", comment: "启用状态" }
+      indexes:
+        - { name: "uk_word", columns: ["word"], unique: true }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "im_channel_message"
+      to: "im_channel"
+      type: "N:1"
+      foreign_key: "channel_id"
+    - from: "im_channel_message"
+      to: "im_channel_material"
+      type: "N:1"
+      foreign_key: "material_id"
+    - from: "im_face_pack_item"
+      to: "im_face_pack"
+      type: "N:1"
+      foreign_key: "pack_id"
+    - from: "im_group_member"
+      to: "im_group"
+      type: "N:1"
+      foreign_key: "group_id"
+    - from: "im_group_request"
+      to: "im_group"
+      type: "N:1"
+      foreign_key: "group_id"
+    - from: "im_group_message"
+      to: "im_group"
+      type: "N:1"
+      foreign_key: "group_id"
+    - from: "im_rtc_participant"
+      to: "im_rtc_call"
+      type: "N:1"
+      foreign_key: "call_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = 'xxx') - Swagger 文档标签"
+      - "@RestController - REST 控制器"
+      - "@RequestMapping('/im/xxx') - 请求路径前缀"
+      - "@Validated - 参数校验"
+      - "@PreAuthorize('@ss.hasPermission('im:xxx:action')') - 权限控制（仅管理端）"
+    example: |
+      @Tag(name = "用户端 - 好友管理")
+      @RestController
+      @RequestMapping("/im/friend")
+      @Validated
+      public class ImFriendController {
+          @Resource
+          private FriendService friendService;
+
+          @GetMapping("/list")
+          @Operation(summary = "获取好友列表")
+          public CommonResult<List<FriendDO>> getFriendList() {
+              return success(friendService.getFriendList(LoginContextHolder.getLoginUserId()));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "XxxService 接口定义业务方法，XxxServiceImpl 实现类"
+    impl_pattern: |
+      @Service
+      @Validated
+      public class XxxServiceImpl implements XxxService {
+          @Resource
+          private XxxMapper xxxMapper;
+
+          // 使用 static final 定义常量
+          // 使用 @Transactional 注解控制事务
+          // 使用 validateXxxExists 方法校验存在性
+          // 使用 exception(ErrorCode) 抛出业务异常
+      }
+    example: |
+      @Service
+      public class PrivateMessageServiceImpl implements PrivateMessageService {
+          @Resource
+          private ImPrivateMessageMapper privateMessageMapper;
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public PrivateMessageDO sendPrivateMessage(PrivateMessageSendReqDTO reqDTO) {
+              // 1. 校验接收者存在
+              // 2. 检查 clientMessageId 幂等
+              // 3. 敏感词过滤
+              // 4. 保存消息
+              PrivateMessageDO message = ...;
+              privateMessageMapper.insert(message);
+              // 5. 事务提交后异步推送
+              TransactionSynchronizationManager.registerSynchronization(
+                  new TransactionSynchronization() {
+                      @Override
+                      public void afterCommit() {
+                          // 推送消息给接收者
+                      }
+                  });
+              return message;
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      public interface XxxMapper extends BaseMapperX<XxxDO> {
+          // 继承 BaseMapperX 获得通用 CRUD 方法
+          // 自定义查询方法使用 @Select 注解或 XML
+          // 分页查询返回 PageResult<XxxDO>
+      }
+    example: |
+      public interface ImPrivateMessageMapper extends BaseMapperX<PrivateMessageDO> {
+          default PageResult<PrivateMessageDO> selectPage(PrivateMessagePageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<PrivateMessageDO>()
+                      .eqIfPresent(PrivateMessageDO::getSenderId, reqVO.getSenderId())
+                      .eqIfPresent(PrivateMessageDO::getReceiverId, reqVO.getReceiverId())
+                      .betweenIfPresent(PrivateMessageDO::getCreateTime, reqVO.getCreateTime())
+                      .orderByDesc(PrivateMessageDO::getId));
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-009-xxx-xxx"
+    examples:
+      - code: "好友已存在"
+      - code: "不是好友关系"
+      - code: "群组不存在"
+      - code: "不是群成员"
+      - code: "已被禁言"
+      - code: "消息已撤回"
+      - code: "撤回超时"
+      - code: "通话不存在"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ErrorCode)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增消息类型
+  new_channel:
+    title: "新增消息类型"
+    steps:
+      - step: "1. 定义消息类型枚举"
+        description: "在 MessageTypeEnum 中添加新的消息类型编号，兼容 OpenIM 协议"
+      - step: "2. 定义消息内容 DTO"
+        description: "创建 XxxContentDTO 类定义该消息类型的 content JSON 结构"
+        code: |
+          @Data
+          public class VideoContentDTO {
+              private String url;
+              private Integer duration;
+              private Integer width;
+              private Integer height;
+              private String thumbUrl;
+          }
+      - step: "3. 实现消息渲染"
+        description: "在客户端实现该消息类型的渲染逻辑"
+      - step: "4. 敏感词处理"
+        description: "如果消息类型包含文本内容，需要在发送时进行敏感词过滤"
+
+  # 新增管理接口
+  new_feature:
+    title: "新增管理后台接口"
+    steps:
+      - step: "1. 创建 Manager Controller"
+        description: "在 controller/admin/manager/ 下创建新的 Controller 类"
+        code: |
+          @Tag(name = "管理后台 - XXX 管理")
+          @RestController
+          @RequestMapping("/im/manager/xxx")
+          @Validated
+          @PreAuthorize("@ss.hasPermission('im:xxx:query')")
+          public class ImXxxManagerController {
+              // 注入 Service
+              // 定义 CRUD 接口
+          }
+      - step: "2. 定义权限标识"
+        description: "在权限系统中注册 im:xxx:query/create/update/delete 权限"
+      - step: "3. 实现 Service 方法"
+        description: "在对应的 Service 中实现管理端的业务逻辑"
+      - step: "4. 添加数据权限"
+        description: "根据需要添加数据权限控制"
+
+  # 最佳实践
+  best_practices:
+    - practice: "clientMessageId 幂等发送"
+      description: "客户端生成 UUID 作为 clientMessageId，服务端通过唯一索引保证幂等，避免网络重试导致重复消息"
+    - practice: "事务感知异步推送"
+      description: "使用 afterCommit 回调确保事务提交后再推送消息，避免接收方读到未提交数据"
+    - practice: "Redis 已读游标"
+      description: "使用 Redis 存储已读游标，避免频繁更新数据库，提高已读状态查询性能"
+    - practice: "双向好友独立属性"
+      description: "每对好友的 2 行记录拥有独立属性，更新时只修改当前用户方向的记录"
+    - practice: "群组角色权限校验"
+      description: "通过 GroupMemberDO.role 字段判断操作权限，注意权限边界（管理员不可踢管理员）"
+    - practice: "LiveKit Webhook 安全"
+      description: "使用 JWT + SHA256 签名验证 Webhook 请求，不要在未验证签名的情况下处理事件"
+    - practice: "敏感词过滤时机"
+      description: "敏感词过滤在消息发送时执行，过滤后直接存储，已发送消息不受后续词库更新影响"
+    - practice: "消息增量拉取"
+      description: "使用 maxMessageId 作为游标进行增量拉取，避免使用 offset 分页的性能问题"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      purpose: "AdminUserApi - 查询用户信息、校验用户存在性"
+    - module: "yudao-module-infra"
+      purpose: "文件存储（头像、图片、文件消息等）"
+    - module: "yudao-framework-common"
+      purpose: "通用工具类、CommonResult、PageResult 等"
+    - module: "yudao-framework-mybatis"
+      purpose: "MyBatis-Plus 封装、BaseMapperX、BaseDO"
+    - module: "yudao-framework-redis"
+      purpose: "Redis 操作封装，用于已读游标存储"
+    - module: "yudao-framework-tenant"
+      purpose: "租户支持"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      purpose: "ORM 框架，提供 CRUD 封装"
+    - name: "sensitive-word"
+      purpose: "基于 Trie 树的敏感词过滤库"
+    - name: "pinyin4j"
+      purpose: "汉字转拼音，用于敏感词拼音匹配"
+    - name: "LiveKit"
+      purpose: "开源实时音视频通信框架，RTC 能力支撑"
+    - name: "Swagger/OpenAPI"
+      purpose: "API 文档注解"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/controller/admin/friend/ImFriendController.java"
+    purpose: "好友管理用户端 Controller"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/controller/admin/group/ImGroupController.java"
+    purpose: "群组管理用户端 Controller"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/controller/admin/message/ImPrivateMessageController.java"
+    purpose: "私聊消息用户端 Controller"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/controller/admin/message/ImGroupMessageController.java"
+    purpose: "群聊消息用户端 Controller"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/controller/admin/rtc/ImRtcController.java"
+    purpose: "RTC 通话用户端 Controller"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/controller/admin/livekit/ImLivekitController.java"
+    purpose: "LiveKit Webhook Controller"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/service/friend/FriendService.java"
+    purpose: "好友关系服务接口"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/service/group/GroupService.java"
+    purpose: "群组核心服务接口"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/service/message/PrivateMessageService.java"
+    purpose: "私聊消息服务接口"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/service/message/GroupMessageService.java"
+    purpose: "群聊消息服务接口"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/service/rtc/RtcService.java"
+    purpose: "RTC 通话服务接口"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/service/sensitive/SensitiveWordService.java"
+    purpose: "敏感词服务接口"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/dal/dataobject/group/GroupDO.java"
+    purpose: "群组实体类"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/dal/dataobject/message/PrivateMessageDO.java"
+    purpose: "私聊消息实体类"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/dal/dataobject/rtc/RtcCallDO.java"
+    purpose: "RTC 通话实体类"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义"
+  - path: "yudao-module-im/src/main/java/cn/iocoder/yudao/module/im/framework/config/ImProperties.java"
+    purpose: "IM 模块配置属性类"

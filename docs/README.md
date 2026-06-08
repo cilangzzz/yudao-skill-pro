@@ -26,8 +26,11 @@
 | **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警 | 6 | 9 | [docs/iot/](iot/README.md) |
 | **mp** | 公众号 | 账号、用户、消息、素材、菜单、自动回复 | 10 | 13 | [docs/mp/](mp/README.md) |
 | **report** | 报表 | GoView 项目、数据查询、积木报表 | 3 | 6 | [docs/report/](report/README.md) |
+| **im** | 即时通讯 | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 10 | [docs/im/](im/README.md) |
+| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | 12 | [docs/mes/](mes/README.md) |
+| **wms** | 仓储管理 | 仓库、物料、库存、入库、出库、调拨、盘点 | 7 | 10 | [docs/wms/](wms/README.md) |
 
-**合计: 12 个模块 / 100 个文档文件**
+**合计: 15 个模块 / 131 个文档文件**
 
 ## 模块依赖关系
 
@@ -63,6 +66,15 @@ system (系统管理) ← 几乎所有模块都依赖
   ├── mp (公众号)
   │   └── 依赖: system (用户), WxJava SDK
   │
+  ├── im (即时通讯)
+  │   └── 依赖: system (用户), infra (文件)
+  │
+  ├── mes (制造执行)
+  │   └── 依赖: system (用户/角色)
+  │
+  ├── wms (仓储管理)
+  │   └── 依赖: system (用户)
+  │
   └── report (报表)
       └── 依赖: system (用户), infra (数据源)
 ```
@@ -83,6 +95,9 @@ system (系统管理) ← 几乎所有模块都依赖
 | iot | 12 | iot_device, iot_product, iot_thing_model |
 | mp | 8 | mp_account, mp_user, mp_message, mp_menu |
 | report | 1 | report_go_view_project |
+| im | 16 | im_private_message, im_group, im_friend, im_channel, im_rtc_call |
+| mes | ~100 | mes_pro_work_order, mes_pro_task, mes_md_item, mes_qc_iqc, mes_wm_material_stock |
+| wms | 16 | wms_inventory, wms_receipt_order, wms_shipment_order, wms_item, wms_warehouse |
 
 ## 生成方式
 

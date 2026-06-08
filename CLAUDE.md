@@ -27,7 +27,7 @@
 
 ## 模块功能文档（docs/）
 
-12 个模块的详细功能文档，由 `author-build-project-docs` 工作流生成。
+15 个模块的详细功能文档，由 `author-build-project-docs` 工作流生成。
 
 > 总索引: [docs/README.md](docs/README.md) — 含模块依赖关系、数据模型统计
 
@@ -45,6 +45,9 @@
 | iot | [docs/iot/](docs/iot/README.md) | 设备、产品、物模型、规则、OTA、告警 | 6 | 12 |
 | mp | [docs/mp/](docs/mp/README.md) | 账号、用户、消息、素材、菜单、自动回复 | 10 | 8 |
 | report | [docs/report/](docs/report/README.md) | GoView 项目、数据查询、积木报表 | 3 | 1 |
+| im | [docs/im/](docs/im/README.md) | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 16 |
+| mes | [docs/mes/](docs/mes/README.md) | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | ~100 |
+| wms | [docs/wms/](docs/wms/README.md) | 仓库、物料、库存、入库、出库、调拨、盘点 | 7 | 16 |
 
 每个模块目录下包含：README.md（索引）+ api-{domain}.md（API 详情）+ data-model.md（数据模型）+ pitfalls.md（踩坑点）
 
@@ -65,6 +68,9 @@ references:
     mapping:
       system: skills/modules/system/skill-system.yaml
       infra: skills/modules/infra/skill-infra.yaml
+      im: skills/modules/im/skill-im.yaml
+      mes: skills/modules/mes/skill-mes.yaml
+      wms: skills/modules/wms/skill-wms.yaml
       # ... 更多模块见下方索引
 ```
 
@@ -88,6 +94,9 @@ references:
 | iot | [skills/modules/iot/skill-iot.yaml](skills/modules/iot/skill-iot.yaml) | 设备、产品、物模型 |
 | mp | [skills/modules/mp/skill-mp.yaml](skills/modules/mp/skill-mp.yaml) | 公众号、菜单、消息 |
 | report | [skills/modules/report/skill-report.yaml](skills/modules/report/skill-report.yaml) | 报表、数据源、图表 |
+| im | [skills/modules/im/skill-im.yaml](skills/modules/im/skill-im.yaml) | 单聊、群聊、消息、RTC、表情、频道 |
+| mes | [skills/modules/mes/skill-mes.yaml](skills/modules/mes/skill-mes.yaml) | 主数据、生产、质检、设备、仓库、排班 |
+| wms | [skills/modules/wms/skill-wms.yaml](skills/modules/wms/skill-wms.yaml) | 仓库、物料、库存、入库、出库、调拨、盘点 |
 
 ---
 

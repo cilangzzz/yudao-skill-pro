@@ -1,0 +1,832 @@
+# Skill 文件 - yudao-module-wms 模块
+# 仓储管理系统知识提取
+
+skill:
+  id: "skill-wms"
+  name: "Warehouse Management Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-wms"
+  created_at: "2026-06-08"
+  updated_at: "2026-06-08"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    wms 模块是仓储管理系统，提供仓储业务全流程管理能力：
+    1. 仓库管理 - 仓库基本信息维护，支持编码、名称、排序
+    2. 物料管理 - 物料主数据管理，包含品牌、分类（树结构）、SKU（多规格）
+    3. 商户管理 - 客户/供应商/既是客户也是供应商的业务伙伴管理
+    4. 库存管理 - 基于 SKU + 仓库维度的库存余额管理，只读设计
+    5. 入库管理 - 入库单创建、审核、完成、取消，完成入库增加库存
+    6. 出库管理 - 出库单创建、审核、完成、取消，完成出库减少库存
+    7. 移库管理 - 库间调拨单创建、审核、完成、取消，完成移库双向变更库存
+    8. 盘点管理 - 库存盘点单创建、审核、完成、取消，完成盘点按实际数量调整库存
+    9. 首页统计 - 订单汇总、订单趋势、库存汇总等仪表盘数据
+
+    定位：面向仓储管理场景，管理仓库、物料、库存及四大单据的完整业务闭环。SKU 作为库存单位，库存以 SKU + 仓库维度跟踪。
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - principle: "单据头/明细模式 (Header + Detail Pattern)"
+      description: "所有四大单据（入库、出库、移库、盘点）均采用 Header + Detail 主子表结构，单据头存储汇总信息，明细行存储 SKU 级别数据"
+    - principle: "只读库存控制器"
+      description: "库存和库存历史 Controller 均为只读，所有库存变更必须通过单据完成（complete）操作触发，确保数据一致性"
+    - principle: "并发安全库存更新"
+      description: "使用 SELECT ... FOR UPDATE 行锁 + DuplicateKeyException 捕获实现库存更新的并发安全和懒初始化"
+    - principle: "VO 组装模式"
+      description: "通过批量查询关联实体到 Map 中，再通过 BeanUtils.toBean() 丰富 VO 对象，避免 N+1 查询"
+    - principle: "单据状态机"
+      description: "PREPARE(0) -> FINISHED(4) 或 CANCELED(5)，单据只有在 PREPARE 状态下才能完成或取消"
+    - principle: "SKU 作为库存单位"
+      description: "库存以 SKU + 仓库维度跟踪，不跟踪物料级别库存，支持多规格管理"
+    - principle: "订单类型常量分段"
+      description: "WmsOrderTypeConstants 定义订单类型范围：入库 [100,200)、出库 [200,300)，用于库存历史来源标识"
+    - principle: "细粒度权限控制"
+      description: "权限标识格式 wms:{entity}:{action}，如 wms:receipt-order:create"
+    - principle: "Excel 导出全覆盖"
+      description: "所有主数据和单据均支持 Excel 导出功能"
+    - principle: "字典集成"
+      description: "单据状态、子类型等使用系统字典管理"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "物料聚合"
+        type: "聚合根"
+        entities: ["ItemDO", "ItemSkuDO", "ItemBrandDO", "ItemCategoryDO"]
+        description: "ItemDO 是物料聚合根，ItemSkuDO 是物料的多规格 SKU，ItemBrandDO 和 ItemCategoryDO 是物料的品牌和分类维度"
+      - name: "商户聚合"
+        type: "聚合根"
+        entities: ["MerchantDO"]
+        description: "MerchantDO 是商户聚合根，管理客户和供应商信息"
+      - name: "仓库聚合"
+        type: "聚合根"
+        entities: ["WarehouseDO"]
+        description: "WarehouseDO 是仓库聚合根，管理仓库基本信息"
+      - name: "库存聚合"
+        type: "聚合根"
+        entities: ["InventoryDO", "InventoryHistoryDO"]
+        description: "InventoryDO 以 SKU + 仓库为唯一维度管理库存余额，InventoryHistoryDO 记录每笔库存变动"
+      - name: "入库单聚合"
+        type: "聚合根"
+        entities: ["ReceiptOrderDO", "ReceiptOrderDetailDO"]
+        description: "ReceiptOrderDO 是入库单聚合根，ReceiptOrderDetailDO 是入库明细行，一对多关系"
+      - name: "出库单聚合"
+        type: "聚合根"
+        entities: ["ShipmentOrderDO", "ShipmentOrderDetailDO"]
+        description: "ShipmentOrderDO 是出库单聚合根，ShipmentOrderDetailDO 是出库明细行，一对多关系"
+      - name: "移库单聚合"
+        type: "聚合根"
+        entities: ["MovementOrderDO", "MovementOrderDetailDO"]
+        description: "MovementOrderDO 是移库单聚合根，MovementOrderDetailDO 是移库明细行，一对多关系"
+      - name: "盘点单聚合"
+        type: "聚合根"
+        entities: ["CheckOrderDO", "CheckOrderDetailDO"]
+        description: "CheckOrderDO 是盘点单聚合根，CheckOrderDetailDO 是盘点明细行，一对多关系"
+
+    value_objects:
+      - name: "WmsOrderTypeConstants"
+        description: "订单类型常量，定义各单据类型范围，用于库存历史来源标识"
+      - name: "OrderStatusEnum"
+        description: "单据状态枚举：PREPARE(0), FINISHED(4), CANCELED(5)"
+
+    services:
+      - name: "ItemService"
+        description: "物料管理服务，提供物料及 SKU 的 CRUD 操作"
+      - name: "ItemBrandService"
+        description: "品牌管理服务"
+      - name: "ItemCategoryService"
+        description: "分类管理服务，支持树形结构操作"
+      - name: "MerchantService"
+        description: "商户管理服务"
+      - name: "WarehouseService"
+        description: "仓库管理服务"
+      - name: "InventoryService"
+        description: "库存管理服务，提供库存查询和变更方法"
+      - name: "InventoryHistoryService"
+        description: "库存历史服务，记录每笔库存变动"
+      - name: "ReceiptOrderService"
+        description: "入库单管理服务"
+      - name: "ShipmentOrderService"
+        description: "出库单管理服务"
+      - name: "MovementOrderService"
+        description: "移库单管理服务"
+      - name: "CheckOrderService"
+        description: "盘点单管理服务"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "api"
+      purpose: "模块间 API 接口，供其他模块 RPC 调用"
+      components: []
+
+    - name: "controller"
+      purpose: "HTTP 接口层，提供 RESTful API"
+      components:
+        - "admin/item - 物料管理接口"
+        - "admin/item-sku - SKU 查询接口（只读）"
+        - "admin/item-brand - 品牌管理接口"
+        - "admin/item-category - 分类管理接口"
+        - "admin/merchant - 商户管理接口"
+        - "admin/warehouse - 仓库管理接口"
+        - "admin/inventory - 库存查询接口（只读）"
+        - "admin/inventory-history - 库存历史查询接口（只读）"
+        - "admin/receipt-order - 入库单管理接口"
+        - "admin/receipt-order-detail - 入库明细查询接口"
+        - "admin/shipment-order - 出库单管理接口"
+        - "admin/shipment-order-detail - 出库明细查询接口"
+        - "admin/movement-order - 移库单管理接口"
+        - "admin/movement-order-detail - 移库明细查询接口"
+        - "admin/check-order - 盘点单管理接口"
+        - "admin/check-order-detail - 盘点明细查询接口"
+        - "admin/home-statistics - 首页统计接口"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "item - 物料服务（ItemService, ItemSkuService）"
+        - "item-brand - 品牌服务（ItemBrandService）"
+        - "item-category - 分类服务（ItemCategoryService）"
+        - "merchant - 商户服务（MerchantService）"
+        - "warehouse - 仓库服务（WarehouseService）"
+        - "inventory - 库存服务（InventoryService, InventoryHistoryService）"
+        - "receipt-order - 入库单服务（ReceiptOrderService, ReceiptOrderDetailService）"
+        - "shipment-order - 出库单服务（ShipmentOrderService, ShipmentOrderDetailService）"
+        - "movement-order - 移库单服务（MovementOrderService, MovementOrderDetailService）"
+        - "check-order - 盘点单服务（CheckOrderService, CheckOrderDetailService）"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject - DO 实体类定义"
+        - "mysql - MyBatis Mapper 接口"
+
+    - name: "enums"
+      purpose: "枚举和常量定义"
+      components:
+        - "WmsOrderTypeConstants - 订单类型常量（入库[100,200)、出库[200,300)等）"
+        - "ErrorCodeConstants - 错误码常量"
+        - "OrderStatusEnum - 单据状态枚举"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "单据头/明细模式 (Header + Detail Pattern)"
+      location: "service/*-order/"
+      purpose: "所有四大单据采用主子表结构，Header 存储汇总信息，Detail 存储 SKU 级别数据"
+    - pattern: "并发安全模式 (Pessimistic Locking)"
+      location: "service/inventory/"
+      purpose: "SELECT ... FOR UPDATE 行锁 + DuplicateKeyException 捕获实现库存更新并发安全"
+    - pattern: "VO 组装模式 (VO Assembly Pattern)"
+      location: "service/*/xxxServiceImpl.java"
+      purpose: "批量查询关联实体到 Map，通过 BeanUtils.toBean() 丰富 VO，避免 N+1"
+    - pattern: "状态机模式 (State Machine)"
+      location: "service/*-order/"
+      purpose: "单据状态：PREPARE(0) -> FINISHED(4) / CANCELED(5)，操作前校验状态"
+    - pattern: "只读控制器模式"
+      location: "controller/admin/inventory/"
+      purpose: "库存和库存历史 Controller 为只读，所有变更通过单据完成触发"
+
+  # 模块间通信
+  communication:
+    apis: []
+    consumers:
+      - module: "yudao-module-system"
+        api: "AdminUserApi"
+        purpose: "批量获取用户信息，用于 VO 组装展示用户名"
+    mq: []
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有 DO 继承 BaseDO，包含 creator, createTime, updater, updateTime, deleted 字段。"
+
+  # 核心数据表
+  tables:
+    # ========== 物料相关 ==========
+    - name: "wms_item_brand"
+      comment: "品牌表"
+      entity: "ItemBrandDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "品牌编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "品牌名称" }
+        - { name: "sort", type: "INT", comment: "排序" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    - name: "wms_item_category"
+      comment: "分类表"
+      entity: "ItemCategoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "分类编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "分类名称" }
+        - { name: "parent_id", type: "BIGINT", comment: "父分类编号（0=顶级）" }
+        - { name: "sort", type: "INT", comment: "排序" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_parent_id", columns: ["parent_id"] }
+
+    - name: "wms_item"
+      comment: "物料表"
+      entity: "ItemDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "物料编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "物料名称" }
+        - { name: "code", type: "VARCHAR", comment: "物料编码" }
+        - { name: "unit", type: "VARCHAR", comment: "计量单位" }
+        - { name: "category_id", type: "BIGINT", comment: "分类编号，关联 ItemCategoryDO" }
+        - { name: "brand_id", type: "BIGINT", comment: "品牌编号，关联 ItemBrandDO" }
+        - { name: "status", type: "TINYINT", comment: "物料状态" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "uk_code", columns: ["code"], unique: true }
+        - { name: "idx_category_id", columns: ["category_id"] }
+        - { name: "idx_brand_id", columns: ["brand_id"] }
+
+    - name: "wms_item_sku"
+      comment: "物料 SKU 表"
+      entity: "ItemSkuDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "SKU 编号，主键" }
+        - { name: "item_id", type: "BIGINT", comment: "物料编号，关联 ItemDO" }
+        - { name: "sku_no", type: "VARCHAR", comment: "SKU 编号/条码" }
+        - { name: "specifications", type: "VARCHAR", comment: "规格属性" }
+        - { name: "bar_code", type: "VARCHAR", comment: "条形码" }
+        - { name: "weight", type: "DECIMAL", comment: "重量" }
+        - { name: "volume", type: "DECIMAL", comment: "体积" }
+        - { name: "purchase_price", type: "DECIMAL", comment: "采购价格" }
+        - { name: "selling_price", type: "DECIMAL", comment: "销售价格" }
+        - { name: "status", type: "TINYINT", comment: "SKU 状态" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_item_id", columns: ["item_id"] }
+        - { name: "idx_sku_no", columns: ["sku_no"] }
+
+    # ========== 商户与仓库 ==========
+    - name: "wms_merchant"
+      comment: "商户表"
+      entity: "MerchantDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "商户编号，主键" }
+        - { name: "name", type: "VARCHAR", comment: "商户名称" }
+        - { name: "type", type: "TINYINT", comment: "商户类型（1=客户 2=供应商 3=两者）" }
+        - { name: "contact", type: "VARCHAR", comment: "联系人" }
+        - { name: "phone", type: "VARCHAR", comment: "联系电话" }
+        - { name: "address", type: "VARCHAR", comment: "地址" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+
+    - name: "wms_warehouse"
+      comment: "仓库表"
+      entity: "WarehouseDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "仓库编号，主键" }
+        - { name: "code", type: "VARCHAR", comment: "仓库编码" }
+        - { name: "name", type: "VARCHAR", comment: "仓库名称" }
+        - { name: "sort", type: "INT", comment: "排序" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "uk_code", columns: ["code"], unique: true }
+
+    # ========== 库存相关 ==========
+    - name: "wms_inventory"
+      comment: "库存表"
+      entity: "InventoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "库存编号，主键" }
+        - { name: "sku_id", type: "BIGINT", comment: "SKU 编号，关联 ItemSkuDO" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库编号，关联 WarehouseDO" }
+        - { name: "quantity", type: "DECIMAL", comment: "库存数量" }
+        - { name: "price", type: "DECIMAL", comment: "库存均价" }
+      indexes:
+        - { name: "uk_sku_warehouse", columns: ["sku_id", "warehouse_id"], unique: true }
+
+    - name: "wms_inventory_history"
+      comment: "库存历史表"
+      entity: "InventoryHistoryDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "历史编号，主键" }
+        - { name: "sku_id", type: "BIGINT", comment: "SKU 编号，关联 ItemSkuDO" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库编号，关联 WarehouseDO" }
+        - { name: "before_quantity", type: "DECIMAL", comment: "变动前数量" }
+        - { name: "after_quantity", type: "DECIMAL", comment: "变动后数量" }
+        - { name: "quantity", type: "DECIMAL", comment: "变动数量（正=增加，负=减少）" }
+        - { name: "price", type: "DECIMAL", comment: "变动价格" }
+        - { name: "source_order_type", type: "INTEGER", comment: "来源单据类型" }
+        - { name: "source_order_id", type: "BIGINT", comment: "来源单据编号" }
+        - { name: "source_order_no", type: "VARCHAR", comment: "来源单号" }
+      indexes:
+        - { name: "idx_sku_warehouse", columns: ["sku_id", "warehouse_id"] }
+        - { name: "idx_source_order", columns: ["source_order_type", "source_order_id"] }
+
+    # ========== 入库单相关 ==========
+    - name: "wms_receipt_order"
+      comment: "入库单表"
+      entity: "ReceiptOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "入库单编号，主键" }
+        - { name: "no", type: "VARCHAR", comment: "入库单号" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库编号，关联 WarehouseDO" }
+        - { name: "merchant_id", type: "BIGINT", comment: "商户编号，关联 MerchantDO" }
+        - { name: "status", type: "TINYINT", comment: "单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED）" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "uk_no", columns: ["no"], unique: true }
+        - { name: "idx_warehouse_id", columns: ["warehouse_id"] }
+        - { name: "idx_status", columns: ["status"] }
+
+    - name: "wms_receipt_order_detail"
+      comment: "入库明细表"
+      entity: "ReceiptOrderDetailDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "明细编号，主键" }
+        - { name: "order_id", type: "BIGINT", comment: "入库单编号，关联 ReceiptOrderDO" }
+        - { name: "sku_id", type: "BIGINT", comment: "SKU 编号，关联 ItemSkuDO" }
+        - { name: "quantity", type: "DECIMAL", comment: "入库数量" }
+        - { name: "price", type: "DECIMAL", comment: "入库单价" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_order_id", columns: ["order_id"] }
+
+    # ========== 出库单相关 ==========
+    - name: "wms_shipment_order"
+      comment: "出库单表"
+      entity: "ShipmentOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "出库单编号，主键" }
+        - { name: "no", type: "VARCHAR", comment: "出库单号" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库编号，关联 WarehouseDO" }
+        - { name: "merchant_id", type: "BIGINT", comment: "商户编号，关联 MerchantDO" }
+        - { name: "status", type: "TINYINT", comment: "单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED）" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "uk_no", columns: ["no"], unique: true }
+        - { name: "idx_warehouse_id", columns: ["warehouse_id"] }
+        - { name: "idx_status", columns: ["status"] }
+
+    - name: "wms_shipment_order_detail"
+      comment: "出库明细表"
+      entity: "ShipmentOrderDetailDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "明细编号，主键" }
+        - { name: "order_id", type: "BIGINT", comment: "出库单编号，关联 ShipmentOrderDO" }
+        - { name: "sku_id", type: "BIGINT", comment: "SKU 编号，关联 ItemSkuDO" }
+        - { name: "quantity", type: "DECIMAL", comment: "出库数量" }
+        - { name: "price", type: "DECIMAL", comment: "出库单价" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_order_id", columns: ["order_id"] }
+
+    # ========== 移库单相关 ==========
+    - name: "wms_movement_order"
+      comment: "移库单表"
+      entity: "MovementOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "移库单编号，主键" }
+        - { name: "no", type: "VARCHAR", comment: "移库单号" }
+        - { name: "from_warehouse_id", type: "BIGINT", comment: "源仓库编号，关联 WarehouseDO" }
+        - { name: "to_warehouse_id", type: "BIGINT", comment: "目标仓库编号，关联 WarehouseDO" }
+        - { name: "status", type: "TINYINT", comment: "单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED）" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "uk_no", columns: ["no"], unique: true }
+        - { name: "idx_from_warehouse_id", columns: ["from_warehouse_id"] }
+        - { name: "idx_to_warehouse_id", columns: ["to_warehouse_id"] }
+        - { name: "idx_status", columns: ["status"] }
+
+    - name: "wms_movement_order_detail"
+      comment: "移库明细表"
+      entity: "MovementOrderDetailDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "明细编号，主键" }
+        - { name: "order_id", type: "BIGINT", comment: "移库单编号，关联 MovementOrderDO" }
+        - { name: "sku_id", type: "BIGINT", comment: "SKU 编号，关联 ItemSkuDO" }
+        - { name: "quantity", type: "DECIMAL", comment: "移库数量" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_order_id", columns: ["order_id"] }
+
+    # ========== 盘点单相关 ==========
+    - name: "wms_check_order"
+      comment: "盘点单表"
+      entity: "CheckOrderDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "盘点单编号，主键" }
+        - { name: "no", type: "VARCHAR", comment: "盘点单号" }
+        - { name: "warehouse_id", type: "BIGINT", comment: "仓库编号，关联 WarehouseDO" }
+        - { name: "status", type: "TINYINT", comment: "单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED）" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "uk_no", columns: ["no"], unique: true }
+        - { name: "idx_warehouse_id", columns: ["warehouse_id"] }
+        - { name: "idx_status", columns: ["status"] }
+
+    - name: "wms_check_order_detail"
+      comment: "盘点明细表"
+      entity: "CheckOrderDetailDO"
+      extends: "BaseDO"
+      columns:
+        - { name: "id", type: "BIGINT", comment: "明细编号，主键" }
+        - { name: "order_id", type: "BIGINT", comment: "盘点单编号，关联 CheckOrderDO" }
+        - { name: "sku_id", type: "BIGINT", comment: "SKU 编号，关联 ItemSkuDO" }
+        - { name: "system_quantity", type: "DECIMAL", comment: "系统数量" }
+        - { name: "actual_quantity", type: "DECIMAL", comment: "实际数量" }
+        - { name: "remark", type: "VARCHAR", comment: "备注" }
+      indexes:
+        - { name: "idx_order_id", columns: ["order_id"] }
+
+  # 表关系（ER关系）
+  relationships:
+    - from: "wms_item"
+      to: "wms_item_category"
+      type: "N:1"
+      foreign_key: "category_id"
+    - from: "wms_item"
+      to: "wms_item_brand"
+      type: "N:1"
+      foreign_key: "brand_id"
+    - from: "wms_item_sku"
+      to: "wms_item"
+      type: "N:1"
+      foreign_key: "item_id"
+    - from: "wms_inventory"
+      to: "wms_item_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+    - from: "wms_inventory"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+    - from: "wms_inventory_history"
+      to: "wms_item_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+    - from: "wms_inventory_history"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+    - from: "wms_receipt_order"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+    - from: "wms_receipt_order"
+      to: "wms_merchant"
+      type: "N:1"
+      foreign_key: "merchant_id"
+    - from: "wms_receipt_order_detail"
+      to: "wms_receipt_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "wms_receipt_order_detail"
+      to: "wms_item_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+    - from: "wms_shipment_order"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+    - from: "wms_shipment_order"
+      to: "wms_merchant"
+      type: "N:1"
+      foreign_key: "merchant_id"
+    - from: "wms_shipment_order_detail"
+      to: "wms_shipment_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "wms_shipment_order_detail"
+      to: "wms_item_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+    - from: "wms_movement_order"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "from_warehouse_id"
+      comment: "源仓库"
+    - from: "wms_movement_order"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "to_warehouse_id"
+      comment: "目标仓库"
+    - from: "wms_movement_order_detail"
+      to: "wms_movement_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "wms_movement_order_detail"
+      to: "wms_item_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+    - from: "wms_check_order"
+      to: "wms_warehouse"
+      type: "N:1"
+      foreign_key: "warehouse_id"
+    - from: "wms_check_order_detail"
+      to: "wms_check_order"
+      type: "N:1"
+      foreign_key: "order_id"
+    - from: "wms_check_order_detail"
+      to: "wms_item_sku"
+      type: "N:1"
+      foreign_key: "sku_id"
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - xxx') - Swagger 文档标签"
+      - "@RestController - REST 控制器"
+      - "@RequestMapping('/wms/xxx') - 请求路径前缀"
+      - "@Validated - 参数校验"
+      - "@PreAuthorize('@ss.hasPermission('wms:xxx:action')') - 权限控制"
+    example: |
+      @Tag(name = "管理后台 - 入库单")
+      @RestController
+      @RequestMapping("/wms/receipt-order")
+      @Validated
+      public class ReceiptOrderController {
+          @Resource
+          private ReceiptOrderService receiptOrderService;
+
+          @PostMapping("/create")
+          @Operation(summary = "创建入库单")
+          @PreAuthorize("@ss.hasPermission('wms:receipt-order:create')")
+          public CommonResult<Long> createReceiptOrder(@Valid @RequestBody ReceiptOrderSaveReqVO reqVO) {
+              return success(receiptOrderService.createReceiptOrder(reqVO));
+          }
+
+          @PutMapping("/complete")
+          @Operation(summary = "完成入库")
+          @PreAuthorize("@ss.hasPermission('wms:receipt-order:update')")
+          public CommonResult<Boolean> completeReceiptOrder(@RequestParam("id") Long id) {
+              receiptOrderService.completeReceiptOrder(id);
+              return success(true);
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "XxxService 接口定义业务方法，XxxServiceImpl 实现类"
+    impl_pattern: |
+      @Service
+      @Validated
+      public class XxxServiceImpl implements XxxService {
+          @Resource
+          private XxxMapper xxxMapper;
+
+          // 使用 static final 定义常量
+          // 使用 @Transactional 注解控制事务
+          // 使用 validateXxxExists 方法校验存在性
+          // 使用 exception(ErrorCode) 抛出业务异常
+      }
+    example: |
+      @Service
+      public class ReceiptOrderServiceImpl implements ReceiptOrderService {
+          @Resource
+          private ReceiptOrderMapper receiptOrderMapper;
+          @Resource
+          private ReceiptOrderDetailMapper receiptOrderDetailMapper;
+          @Resource
+          private InventoryService inventoryService;
+
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public void completeReceiptOrder(Long id) {
+              // 1. 校验单据存在且状态为 PREPARE
+              ReceiptOrderDO order = receiptOrderMapper.selectById(id);
+              validateReceiptOrderCanComplete(order);
+
+              // 2. 遍历明细行，增加库存
+              List<ReceiptOrderDetailDO> details = receiptOrderDetailMapper.selectListByOrderId(id);
+              for (ReceiptOrderDetailDO detail : details) {
+                  inventoryService.addStock(detail.getSkuId(), order.getWarehouseId(),
+                      detail.getQuantity(), detail.getPrice(),
+                      WmsOrderTypeConstants.RECEIPT_ORDER_TYPE, order.getId(), order.getNo());
+              }
+
+              // 3. 更新单据状态为 FINISHED
+              receiptOrderMapper.updateById(new ReceiptOrderDO().setId(id)
+                  .setStatus(OrderStatusEnum.FINISHED.getStatus()));
+          }
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      public interface XxxMapper extends BaseMapperX<XxxDO> {
+          // 继承 BaseMapperX 获得通用 CRUD 方法
+          // 自定义查询方法使用 @Select 注解或 XML
+          // 分页查询返回 PageResult<XxxDO>
+      }
+    example: |
+      public interface InventoryMapper extends BaseMapperX<InventoryDO> {
+          default PageResult<InventoryDO> selectPage(InventoryPageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<InventoryDO>()
+                      .eqIfPresent(InventoryDO::getSkuId, reqVO.getSkuId())
+                      .eqIfPresent(InventoryDO::getWarehouseId, reqVO.getWarehouseId())
+                      .orderByDesc(InventoryDO::getId));
+          }
+      }
+
+  # 库存并发安全模式
+  inventory_concurrency:
+    description: "库存更新使用 SELECT ... FOR UPDATE 行锁 + DuplicateKeyException 捕获实现并发安全"
+    example: |
+      @Service
+      public class InventoryServiceImpl implements InventoryService {
+          @Override
+          @Transactional(rollbackFor = Exception.class)
+          public void addStock(Long skuId, Long warehouseId, BigDecimal quantity,
+                              BigDecimal price, Integer sourceOrderType,
+                              Long sourceOrderId, String sourceOrderNo) {
+              // 1. 查询库存记录（带行锁）
+              InventoryDO inventory = inventoryMapper.selectBySkuIdAndWarehouseIdForUpdate(skuId, warehouseId);
+
+              BigDecimal beforeQuantity;
+              if (inventory == null) {
+                  // 2. 首次入库，尝试插入（懒初始化）
+                  try {
+                      inventory = new InventoryDO().setSkuId(skuId)
+                          .setWarehouseId(warehouseId).setQuantity(quantity).setPrice(price);
+                      inventoryMapper.insert(inventory);
+                      beforeQuantity = BigDecimal.ZERO;
+                  } catch (DuplicateKeyException e) {
+                      // 3. 并发插入冲突，重新查询
+                      inventory = inventoryMapper.selectBySkuIdAndWarehouseIdForUpdate(skuId, warehouseId);
+                      beforeQuantity = inventory.getQuantity();
+                      inventory.setQuantity(beforeQuantity.add(quantity));
+                      inventoryMapper.updateById(inventory);
+                  }
+              } else {
+                  // 4. 已有记录，直接更新
+                  beforeQuantity = inventory.getQuantity();
+                  inventory.setQuantity(beforeQuantity.add(quantity));
+                  inventoryMapper.updateById(inventory);
+              }
+
+              // 5. 记录库存变动历史
+              inventoryHistoryService.createHistory(skuId, warehouseId,
+                  beforeQuantity, inventory.getQuantity(), quantity, price,
+                  sourceOrderType, sourceOrderId, sourceOrderNo);
+          }
+      }
+
+  # 异常处理
+  error_handling:
+    code_prefix: "wms 模块错误码需遵循项目统一的错误码分配规则"
+    examples:
+      - message: "物料不存在"
+      - message: "仓库不存在"
+      - message: "商户不存在"
+      - message: "SKU 不存在"
+      - message: "库存不足"
+      - message: "单据状态不允许操作"
+      - message: "品牌存在关联数据不允许删除"
+      - message: "分类存在子分类不允许删除"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ErrorCode)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增单据类型
+  new_channel:
+    title: "新增仓储单据类型"
+    steps:
+      - step: "1. 分配订单类型常量"
+        description: "在 WmsOrderTypeConstants 中分配新的类型范围"
+        code: |
+          // 示例：新增调拨单，类型范围 [500, 600)
+          public static final int TRANSFER_ORDER_TYPE_BEGIN = 500;
+          public static final int TRANSFER_ORDER_TYPE_END = 600;
+      - step: "2. 创建单据头和明细表"
+        description: "创建主子表，单据头包含 no、warehouse_id、status 等字段"
+        code: |
+          CREATE TABLE wms_transfer_order (
+            id BIGINT PRIMARY KEY AUTO_INCREMENT,
+            no VARCHAR(64) NOT NULL,
+            warehouse_id BIGINT NOT NULL,
+            status TINYINT NOT NULL DEFAULT 0,
+            remark VARCHAR(512),
+            -- BaseDO 字段
+            creator VARCHAR(64), create_time DATETIME, updater VARCHAR(64),
+            update_time DATETIME, deleted BIT DEFAULT 0,
+            UNIQUE KEY uk_no (no)
+          );
+      - step: "3. 创建 DO、Mapper、Service、Controller"
+        description: "按照既有模式创建完整的 CRUD 代码"
+      - step: "4. 实现完成/取消逻辑"
+        description: "在 Service 中实现单据完成时的库存变更逻辑"
+      - step: "5. 添加权限配置"
+        description: "在系统中配置权限标识 wms:transfer-order:{action}"
+
+  # 新增物料属性
+  new_feature:
+    title: "扩展物料属性"
+    steps:
+      - step: "1. 添加字段到 wms_item 或 wms_item_sku"
+        description: "根据属性粒度决定添加到物料表还是 SKU 表"
+      - step: "2. 更新 DO 类"
+        description: "在对应的 DO 类中添加字段"
+      - step: "3. 更新 VO 类"
+        description: "在 SaveReqVO 和 RespVO 中添加字段"
+      - step: "4. 更新 Controller 和 Service"
+        description: "确保新字段在 CRUD 流程中正确处理"
+      - step: "5. 更新 Excel 导出模板"
+        description: "在导出 VO 中添加 @ExcelProperty 注解"
+
+  # 最佳实践
+  best_practices:
+    - practice: "库存更新必须使用行锁"
+      description: "所有库存更新操作必须使用 SELECT ... FOR UPDATE 行锁，避免并发更新丢失"
+    - practice: "单据完成操作使用事务"
+      description: "单据完成涉及状态更新、库存变更、历史记录，必须在同一事务中完成"
+    - practice: "VO 组装使用批量查询"
+      description: "通过 AdminUserApi.getUserMap() 等批量查询避免 N+1 问题"
+    - practice: "单据操作前校验状态"
+      description: "完成、取消、更新、删除操作前必须校验单据状态为 PREPARE"
+    - practice: "订单类型常量分段管理"
+      description: "新单据类型必须在 WmsOrderTypeConstants 中分配范围，避免类型冲突"
+    - practice: "SKU 作为库存单位"
+      description: "库存以 SKU + 仓库维度管理，物料级别不跟踪库存"
+    - practice: "分类树一次性加载"
+      description: "分类查询建议一次性加载所有数据到内存后构建树，避免递归查询数据库"
+    - practice: "Excel 导出控制数据量"
+      description: "大数据量导出使用 EasyExcel 流式写入，避免内存溢出"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      purpose: "AdminUserApi - 批量获取用户信息用于 VO 组装"
+    - module: "yudao-framework-common"
+      purpose: "通用工具类、CommonResult、PageResult 等"
+    - module: "yudao-framework-mybatis"
+      purpose: "MyBatis-Plus 封装、BaseMapperX、BaseDO"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      purpose: "ORM 框架，提供 CRUD 封装"
+    - name: "Hutool"
+      purpose: "Java 工具类库"
+    - name: "Swagger/OpenAPI"
+      purpose: "API 文档注解"
+    - name: "Apache POI / EasyExcel"
+      purpose: "Excel 导入导出"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/inventory/InventoryServiceImpl.java"
+    purpose: "库存服务实现，核心库存变更逻辑（并发安全）"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/inventory/InventoryHistoryServiceImpl.java"
+    purpose: "库存历史服务，记录每笔库存变动"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/receiptorder/ReceiptOrderServiceImpl.java"
+    purpose: "入库单服务实现，完成入库触发库存增加"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/shipmentorder/ShipmentOrderServiceImpl.java"
+    purpose: "出库单服务实现，完成出库触发库存减少"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/movementorder/MovementOrderServiceImpl.java"
+    purpose: "移库单服务实现，完成移库触发双向库存变更"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/checkorder/CheckOrderServiceImpl.java"
+    purpose: "盘点单服务实现，完成盘点触发库存调整"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/service/item/ItemServiceImpl.java"
+    purpose: "物料服务实现，包含 SKU 嵌入管理"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/dal/mysql/inventory/InventoryMapper.java"
+    purpose: "库存 Mapper，含 FOR UPDATE 查询方法"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/enums/WmsOrderTypeConstants.java"
+    purpose: "订单类型常量，定义各单据类型范围"
+  - path: "yudao-module-wms/src/main/java/cn/iocoder/yudao/module/wms/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义"

@@ -1,0 +1,964 @@
+# Skill 文件 - yudao-module-mes 模块
+# 制造执行系统模块知识提取
+
+skill:
+  id: "skill-mes"
+  name: "Manufacturing Execution System Skill"
+  version: "1.0.0"
+  module_path: "yudao-module-mes"
+  created_at: "2026-06-08"
+  updated_at: "2026-06-08"
+
+# ============================================
+# 第一阶段：设计理念
+# ============================================
+philosophy:
+  # 业务定位：模块解决什么业务问题？在整个系统中的定位？
+  business_position: |
+    mes 模块是制造执行系统（MES），连接 ERP 计划层与车间执行层，实现生产过程的数字化管理：
+    1. 主数据管理 - 物料、BOM、工艺路线、SOP/SIP、客户/供应商、车间/工位、自动编码规则
+    2. 生产管理 - 工单（草稿->确认->完工/取消）、工序任务（甘特图）、流转卡、报工反馈、安灯呼叫
+    3. 质量管理 - 检验模板、检验指标、缺陷管理、IQC/IPQC/OQC/RQC 四大检验
+    4. 设备管理 - 设备台账、点检计划/记录、保养记录、维修管理
+    5. 工具管理 - 工具台账、工具类型
+    6. 仓库管理 - 仓库/库区/库位、物料库存、批次、条码/SN、各类出入库、调拨、盘点
+    7. 排班日历 - 工厂日历、节假日、排班计划、班组管理
+    8. 首页看板 - 订单汇总、工单状态、生产趋势统计
+
+    定位：面向离散制造和流程制造，提供从生产计划下达到成品入库的全流程管理。
+
+  # 设计原则：遵循了哪些设计原则（SOLID、DDD）？有哪些架构决策？
+  design_principles:
+    - principle: "状态机模式"
+      description: "工单/流转卡/报工/维修/调拨/排班计划等核心实体使用状态机管理状态流转，变更前校验前置状态，使用 CAS 防止并发覆盖"
+    - principle: "策略模式"
+      description: "自动编码规则支持日期、固定字符、输入字符、序列号等零件组合，不同零件类型有不同的生成策略"
+    - principle: "VO Assembly 模式"
+      description: "查询接口批量获取关联实体后组装 VO，避免 N+1 查询，提升查询性能"
+    - principle: "标准 CRUD 模式"
+      description: "全部 Controller/Service/Mapper 遵循统一的增删改查规范，配合 @PreAuthorize 权限控制"
+    - principle: "主子表结构"
+      description: "BOM、检验单、出入库单、维修单等使用主子表结构，子表通过外键关联主表"
+    - principle: "Oracle/PG 兼容"
+      description: "使用 @KeySequence 注解兼容 Oracle 和 PostgreSQL 的主键生成方式"
+    - principle: "跨模块 API 集成"
+      description: "通过 AdminUserApi、RoleApi 等接口与 system 模块集成，不直接依赖实现类"
+
+  # 领域模型：核心领域对象有哪些？领域对象之间的关系？聚合根是什么？
+  domain_model:
+    aggregates:
+      - name: "物料聚合"
+        type: "聚合根"
+        entities: ["ItemDO", "ItemBatchConfigDO"]
+        description: "ItemDO 是物料聚合根，BatchConfigDO 定义物料的批次生成规则"
+      - name: "BOM 聚合"
+        type: "聚合根"
+        entities: ["ProductBomDO", "Bom子表"]
+        description: "ProductBomDO 是 BOM 聚合根，定义产品由哪些子物料组成及用量"
+      - name: "工艺路线聚合"
+        type: "聚合根"
+        entities: ["RouteDO", "RouteProcessDO", "RouteProductDO"]
+        description: "RouteDO 是工艺路线聚合根，包含工序列表和适用产品"
+      - name: "工单聚合"
+        type: "聚合根"
+        entities: ["WorkOrderDO", "WorkOrderBomDO"]
+        description: "WorkOrderDO 是工单聚合根，关联 BOM 和工艺路线"
+      - name: "任务聚合"
+        type: "聚合根"
+        entities: ["TaskDO", "TaskIssueDO"]
+        description: "TaskDO 是生产任务聚合根，关联工序、工位、设备、操作员"
+      - name: "流转卡聚合"
+        type: "聚合根"
+        entities: ["CardDO", "CardProcessDO"]
+        description: "CardDO 是流转卡聚合根，跟踪各工序的执行情况"
+      - name: "检验单聚合"
+        type: "聚合根"
+        entities: ["QcIqcDO/QcIpqcDO/QcOqcDO/QcRqcDO", "检验行"]
+        description: "四大检验单各自为聚合根，主子表结构"
+      - name: "设备聚合"
+        type: "聚合根"
+        entities: ["MachineryDO", "CheckPlanDO", "CheckRecordDO", "MaintenRecordDO", "RepairDO"]
+        description: "MachineryDO 是设备聚合根，关联点检、保养、维修"
+      - name: "仓库聚合"
+        type: "聚合根"
+        entities: ["WarehouseDO", "WarehouseAreaDO", "WarehouseLocationDO"]
+        description: "WarehouseDO 是仓库聚合根，包含库区和库位的层级结构"
+      - name: "库存聚合"
+        type: "聚合根"
+        entities: ["MaterialStockDO", "BatchDO", "BarcodeDO", "SnDO"]
+        description: "MaterialStockDO 是库存聚合根，按物料/仓库/库位/批次维度管理"
+      - name: "排班聚合"
+        type: "聚合根"
+        entities: ["CalPlanDO", "CalPlanShiftDO", "CalPlanTeamDO", "CalTeamDO"]
+        description: "CalPlanDO 是排班计划聚合根，关联班次和班组"
+      - name: "自动编码聚合"
+        type: "聚合根"
+        entities: ["AutoCodeRuleDO", "AutoCodePartDO", "AutoCodeRecordDO"]
+        description: "AutoCodeRuleDO 是编码规则聚合根，由零件组合定义编码格式"
+
+    services:
+      - name: "ItemService"
+        description: "物料管理服务，提供物料的增删改查"
+      - name: "ProductBomService"
+        description: "BOM 管理服务，管理产品物料清单"
+      - name: "RouteService"
+        description: "工艺路线服务，管理生产工序流程"
+      - name: "WorkOrderService"
+        description: "工单管理服务，工单状态机流转"
+      - name: "TaskService"
+        description: "生产任务服务，支持甘特图排产"
+      - name: "CardService"
+        description: "流转卡服务，跟踪生产工序执行"
+      - name: "FeedbackService"
+        description: "报工反馈服务，提交/审批报工"
+      - name: "QcIqcService/QcIpqcService/QcOqcService/QcRqcService"
+        description: "四大检验服务，管理来料/过程/出货/退货检验"
+      - name: "MachineryService"
+        description: "设备管理服务，设备台账维护"
+      - name: "RepairService"
+        description: "维修管理服务，维修单状态流转"
+      - name: "WarehouseService"
+        description: "仓库管理服务，仓库/库区/库位层级管理"
+      - name: "MaterialStockService"
+        description: "库存管理服务，出入库、调拨、盘点"
+      - name: "AutoCodeService"
+        description: "自动编码服务，根据规则生成业务单号"
+      - name: "CalPlanService"
+        description: "排班计划服务，工厂日历和班组排班"
+
+# ============================================
+# 第二阶段：架构设计
+# ============================================
+architecture:
+  # 分层架构
+  layers:
+    - name: "controller"
+      purpose: "HTTP 接口层，提供 RESTful API"
+      components:
+        - "admin/home - 首页看板接口"
+        - "admin/cal - 排班日历接口（cal/holiday, cal/plan, cal/team 等）"
+        - "admin/md - 主数据接口（item, bom, sop, sip, client, vendor, workshop, workstation, auto-code）"
+        - "admin/pro - 生产管理接口（work-order, task, route, process, card, feedback, work-record, andon）"
+        - "admin/qc - 质量管理接口（template, indicator, defect, iqc, ipqc, oqc, rqc, pending-inspect）"
+        - "admin/dv - 设备管理接口（machinery, machinery-type, check-plan, check-record, mainten-record, repair, subject）"
+        - "admin/tm - 工具管理接口（tool, tool-type）"
+        - "admin/wm - 仓库管理接口（warehouse, area, location, material-stock, batch, barcode, sn, arrival-notice, item-receipt, product-receipt, product-issue, return-issue, misc-issue, misc-receipt, product-sales, return-sales, outsource-issue, outsource-receipt, return-vendor, transfer, package, stock-taking, sales-notice）"
+
+    - name: "service"
+      purpose: "业务逻辑层"
+      components:
+        - "md - 主数据服务（ItemService, ProductBomService, RouteService, WorkshopService, WorkstationService, AutoCodeService）"
+        - "pro - 生产服务（WorkOrderService, TaskService, CardService, FeedbackService, WorkRecordService, AndonService）"
+        - "qc - 质量服务（QcTemplateService, QcIndicatorService, QcDefectService, QcIqcService, QcIpqcService, QcOqcService, QcRqcService）"
+        - "dv - 设备服务（MachineryService, CheckPlanService, CheckRecordService, MaintenRecordService, RepairService）"
+        - "tm - 工具服务（ToolService）"
+        - "wm - 仓库服务（WarehouseService, MaterialStockService, BatchService, BarcodeService, 各出入库Service, TransferService, PackageService, StockTakingService）"
+        - "cal - 日历服务（CalPlanService, CalHolidayService, CalTeamService）"
+        - "home - 首页服务（HomeService）"
+
+    - name: "dal"
+      purpose: "数据访问层"
+      components:
+        - "dataobject - DO 实体类定义，按域组织（md/pro/qc/dv/tm/wm/cal）"
+        - "mysql - MyBatis Mapper 接口，继承 BaseMapperX"
+
+    - name: "enums"
+      purpose: "枚举和错误码"
+      components:
+        - "MesBizTypeConstants - 集中管理业务类型常量"
+        - "各状态枚举 - WorkOrderStatusEnum, CardStatusEnum, FeedbackStatusEnum, RepairStatusEnum 等"
+        - "ErrorCodeConstants - 错误码常量定义"
+
+  # 设计模式应用
+  design_patterns:
+    - pattern: "状态机模式 (State Machine Pattern)"
+      location: "service 层各核心实体的状态管理"
+      purpose: "工单/流转卡/报工/维修/调拨/排班计划的状态流转管理，变更前校验前置状态"
+    - pattern: "策略模式 (Strategy Pattern)"
+      location: "service/md/AutoCodeService"
+      purpose: "自动编码规则支持日期、固定字符、输入字符、序列号等零件组合，不同零件类型有不同的生成策略"
+    - pattern: "VO Assembly 模式"
+      location: "controller 层的 get/page 接口"
+      purpose: "批量获取关联实体后组装 VO，避免 N+1 查询"
+    - pattern: "标准 CRUD 模式"
+      location: "全部 Controller/Service/Mapper"
+      purpose: "统一的增删改查 + @PreAuthorize 权限控制"
+    - pattern: "主子表模式"
+      location: "BOM、检验单、出入库单、维修单等"
+      purpose: "主表记录基本信息，子表记录明细，通过外键关联"
+    - pattern: "CAS 更新模式"
+      location: "状态变更、库存扣减"
+      purpose: "使用 WHERE status = #{oldStatus} 防止并发覆盖"
+
+  # 模块间通信
+  communication:
+    apis:
+      - name: "AdminUserApi"
+        method: "getUser()"
+        description: "获取用户信息，用于工位操作员、报工人等关联"
+      - name: "RoleApi"
+        method: "hasAnyRole()"
+        description: "角色权限校验"
+    consumers:
+      - module: "yudao-module-system"
+        api: "AdminUserApi"
+        purpose: "获取用户信息（工位操作员名称、报工人名称等）"
+      - module: "yudao-module-system"
+        api: "RoleApi"
+        purpose: "角色权限校验"
+    mq: []
+
+# ============================================
+# 第三阶段：数据表设计
+# ============================================
+data_model:
+  # 实体继承体系
+  entity_hierarchy:
+    base: "BaseDO"
+    description: "所有 DO 继承 BaseDO，包含 id, creator, createTime, updater, updateTime, deleted 字段。部分表使用 @KeySequence 注解兼容 Oracle/PostgreSQL。"
+
+  # 核心数据表（按域组织）
+  tables:
+    # ========== 主数据域 (MD) - 17 张表 ==========
+    - name: "mes_md_item"
+      comment: "物料表"
+      entity: "MesItemDO"
+      domain: "MD"
+    - name: "mes_md_item_type"
+      comment: "物料分类表"
+      entity: "MesItemTypeDO"
+      domain: "MD"
+    - name: "mes_md_item_batch_config"
+      comment: "物料批次配置表"
+      entity: "MesItemBatchConfigDO"
+      domain: "MD"
+    - name: "mes_md_product_bom"
+      comment: "产品 BOM 表"
+      entity: "MesProductBomDO"
+      domain: "MD"
+    - name: "mes_md_product_sip"
+      comment: "产品 SIP 表（标准检验程序）"
+      entity: "MesProductSipDO"
+      domain: "MD"
+    - name: "mes_md_product_sop"
+      comment: "产品 SOP 表（标准作业指导书）"
+      entity: "MesProductSopDO"
+      domain: "MD"
+    - name: "mes_md_client"
+      comment: "客户表"
+      entity: "MesClientDO"
+      domain: "MD"
+    - name: "mes_md_vendor"
+      comment: "供应商表"
+      entity: "MesVendorDO"
+      domain: "MD"
+    - name: "mes_md_unit_measure"
+      comment: "计量单位表"
+      entity: "MesUnitMeasureDO"
+      domain: "MD"
+    - name: "mes_md_workshop"
+      comment: "车间表"
+      entity: "MesWorkshopDO"
+      domain: "MD"
+    - name: "mes_md_workstation"
+      comment: "工位表"
+      entity: "MesWorkstationDO"
+      domain: "MD"
+    - name: "mes_md_workstation_machine"
+      comment: "工位机器关联表"
+      entity: "MesWorkstationMachineDO"
+      domain: "MD"
+    - name: "mes_md_workstation_tool"
+      comment: "工位工具关联表"
+      entity: "MesWorkstationToolDO"
+      domain: "MD"
+    - name: "mes_md_workstation_worker"
+      comment: "工位工人关联表"
+      entity: "MesWorkstationWorkerDO"
+      domain: "MD"
+    - name: "mes_md_auto_code_rule"
+      comment: "自动编码规则表"
+      entity: "MesAutoCodeRuleDO"
+      domain: "MD"
+    - name: "mes_md_auto_code_part"
+      comment: "编码规则零件表"
+      entity: "MesAutoCodePartDO"
+      domain: "MD"
+    - name: "mes_md_auto_code_record"
+      comment: "编码记录表"
+      entity: "MesAutoCodeRecordDO"
+      domain: "MD"
+
+    # ========== 生产域 (PRO) - 17 张表 ==========
+    - name: "mes_pro_work_order"
+      comment: "生产工单表"
+      entity: "MesWorkOrderDO"
+      domain: "PRO"
+    - name: "mes_pro_work_order_bom"
+      comment: "工单 BOM 表"
+      entity: "MesWorkOrderBomDO"
+      domain: "PRO"
+    - name: "mes_pro_task"
+      comment: "生产任务表"
+      entity: "MesTaskDO"
+      domain: "PRO"
+    - name: "mes_pro_task_issue"
+      comment: "任务领料表"
+      entity: "MesTaskIssueDO"
+      domain: "PRO"
+    - name: "mes_pro_route"
+      comment: "工艺路线表"
+      entity: "MesRouteDO"
+      domain: "PRO"
+    - name: "mes_pro_route_process"
+      comment: "工艺路线工序表"
+      entity: "MesRouteProcessDO"
+      domain: "PRO"
+    - name: "mes_pro_route_product"
+      comment: "工艺路线产品关联表"
+      entity: "MesRouteProductDO"
+      domain: "PRO"
+    - name: "mes_pro_route_product_bom"
+      comment: "工艺路线产品 BOM 关联表"
+      entity: "MesRouteProductBomDO"
+      domain: "PRO"
+    - name: "mes_pro_process"
+      comment: "工序表"
+      entity: "MesProcessDO"
+      domain: "PRO"
+    - name: "mes_pro_process_content"
+      comment: "工序内容表"
+      entity: "MesProcessContentDO"
+      domain: "PRO"
+    - name: "mes_pro_card"
+      comment: "流转卡表"
+      entity: "MesCardDO"
+      domain: "PRO"
+    - name: "mes_pro_card_process"
+      comment: "流转卡工序表"
+      entity: "MesCardProcessDO"
+      domain: "PRO"
+    - name: "mes_pro_feedback"
+      comment: "报工反馈表"
+      entity: "MesFeedbackDO"
+      domain: "PRO"
+    - name: "mes_pro_work_record"
+      comment: "报工记录表"
+      entity: "MesWorkRecordDO"
+      domain: "PRO"
+    - name: "mes_pro_work_record_log"
+      comment: "报工日志表"
+      entity: "MesWorkRecordLogDO"
+      domain: "PRO"
+    - name: "mes_pro_andon_config"
+      comment: "安灯配置表"
+      entity: "MesAndonConfigDO"
+      domain: "PRO"
+    - name: "mes_pro_andon_record"
+      comment: "安灯记录表"
+      entity: "MesAndonRecordDO"
+      domain: "PRO"
+
+    # ========== 质量域 (QC) - 17 张表 ==========
+    - name: "mes_qc_template"
+      comment: "检验模板表"
+      entity: "MesQcTemplateDO"
+      domain: "QC"
+    - name: "mes_qc_template_item"
+      comment: "检验模板检验项表"
+      entity: "MesQcTemplateItemDO"
+      domain: "QC"
+    - name: "mes_qc_template_indicator"
+      comment: "检验模板指标表"
+      entity: "MesQcTemplateIndicatorDO"
+      domain: "QC"
+    - name: "mes_qc_indicator"
+      comment: "检验指标表"
+      entity: "MesQcIndicatorDO"
+      domain: "QC"
+    - name: "mes_qc_indicator_result"
+      comment: "指标结果表"
+      entity: "MesQcIndicatorResultDO"
+      domain: "QC"
+    - name: "mes_qc_indicator_result_detail"
+      comment: "指标结果明细表"
+      entity: "MesQcIndicatorResultDetailDO"
+      domain: "QC"
+    - name: "mes_qc_defect"
+      comment: "缺陷类型表"
+      entity: "MesQcDefectDO"
+      domain: "QC"
+    - name: "mes_qc_defect_record"
+      comment: "缺陷记录表"
+      entity: "MesQcDefectRecordDO"
+      domain: "QC"
+    - name: "mes_qc_iqc"
+      comment: "来料检验单表"
+      entity: "MesQcIqcDO"
+      domain: "QC"
+    - name: "mes_qc_iqc_line"
+      comment: "来料检验行表"
+      entity: "MesQcIqcLineDO"
+      domain: "QC"
+    - name: "mes_qc_ipqc"
+      comment: "过程检验单表"
+      entity: "MesQcIpqcDO"
+      domain: "QC"
+    - name: "mes_qc_ipqc_line"
+      comment: "过程检验行表"
+      entity: "MesQcIpqcLineDO"
+      domain: "QC"
+    - name: "mes_qc_oqc"
+      comment: "出货检验单表"
+      entity: "MesQcOqcDO"
+      domain: "QC"
+    - name: "mes_qc_oqc_line"
+      comment: "出货检验行表"
+      entity: "MesQcOqcLineDO"
+      domain: "QC"
+    - name: "mes_qc_rqc"
+      comment: "退货检验单表"
+      entity: "MesQcRqcDO"
+      domain: "QC"
+    - name: "mes_qc_rqc_line"
+      comment: "退货检验行表"
+      entity: "MesQcRqcLineDO"
+      domain: "QC"
+
+    # ========== 设备域 (DV) - 12 张表 ==========
+    - name: "mes_dv_machinery"
+      comment: "设备台账表"
+      entity: "MesMachineryDO"
+      domain: "DV"
+    - name: "mes_dv_machinery_type"
+      comment: "设备类型表"
+      entity: "MesMachineryTypeDO"
+      domain: "DV"
+    - name: "mes_dv_check_plan"
+      comment: "点检计划表"
+      entity: "MesCheckPlanDO"
+      domain: "DV"
+    - name: "mes_dv_check_plan_machinery"
+      comment: "点检计划设备关联表"
+      entity: "MesCheckPlanMachineryDO"
+      domain: "DV"
+    - name: "mes_dv_check_plan_subject"
+      comment: "点检计划检查项关联表"
+      entity: "MesCheckPlanSubjectDO"
+      domain: "DV"
+    - name: "mes_dv_check_record"
+      comment: "点检记录表"
+      entity: "MesCheckRecordDO"
+      domain: "DV"
+    - name: "mes_dv_check_record_line"
+      comment: "点检记录行表"
+      entity: "MesCheckRecordLineDO"
+      domain: "DV"
+    - name: "mes_dv_mainten_record"
+      comment: "保养记录表"
+      entity: "MesMaintenRecordDO"
+      domain: "DV"
+    - name: "mes_dv_mainten_record_line"
+      comment: "保养记录行表"
+      entity: "MesMaintenRecordLineDO"
+      domain: "DV"
+    - name: "mes_dv_repair"
+      comment: "维修单表"
+      entity: "MesRepairDO"
+      domain: "DV"
+    - name: "mes_dv_repair_line"
+      comment: "维修行表"
+      entity: "MesRepairLineDO"
+      domain: "DV"
+    - name: "mes_dv_subject"
+      comment: "检查项目表"
+      entity: "MesSubjectDO"
+      domain: "DV"
+
+    # ========== 工具域 (TM) - 2 张表 ==========
+    - name: "mes_tm_tool"
+      comment: "工具台账表"
+      entity: "MesToolDO"
+      domain: "TM"
+    - name: "mes_tm_tool_type"
+      comment: "工具类型表"
+      entity: "MesToolTypeDO"
+      domain: "TM"
+
+    # ========== 仓库域 (WM) - 40+ 张表 ==========
+    - name: "mes_wm_warehouse"
+      comment: "仓库表"
+      entity: "MesWarehouseDO"
+      domain: "WM"
+    - name: "mes_wm_warehouse_area"
+      comment: "库区表"
+      entity: "MesWarehouseAreaDO"
+      domain: "WM"
+    - name: "mes_wm_warehouse_location"
+      comment: "库位表"
+      entity: "MesWarehouseLocationDO"
+      domain: "WM"
+    - name: "mes_wm_material_stock"
+      comment: "物料库存表"
+      entity: "MesMaterialStockDO"
+      domain: "WM"
+    - name: "mes_wm_batch"
+      comment: "批次表"
+      entity: "MesBatchDO"
+      domain: "WM"
+    - name: "mes_wm_barcode"
+      comment: "条码表"
+      entity: "MesBarcodeDO"
+      domain: "WM"
+    - name: "mes_wm_barcode_config"
+      comment: "条码配置表"
+      entity: "MesBarcodeConfigDO"
+      domain: "WM"
+    - name: "mes_wm_sn"
+      comment: "SN 序列号表"
+      entity: "MesSnDO"
+      domain: "WM"
+    - name: "mes_wm_transaction"
+      comment: "库存事务表"
+      entity: "MesTransactionDO"
+      domain: "WM"
+    - name: "mes_wm_arrival_notice"
+      comment: "到货通知表"
+      entity: "MesArrivalNoticeDO"
+      domain: "WM"
+    - name: "mes_wm_arrival_notice_line"
+      comment: "到货通知行表"
+      entity: "MesArrivalNoticeLineDO"
+      domain: "WM"
+    - name: "mes_wm_item_receipt"
+      comment: "采购入库表"
+      entity: "MesItemReceiptDO"
+      domain: "WM"
+    - name: "mes_wm_item_receipt_line"
+      comment: "采购入库行表"
+      entity: "MesItemReceiptLineDO"
+      domain: "WM"
+    - name: "mes_wm_item_receipt_detail"
+      comment: "采购入库详情表"
+      entity: "MesItemReceiptDetailDO"
+      domain: "WM"
+    - name: "mes_wm_product_receipt"
+      comment: "产品入库表"
+      entity: "MesProductReceiptDO"
+      domain: "WM"
+    - name: "mes_wm_product_issue"
+      comment: "生产领料表"
+      entity: "MesProductIssueDO"
+      domain: "WM"
+    - name: "mes_wm_return_issue"
+      comment: "生产退料表"
+      entity: "MesReturnIssueDO"
+      domain: "WM"
+    - name: "mes_wm_misc_issue"
+      comment: "其他出库表"
+      entity: "MesMiscIssueDO"
+      domain: "WM"
+    - name: "mes_wm_misc_receipt"
+      comment: "其他入库表"
+      entity: "MesMiscReceiptDO"
+      domain: "WM"
+    - name: "mes_wm_product_sales"
+      comment: "销售出库表"
+      entity: "MesProductSalesDO"
+      domain: "WM"
+    - name: "mes_wm_return_sales"
+      comment: "销售退货表"
+      entity: "MesReturnSalesDO"
+      domain: "WM"
+    - name: "mes_wm_outsource_issue"
+      comment: "委外发料表"
+      entity: "MesOutsourceIssueDO"
+      domain: "WM"
+    - name: "mes_wm_outsource_receipt"
+      comment: "委外收料表"
+      entity: "MesOutsourceReceiptDO"
+      domain: "WM"
+    - name: "mes_wm_return_vendor"
+      comment: "供应商退货表"
+      entity: "MesReturnVendorDO"
+      domain: "WM"
+    - name: "mes_wm_transfer"
+      comment: "库存调拨表"
+      entity: "MesTransferDO"
+      domain: "WM"
+    - name: "mes_wm_package"
+      comment: "包装表"
+      entity: "MesPackageDO"
+      domain: "WM"
+    - name: "mes_wm_package_line"
+      comment: "包装行表"
+      entity: "MesPackageLineDO"
+      domain: "WM"
+    - name: "mes_wm_stock_taking_plan"
+      comment: "盘点计划表"
+      entity: "MesStockTakingPlanDO"
+      domain: "WM"
+    - name: "mes_wm_stock_taking_task"
+      comment: "盘点任务表"
+      entity: "MesStockTakingTaskDO"
+      domain: "WM"
+    - name: "mes_wm_stock_taking_task_result"
+      comment: "盘点结果表"
+      entity: "MesStockTakingTaskResultDO"
+      domain: "WM"
+    - name: "mes_wm_item_consume"
+      comment: "物料消耗表"
+      entity: "MesItemConsumeDO"
+      domain: "WM"
+    - name: "mes_wm_product_produce"
+      comment: "产品产出表"
+      entity: "MesProductProduceDO"
+      domain: "WM"
+    - name: "mes_wm_sales_notice"
+      comment: "销售通知表"
+      entity: "MesSalesNoticeDO"
+      domain: "WM"
+
+    # ========== 日历域 (CAL) - 7 张表 ==========
+    - name: "mes_cal_holiday"
+      comment: "节假日表"
+      entity: "MesCalHolidayDO"
+      domain: "CAL"
+    - name: "mes_cal_plan"
+      comment: "排班计划表"
+      entity: "MesCalPlanDO"
+      domain: "CAL"
+    - name: "mes_cal_plan_shift"
+      comment: "排班计划班次表"
+      entity: "MesCalPlanShiftDO"
+      domain: "CAL"
+    - name: "mes_cal_plan_team"
+      comment: "排班计划班组表"
+      entity: "MesCalPlanTeamDO"
+      domain: "CAL"
+    - name: "mes_cal_team"
+      comment: "班组表"
+      entity: "MesCalTeamDO"
+      domain: "CAL"
+    - name: "mes_cal_team_member"
+      comment: "班组成员表"
+      entity: "MesCalTeamMemberDO"
+      domain: "CAL"
+    - name: "mes_cal_team_shift"
+      comment: "班组班次表"
+      entity: "MesCalTeamShiftDO"
+      domain: "CAL"
+
+  # 表关系（ER关系）
+  relationships:
+    # 主数据域
+    - { from: "mes_md_item", to: "mes_md_item_type", type: "N:1", foreign_key: "item_type_id" }
+    - { from: "mes_md_workstation", to: "mes_md_workshop", type: "N:1", foreign_key: "workshop_id" }
+    - { from: "mes_md_workstation_machine", to: "mes_md_workstation", type: "N:1", foreign_key: "workstation_id" }
+    - { from: "mes_md_workstation_tool", to: "mes_md_workstation", type: "N:1", foreign_key: "workstation_id" }
+    - { from: "mes_md_workstation_worker", to: "mes_md_workstation", type: "N:1", foreign_key: "workstation_id" }
+    - { from: "mes_md_auto_code_part", to: "mes_md_auto_code_rule", type: "N:1", foreign_key: "rule_id" }
+    - { from: "mes_md_auto_code_record", to: "mes_md_auto_code_rule", type: "N:1", foreign_key: "rule_id" }
+    # 生产域
+    - { from: "mes_pro_work_order_bom", to: "mes_pro_work_order", type: "N:1", foreign_key: "work_order_id" }
+    - { from: "mes_pro_task", to: "mes_pro_work_order", type: "N:1", foreign_key: "work_order_id" }
+    - { from: "mes_pro_task", to: "mes_pro_route_process", type: "N:1", foreign_key: "route_process_id" }
+    - { from: "mes_pro_task_issue", to: "mes_pro_task", type: "N:1", foreign_key: "task_id" }
+    - { from: "mes_pro_route_process", to: "mes_pro_route", type: "N:1", foreign_key: "route_id" }
+    - { from: "mes_pro_route_process", to: "mes_pro_process", type: "N:1", foreign_key: "process_id" }
+    - { from: "mes_pro_card_process", to: "mes_pro_card", type: "N:1", foreign_key: "card_id" }
+    - { from: "mes_pro_feedback", to: "mes_pro_work_order", type: "N:1", foreign_key: "work_order_id" }
+    - { from: "mes_pro_andon_record", to: "mes_pro_andon_config", type: "N:1", foreign_key: "config_id" }
+    # 质量域
+    - { from: "mes_qc_template_item", to: "mes_qc_template", type: "N:1", foreign_key: "template_id" }
+    - { from: "mes_qc_template_indicator", to: "mes_qc_template_item", type: "N:1", foreign_key: "template_item_id" }
+    - { from: "mes_qc_iqc_line", to: "mes_qc_iqc", type: "N:1", foreign_key: "iqc_id" }
+    - { from: "mes_qc_ipqc_line", to: "mes_qc_ipqc", type: "N:1", foreign_key: "ipqc_id" }
+    - { from: "mes_qc_oqc_line", to: "mes_qc_oqc", type: "N:1", foreign_key: "oqc_id" }
+    - { from: "mes_qc_rqc_line", to: "mes_qc_rqc", type: "N:1", foreign_key: "rqc_id" }
+    - { from: "mes_qc_indicator_result", to: "mes_qc_indicator", type: "N:1", foreign_key: "indicator_id" }
+    - { from: "mes_qc_indicator_result_detail", to: "mes_qc_indicator_result", type: "N:1", foreign_key: "result_id" }
+    - { from: "mes_qc_defect_record", to: "mes_qc_defect", type: "N:1", foreign_key: "defect_id" }
+    # 设备域
+    - { from: "mes_dv_machinery", to: "mes_dv_machinery_type", type: "N:1", foreign_key: "machinery_type_id" }
+    - { from: "mes_dv_check_plan_machinery", to: "mes_dv_check_plan", type: "N:1", foreign_key: "plan_id" }
+    - { from: "mes_dv_check_plan_subject", to: "mes_dv_check_plan", type: "N:1", foreign_key: "plan_id" }
+    - { from: "mes_dv_check_record", to: "mes_dv_check_plan", type: "N:1", foreign_key: "plan_id" }
+    - { from: "mes_dv_check_record_line", to: "mes_dv_check_record", type: "N:1", foreign_key: "record_id" }
+    - { from: "mes_dv_mainten_record_line", to: "mes_dv_mainten_record", type: "N:1", foreign_key: "record_id" }
+    - { from: "mes_dv_repair_line", to: "mes_dv_repair", type: "N:1", foreign_key: "repair_id" }
+    # 仓库域
+    - { from: "mes_wm_warehouse_area", to: "mes_wm_warehouse", type: "N:1", foreign_key: "warehouse_id" }
+    - { from: "mes_wm_warehouse_location", to: "mes_wm_warehouse_area", type: "N:1", foreign_key: "area_id" }
+    - { from: "mes_wm_material_stock", to: "mes_md_item", type: "N:1", foreign_key: "item_id" }
+    - { from: "mes_wm_arrival_notice_line", to: "mes_wm_arrival_notice", type: "N:1", foreign_key: "notice_id" }
+    - { from: "mes_wm_item_receipt_line", to: "mes_wm_item_receipt", type: "N:1", foreign_key: "receipt_id" }
+    - { from: "mes_wm_item_receipt_detail", to: "mes_wm_item_receipt_line", type: "N:1", foreign_key: "line_id" }
+    - { from: "mes_wm_package_line", to: "mes_wm_package", type: "N:1", foreign_key: "package_id" }
+    - { from: "mes_wm_stock_taking_task", to: "mes_wm_stock_taking_plan", type: "N:1", foreign_key: "plan_id" }
+    - { from: "mes_wm_stock_taking_task_result", to: "mes_wm_stock_taking_task", type: "N:1", foreign_key: "task_id" }
+    # 日历域
+    - { from: "mes_cal_plan_shift", to: "mes_cal_plan", type: "N:1", foreign_key: "plan_id" }
+    - { from: "mes_cal_plan_team", to: "mes_cal_plan", type: "N:1", foreign_key: "plan_id" }
+    - { from: "mes_cal_plan_team", to: "mes_cal_team", type: "N:1", foreign_key: "team_id" }
+    - { from: "mes_cal_team_member", to: "mes_cal_team", type: "N:1", foreign_key: "team_id" }
+    - { from: "mes_cal_team_shift", to: "mes_cal_team", type: "N:1", foreign_key: "team_id" }
+
+# ============================================
+# 第四阶段：代码使用设计
+# ============================================
+code_patterns:
+  # Controller层规范
+  controller:
+    annotations:
+      - "@Tag(name = '管理后台 - xxx') - Swagger 文档标签"
+      - "@RestController - REST 控制器"
+      - "@RequestMapping('/admin-api/mes/xxx') - 请求路径前缀"
+      - "@Validated - 参数校验"
+      - "@PreAuthorize('@ss.hasPermission('mes:xxx:action')') - 权限控制"
+    example: |
+      @Tag(name = "管理后台 - 物料管理")
+      @RestController
+      @RequestMapping("/admin-api/mes/item")
+      @Validated
+      public class MesItemController {
+          @Resource
+          private MesItemService itemService;
+
+          @PostMapping("/create")
+          @Operation(summary = "创建物料")
+          @PreAuthorize("@ss.hasPermission('mes:item:create')")
+          public CommonResult<Long> create(@Valid @RequestBody MesItemSaveReqVO reqVO) {
+              return success(itemService.create(reqVO));
+          }
+
+          @PutMapping("/update")
+          @Operation(summary = "更新物料")
+          @PreAuthorize("@ss.hasPermission('mes:item:update')")
+          public CommonResult<Boolean> update(@Valid @RequestBody MesItemSaveReqVO reqVO) {
+              itemService.update(reqVO);
+              return success(true);
+          }
+
+          @DeleteMapping("/delete")
+          @Operation(summary = "删除物料")
+          @PreAuthorize("@ss.hasPermission('mes:item:delete')")
+          public CommonResult<Boolean> delete(@RequestParam("id") Long id) {
+              itemService.delete(id);
+              return success(true);
+          }
+
+          @GetMapping("/get")
+          @Operation(summary = "获取物料详情")
+          @PreAuthorize("@ss.hasPermission('mes:item:query')")
+          public CommonResult<MesItemRespVO> get(@RequestParam("id") Long id) {
+              return success(itemService.get(id));
+          }
+
+          @GetMapping("/page")
+          @Operation(summary = "物料分页查询")
+          @PreAuthorize("@ss.hasPermission('mes:item:query')")
+          public CommonResult<PageResult<MesItemRespVO>> page(@Valid MesItemPageReqVO reqVO) {
+              return success(itemService.page(reqVO));
+          }
+      }
+
+  # Service层规范
+  service:
+    interface_pattern: "XxxService 接口定义业务方法，XxxServiceImpl 实现类"
+    impl_pattern: |
+      @Service
+      @Validated
+      public class XxxServiceImpl implements XxxService {
+          @Resource
+          private XxxMapper xxxMapper;
+
+          // 使用 static final 定义常量
+          // 使用 @Transactional 注解控制事务
+          // 使用 validateXxxExists 方法校验存在性
+          // 使用 exception(ErrorCode) 抛出业务异常
+      }
+    state_machine_example: |
+      @Override
+      @Transactional(rollbackFor = Exception.class)
+      public void updateStatus(Long id, Integer status) {
+        MesWorkOrderDO order = validateWorkOrderExists(id);
+        // 校验状态流转
+        if (!MesWorkOrderStatusEnum.canTransit(order.getStatus(), status)) {
+          throw exception(WORK_ORDER_STATUS_TRANSIT_FAIL);
+        }
+        // CAS 更新
+        workOrderMapper.updateStatus(id, order.getStatus(), status);
+      }
+
+  # 数据访问规范
+  dal:
+    mapper_pattern: |
+      public interface XxxMapper extends BaseMapperX<XxxDO> {
+          default PageResult<XxxDO> selectPage(XxxPageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<XxxDO>()
+                      .likeIfPresent(XxxDO::getName, reqVO.getName())
+                      .eqIfPresent(XxxDO::getStatus, reqVO.getStatus())
+                      .orderByDesc(XxxDO::getId));
+          }
+      }
+    example: |
+      public interface MesItemMapper extends BaseMapperX<MesItemDO> {
+          default PageResult<MesItemDO> selectPage(MesItemPageReqVO reqVO) {
+              return selectPage(reqVO, new LambdaQueryWrapperX<MesItemDO>()
+                      .likeIfPresent(MesItemDO::getName, reqVO.getName())
+                      .likeIfPresent(MesItemDO::getCode, reqVO.getCode())
+                      .eqIfPresent(MesItemDO::getItemTypeId, reqVO.getItemTypeId())
+                      .eqIfPresent(MesItemDO::getStatus, reqVO.getStatus())
+                      .orderByDesc(MesItemDO::getId));
+          }
+      }
+
+  # VO Assembly 模式
+  vo_assembly: |
+    // 查询时批量获取关联数据，避免 N+1
+    PageResult<MesWorkOrderDO> pageResult = workOrderMapper.selectPage(reqVO);
+    Set<Long> itemIds = pageResult.getList().stream()
+        .map(MesWorkOrderDO::getItemId).collect(Collectors.toSet());
+    Map<Long, MesItemDO> itemMap = itemService.getItemMap(itemIds);
+
+    // 组装 VO
+    return new PageResult<>(pageResult.getList().stream().map(order -> {
+        MesWorkOrderRespVO vo = BeanUtils.toBean(order, MesWorkOrderRespVO.class);
+        MesItemDO item = itemMap.get(order.getItemId());
+        if (item != null) {
+            vo.setItemName(item.getName());
+        }
+        return vo;
+    }).collect(Collectors.toList()), pageResult.getTotal());
+
+  # 异常处理
+  error_handling:
+    code_prefix: "1-xxx-xxx-xxx"
+    note: "具体错误码前缀需查阅 ErrorCodeConstants.java 确认"
+
+  # 统一响应
+  response:
+    success_pattern: "CommonResult.success(data)"
+    error_pattern: "throw exception(ErrorCode)"
+
+# ============================================
+# 第五阶段：扩展指南
+# ============================================
+extension_guide:
+  # 新增物料属性
+  new_feature:
+    title: "新增物料属性"
+    steps:
+      - step: "1. 修改数据库表"
+        description: "在 mes_md_item 表中添加新字段"
+      - step: "2. 更新 DO 实体"
+        description: "在 MesItemDO 中添加对应属性"
+      - step: "3. 更新 VO"
+        description: "在 MesItemSaveReqVO 和 MesItemRespVO 中添加字段"
+      - step: "4. 更新 Controller"
+        description: "确保新字段在创建/更新/查询接口中正确处理"
+
+  # 新增出入库类型
+  new_channel:
+    title: "新增出入库类型"
+    steps:
+      - step: "1. 创建出入库表"
+        description: "参考 mes_wm_misc_issue 创建新的出入库主子表"
+      - step: "2. 创建 DO 实体"
+        description: "创建 XxxDO 继承 BaseDO"
+      - step: "3. 创建 Mapper/Service/Controller"
+        description: "遵循标准 CRUD 模式创建各层代码"
+      - step: "4. 集成库存更新"
+        description: "在 Service 中调用 MaterialStockService 更新库存"
+      - step: "5. 添加权限配置"
+        description: "在系统权限中添加 mes:xxx:create/update/delete/query 权限"
+
+  # 新增检验类型
+  new_inspection:
+    title: "新增检验类型"
+    steps:
+      - step: "1. 创建检验单表"
+        description: "参考 mes_qc_iqc 创建新的检验主子表"
+      - step: "2. 创建 DO/VO/Service/Controller"
+        description: "遵循标准 CRUD + 主子表模式"
+      - step: "3. 集成检验模板"
+        description: "关联 QcTemplateDO 的检验项和指标"
+      - step: "4. 集成缺陷管理"
+        description: "检验不合格时关联 QcDefectRecordDO"
+      - step: "5. 联动仓库操作"
+        description: "检验结果触发对应的出入库操作"
+
+  # 最佳实践
+  best_practices:
+    - practice: "状态机校验"
+      description: "所有状态变更前校验前置状态，使用 CAS 方式更新防止并发覆盖"
+    - practice: "VO Assembly"
+      description: "查询接口批量获取关联实体后组装 VO，避免 N+1 查询"
+    - practice: "库存乐观锁"
+      description: "出库操作使用 quantity >= #{outQuantity} 条件防止库存变为负数"
+    - practice: "自动编码防重"
+      description: "使用 SELECT FOR UPDATE 锁定编码记录，防止并发生成重复编码"
+    - practice: "检验与入库联动"
+      description: "IQC 合格后才能办理采购入库，不合格走供应商退货"
+    - practice: "设备状态联动"
+      description: "维修/保养完成后自动恢复设备状态为正常"
+    - practice: "事务范围控制"
+      description: "只包含写操作，查询移到事务外，避免长事务和锁竞争"
+
+# ============================================
+# 依赖关系
+# ============================================
+dependencies:
+  # 内部依赖（其他模块）
+  internal:
+    - module: "yudao-module-system"
+      api: "AdminUserApi"
+      purpose: "获取用户信息（工位操作员、报工人等）"
+    - module: "yudao-module-system"
+      api: "RoleApi"
+      purpose: "角色权限校验"
+
+  # 外部依赖（第三方库）
+  external:
+    - name: "MyBatis-Plus"
+      purpose: "ORM 框架，提供 CRUD 封装，BaseMapperX"
+    - name: "Swagger/OpenAPI"
+      purpose: "API 文档注解"
+    - name: "MapStruct"
+      purpose: "VO/DO 对象映射转换"
+    - name: "Hutool"
+      purpose: "Java 工具类库"
+
+# ============================================
+# 关键文件清单
+# ============================================
+key_files:
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/md/ItemService.java"
+    purpose: "物料管理服务接口"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/pro/WorkOrderService.java"
+    purpose: "工单管理服务接口，核心状态机"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/pro/TaskService.java"
+    purpose: "生产任务服务，甘特图支持"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/pro/CardService.java"
+    purpose: "流转卡服务，工序执行跟踪"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/pro/FeedbackService.java"
+    purpose: "报工反馈服务，审批流程"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/qc/QcIqcService.java"
+    purpose: "来料检验服务"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/dv/MachineryService.java"
+    purpose: "设备管理服务"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/dv/RepairService.java"
+    purpose: "维修管理服务，状态机"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/wm/MaterialStockService.java"
+    purpose: "库存管理服务，出入库核心"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/wm/TransferService.java"
+    purpose: "调拨服务，双向库存更新"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/md/AutoCodeService.java"
+    purpose: "自动编码服务，策略模式"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/service/cal/CalPlanService.java"
+    purpose: "排班计划服务"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/enums/MesBizTypeConstants.java"
+    purpose: "业务类型常量定义"
+  - path: "yudao-module-mes/src/main/java/cn/iocoder/yudao/module/mes/enums/ErrorCodeConstants.java"
+    purpose: "错误码常量定义"
