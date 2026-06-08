@@ -25,6 +25,31 @@
 
 ---
 
+## 模块功能文档（docs/）
+
+12 个模块的详细功能文档，由 `author-build-project-docs` 工作流生成。
+
+> 总索引: [docs/README.md](docs/README.md) — 含模块依赖关系、数据模型统计
+
+| 模块 | 文档路径 | 功能点 | API 域数 | 表数量 |
+|-----|---------|-------|---------|--------|
+| system | [docs/system/](docs/system/README.md) | 用户、角色、权限、部门、租户 | 5 | 18 |
+| infra | [docs/infra/](docs/infra/README.md) | 文件、配置、定时任务、日志、代码生成 | 5 | 11 |
+| pay | [docs/pay/](docs/pay/README.md) | 订单、退款、钱包、转账、渠道、通知 | 6 | 9 |
+| member | [docs/member/](docs/member/README.md) | 用户、等级、积分、签到、地址、标签 | 7 | 11 |
+| mall | [docs/mall/](docs/mall/README.md) | 商品(SPU/SKU)、订单、促销、统计 | 4 | 12 |
+| crm | [docs/crm/](docs/crm/README.md) | 客户、线索、商机、合同、回款、统计 | 10 | 20 |
+| erp | [docs/erp/](docs/erp/README.md) | 采购、销售、库存、财务、产品 | 5 | 25 |
+| bpm | [docs/bpm/](docs/bpm/README.md) | 模型、流程定义、实例、任务、表单 | 7 | 16 |
+| ai | [docs/ai/](docs/ai/README.md) | 对话、图像、模型、知识库、音乐、写作 | 8 | 14 |
+| iot | [docs/iot/](docs/iot/README.md) | 设备、产品、物模型、规则、OTA、告警 | 6 | 12 |
+| mp | [docs/mp/](docs/mp/README.md) | 账号、用户、消息、素材、菜单、自动回复 | 10 | 8 |
+| report | [docs/report/](docs/report/README.md) | GoView 项目、数据查询、积木报表 | 3 | 1 |
+
+每个模块目录下包含：README.md（索引）+ api-{domain}.md（API 详情）+ data-model.md（数据模型）+ pitfalls.md（踩坑点）
+
+---
+
 ## 自动引用机制
 
 使用样例文档头部包含 YAML front matter，声明需要引用的规范文件：

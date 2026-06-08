@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ls -la \"h:/basePlatform/ruoyi-vue-pro-master/ruoyi-vue-pro-master/skills/modules/\"*/)"
+      "Bash(ls -la \"h:/basePlatform/ruoyi-vue-pro-master/ruoyi-vue-pro-master/skills/modules/\"*/)",
+      "Read(//f/work/flow/software-dev-ai-workflow/0.0-通用skill/author-build-project-docs/**)",
+      "Read(//f/work/flow/software-dev-ai-workflow/0.0-通用skill/author-build-project-docs/references/docs/**)"
     ]
   }
 }
