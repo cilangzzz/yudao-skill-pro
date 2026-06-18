@@ -26,7 +26,7 @@ references:
 
 # Skill 使用指南 - 新增模块场景
 
-本文档提供从零开始创建新模块的完整提示词模板，基于 ruoyi-vue-pro 项目的模块化架构规范。
+本文档提供从零开始创建新模块的完整提示词模板，基于 yudao-vue-pro 项目的模块化架构规范。
 
 ---
 
@@ -79,7 +79,7 @@ references:
 ```markdown
 # 需求分析任务
 
-我需要在 ruoyi-vue-pro 项目中新增一个 [模块名称] 模块，请帮我进行需求分析。
+我需要在 yudao-vue-pro 项目中新增一个 [模块名称] 模块，请帮我进行需求分析。
 
 ## 业务背景
 [描述业务背景和目标，如：需要为系统增加内容管理能力，支持文章发布、栏目管理等功能]
@@ -139,11 +139,11 @@ references:
 
 | 层次 | 目录 | 职责 | 组件列表 |
 |------|------|------|----------|
-| api | yudao-module-{module}-api | 模块间API接口 | [列出API接口] |
-| controller | yudao-module-{module}/controller | HTTP接口 | [列出Controller] |
-| service | yudao-module-{module}/service | 业务逻辑 | [列出Service] |
-| dal | yudao-module-{module}/dal | 数据访问 | [列出Mapper] |
-| framework | yudao-module-{module}/framework | 框架扩展 | [如有] |
+| api | api/ | 模块间API接口 | [列出API接口] |
+| controller | controller/admin/ | HTTP接口 | [列出Controller] |
+| service | service/ | 业务逻辑 | [列出Service] |
+| dal | dal/ | 数据访问 | [列出Mapper] |
+| framework | framework/ | 框架扩展 | [如有] |
 
 ### 2. 设计模式选择
 根据业务特点，选择合适的设计模式：
@@ -157,15 +157,15 @@ references:
 - 参考：skills/patterns/template-method-pattern.yaml
 
 ### 3. 模块间通信设计
-- **对外API**：哪些功能需要暴露给其他模块？
+- **对外API**：哪些功能需要暴露给其他模块？在 api/ 包中定义
 - **依赖API**：需要调用哪些其他模块的API？
 - **消息队列**：是否需要异步消息通知？
 
 ### 4. 子模块划分（如果模块较大）
-如果模块包含多个独立子域，建议拆分子模块：
-- yudao-module-{module}-api：API 定义
-- yudao-module-{domain1}：子域1实现
-- yudao-module-{domain2}：子域2实现
+如果模块包含多个独立子域，可考虑拆分子模块：
+- yudao-module-{module}/
+  - yudao-module-{domain1}/
+  - yudao-module-{domain2}/
 
 请输出详细的架构设计文档。
 ```
@@ -265,40 +265,41 @@ public enum {Entity}StatusEnum {
 
 ```
 yudao-module-{module}/
-├── yudao-module-{module}-api/          # API 模块
-│   └── src/main/java/.../module/{module}/
-│       ├── api/                        # API 接口定义
-│       │   ├── {Entity}Api.java
-│       │   └── dto/                    # DTO 对象
-│       │       └── {Entity}RespDTO.java
-│       └── enums/                      # 枚举定义
-│           └── ErrorCodeConstants.java
-│
-└── yudao-module-{module}-biz/          # 业务实现模块
-    └── src/main/java/.../module/{module}/
-        ├── controller/                 # Controller 层
-        │   ├── admin/                  # 管理后台接口
-        │   │   └── {entity}/
-        │   │       ├── {Entity}Controller.java
-        │   │       └── vo/             # VO 对象
-        │   │           ├── {Entity}SaveReqVO.java
-        │   │           ├── {Entity}PageReqVO.java
-        │   │           └── {Entity}RespVO.java
-        │   └── app/                    # 用户端接口（如有）
-        ├── service/                    # Service 层
-        │   └── {entity}/
-        │       ├── {Entity}Service.java
-        │       └── {Entity}ServiceImpl.java
-        ├── dal/                        # 数据访问层
-        │   ├── dataobject/             # DO 实体
-        │   │   └── {entity}/
-        │   │       └── {Entity}DO.java
-        │   └── mysql/                  # Mapper
-        │       └── {entity}/
-        │           └── {Entity}Mapper.java
-        ├── convert/                    # 对象转换（可选）
-        │   └── {Entity}Convert.java
-        └── framework/                  # 框架扩展（如有）
+├── pom.xml                              # 单一 POM 文件
+└── src/main/java/cn/iocoder/yudao/module/{module}/
+    ├── api/                              # API 接口定义 + 实现（内部包）
+    │   ├── {entity}/
+    │   │   ├── {Entity}Api.java          # API 接口
+    │   │   ├── {Entity}ApiImpl.java      # API 实现（@Service）
+    │   │   └── dto/
+    │   │       ├── {Entity}CreateReqDTO.java
+    │   │       └── {Entity}RespDTO.java
+    │   └── ...
+    ├── controller/                        # Controller 层
+    │   └── admin/
+    │       └── {entity}/
+    │           ├── {Entity}Controller.java
+    │           └── vo/
+    │               ├── {Entity}SaveReqVO.java
+    │               ├── {Entity}PageReqVO.java
+    │               └── {Entity}RespVO.java
+    ├── service/                           # Service 层
+    │   └── {entity}/
+    │       ├── {Entity}Service.java
+    │       └── {Entity}ServiceImpl.java
+    ├── dal/                               # 数据访问层
+    │   ├── dataobject/
+    │   │   └── {entity}/
+    │   │       └── {Entity}DO.java
+    │   └── mysql/
+    │       └── {entity}/
+    │           └── {Entity}Mapper.java
+    ├── enums/                             # 枚举定义
+    │   ├── {Entity}StatusEnum.java
+    │   └── ErrorCodeConstants.java
+    ├── convert/                           # 对象转换（可选）
+    │   └── {Entity}Convert.java
+    └── framework/                         # 框架扩展（如有）
 ```
 
 ## 生成要求
@@ -500,6 +501,7 @@ public class {Entity}RespVO {
 
 ### 6. API 接口（跨模块调用）
 
+**接口定义：**
 ```java
 public interface {Entity}Api {
 
@@ -510,6 +512,37 @@ public interface {Entity}Api {
      * @return {实体中文名}
      */
     {Entity}RespDTO get{Entity}(Long id);
+
+    /**
+     * 创建{实体中文名}
+     *
+     * @param reqDTO 创建请求
+     * @return 编号
+     */
+    Long create{Entity}(@Valid {Entity}CreateReqDTO reqDTO);
+}
+```
+
+**接口实现：**
+```java
+@Service
+@Validated
+public class {Entity}ApiImpl implements {Entity}Api {
+
+    @Resource
+    private {Entity}Service {entity}Service;
+
+    @Override
+    public {Entity}RespDTO get{Entity}(Long id) {
+        {Entity}DO {entity} = {entity}Service.get{Entity}(id);
+        return BeanUtils.toBean({entity}, {Entity}RespDTO.class);
+    }
+
+    @Override
+    public Long create{Entity}({Entity}CreateReqDTO reqDTO) {
+        {Entity}SaveReqVO saveReqVO = BeanUtils.toBean(reqDTO, {Entity}SaveReqVO.class);
+        return {entity}Service.create{Entity}(saveReqVO);
+    }
 }
 ```
 
@@ -645,7 +678,7 @@ class {Entity}ControllerTest {
 ```markdown
 # 新增模块任务：内容管理CMS模块
 
-我需要在 ruoyi-vue-pro 项目中新增一个 CMS（内容管理系统）模块，请帮我完成从需求分析到代码生成的全过程。
+我需要在 yudao-vue-pro 项目中新增一个 CMS（内容管理系统）模块，请帮我完成从需求分析到代码生成的全过程。
 
 ## 业务背景
 系统需要一个内容管理模块，支持：
@@ -688,7 +721,8 @@ class {Entity}ControllerTest {
 3. Service 接口和实现
 4. Controller 类
 5. VO 类
-6. 错误码定义
+6. API 接口（如需跨模块调用）
+7. 错误码定义
 
 ### 阶段5：测试
 生成单元测试和集成测试代码
@@ -700,41 +734,39 @@ class {Entity}ControllerTest {
 
 ```
 yudao-module-cms/
-├── yudao-module-cms-api/
-│   └── src/main/java/.../module/cms/
-│       ├── api/
-│       │   ├── ArticleApi.java
-│       │   └── dto/
-│       │       └── ArticleRespDTO.java
-│       └── enums/
-│           ├── ArticleStatusEnum.java
-│           └── ErrorCodeConstants.java
-│
-└── yudao-module-cms-biz/
-    └── src/main/java/.../module/cms/
-        ├── controller/
-        │   └── admin/
-        │       ├── article/
-        │       │   ├── ArticleController.java
-        │       │   └── vo/
-        │       ├── category/
-        │       │   ├── CategoryController.java
-        │       │   └── vo/
-        │       ├── tag/
-        │       └── comment/
-        ├── service/
-        │   ├── article/
-        │   ├── category/
-        │   ├── tag/
-        │   └── comment/
-        ├── dal/
-        │   ├── dataobject/
-        │   │   ├── article/ArticleDO.java
-        │   │   ├── category/CategoryDO.java
-        │   │   ├── tag/TagDO.java
-        │   │   └── comment/CommentDO.java
-        │   └── mysql/
-        └── convert/
+├── pom.xml
+└── src/main/java/cn/iocoder/yudao/module/cms/
+    ├── api/                              # API 接口（跨模块调用）
+    │   └── article/
+    │       ├── ArticleApi.java
+    │       ├── ArticleApiImpl.java
+    │       └── dto/
+    │           └── ArticleRespDTO.java
+    ├── controller/
+    │   └── admin/
+    │       ├── article/
+    │       │   ├── ArticleController.java
+    │       │   └── vo/
+    │       ├── category/
+    │       │   ├── CategoryController.java
+    │       │   └── vo/
+    │       ├── tag/
+    │       └── comment/
+    ├── service/
+    │   ├── article/
+    │   ├── category/
+    │   ├── tag/
+    │   └── comment/
+    ├── dal/
+    │   ├── dataobject/
+    │   │   ├── article/ArticleDO.java
+    │   │   ├── category/CategoryDO.java
+    │   │   ├── tag/TagDO.java
+    │   │   └── comment/CommentDO.java
+    │   └── mysql/
+    └── enums/
+        ├── ArticleStatusEnum.java
+        └── ErrorCodeConstants.java
 ```
 
 ---
@@ -920,79 +952,66 @@ public enum TicketStatusEnum {
 
 ## 4. 模块结构清单
 
-### 4.1 标准 Maven 模块结构
+### 4.1 单模块结构
 
 ```
 yudao-module-{module}/
-├── pom.xml                              # 父 POM
-├── yudao-module-{module}-api/           # API 模块
-│   ├── pom.xml
-│   └── src/main/java/.../module/{module}/
-│       ├── api/                         # API 接口
-│       │   ├── {Entity}Api.java
-│       │   └── dto/                     # DTO 对象
-│       │       ├── {Entity}CreateReqDTO.java
-│       │       └── {Entity}RespDTO.java
-│       └── enums/                       # 枚举和常量
-│           ├── {Entity}StatusEnum.java
-│           └── ErrorCodeConstants.java
-│
-└── yudao-module-{module}-biz/           # 业务实现模块
-    ├── pom.xml
-    └── src/
-        ├── main/java/.../module/{module}/
-        │   ├── controller/              # Controller 层
-        │   │   ├── admin/               # 管理后台接口
-        │   │   │   └── {entity}/
-        │   │   │       ├── {Entity}Controller.java
-        │   │   │       └── vo/
-        │   │   │           ├── {Entity}SaveReqVO.java
-        │   │   │           ├── {Entity}PageReqVO.java
-        │   │   │           └── {Entity}RespVO.java
-        │   │   └── app/                 # 用户端接口
-        │   ├── service/                 # Service 层
-        │   │   └── {entity}/
-        │   │       ├── {Entity}Service.java
-        │   │       └── {Entity}ServiceImpl.java
-        │   ├── dal/                     # 数据访问层
-        │   │   ├── dataobject/          # DO 实体
-        │   │   │   └── {entity}/
-        │   │   │       └── {Entity}DO.java
-        │   │   └── mysql/               # Mapper
-        │   │       └── {entity}/
-        │   │           └── {Entity}Mapper.java
-        │   ├── convert/                 # 对象转换
-        │   │   └── {Entity}Convert.java
-        │   ├── api/                     # API 实现
-        │   │   └── {Entity}ApiImpl.java
-        │   └── framework/               # 框架扩展
-        │       └── {domain}/            # 领域特定扩展
-        │           └── {Custom}Client.java
-        │
-        └── test/java/.../module/{module}/
-            └── service/
-                └── {entity}/
-                    └── {Entity}ServiceImplTest.java
+├── pom.xml                              # 单一 POM 文件
+└── src/
+    ├── main/java/cn/iocoder/yudao/module/{module}/
+    │   ├── api/                          # API 接口（跨模块调用）
+    │   │   └── {entity}/
+    │   │       ├── {Entity}Api.java
+    │   │       ├── {Entity}ApiImpl.java
+    │   │       └── dto/
+    │   │           ├── {Entity}CreateReqDTO.java
+    │   │           └── {Entity}RespDTO.java
+    │   ├── controller/                   # Controller 层
+    │   │   └── admin/
+    │   │       └── {entity}/
+    │   │           ├── {Entity}Controller.java
+    │   │           └── vo/
+    │   │               ├── {Entity}SaveReqVO.java
+    │   │               ├── {Entity}PageReqVO.java
+    │   │               └── {Entity}RespVO.java
+    │   ├── service/                      # Service 层
+    │   │   └── {entity}/
+    │   │       ├── {Entity}Service.java
+    │   │       └── {Entity}ServiceImpl.java
+    │   ├── dal/                          # 数据访问层
+    │   │   ├── dataobject/
+    │   │   │   └── {entity}/
+    │   │   │       └── {Entity}DO.java
+    │   │   └── mysql/
+    │   │       └── {entity}/
+    │   │           └── {Entity}Mapper.java
+    │   ├── enums/                        # 枚举定义
+    │   │   ├── {Entity}StatusEnum.java
+    │   │   └── ErrorCodeConstants.java
+    │   ├── convert/                      # 对象转换（可选）
+    │   │   └── {Entity}Convert.java
+    │   └── framework/                    # 框架扩展（如有）
+    │
+    └── test/java/cn/iocoder/yudao/module/{module}/
+        └── service/
+            └── {entity}/
+                └── {Entity}ServiceImplTest.java
 ```
 
 ### 4.2 多子模块结构（大型模块）
 
 ```
 yudao-module-{module}/
-├── pom.xml
-├── yudao-module-{module}-api/           # 统一 API
-│
-├── yudao-module-{domain1}-biz/          # 子域1
+├── pom.xml                              # 父 POM
+├── yudao-module-{domain1}/              # 子域1
 │   ├── controller/
 │   ├── service/
 │   └── dal/
-│
-├── yudao-module-{domain2}-biz/          # 子域2
+├── yudao-module-{domain2}/              # 子域2
 │   ├── controller/
 │   ├── service/
 │   └── dal/
-│
-└── yudao-module-{module}-biz/           # 主模块（聚合）
+└── yudao-module-{module}-api/           # 共享 API（如有需要）
 ```
 
 ---
@@ -1001,7 +1020,7 @@ yudao-module-{module}/
 
 ### 5.1 POM 文件模板
 
-**父 POM（yudao-module-{module}/pom.xml）：**
+**单模块 POM（推荐）：**
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -1016,83 +1035,15 @@ yudao-module-{module}/
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>yudao-module-{module}</artifactId>
-    <packaging>pom</packaging>
+    <packaging>jar</packaging>
     <name>${project.artifactId}</name>
     <description>{模块中文名}模块</description>
 
-    <modules>
-        <module>yudao-module-{module}-api</module>
-        <module>yudao-module-{module}-biz</module>
-    </modules>
-</project>
-```
-
-**API 模块 POM（yudao-module-{module}-api/pom.xml）：**
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <parent>
-        <groupId>cn.iocoder.boot</groupId>
-        <artifactId>yudao-module-{module}</artifactId>
-        <version>${revision}</version>
-    </parent>
-    <modelVersion>4.0.0</modelVersion>
-
-    <artifactId>yudao-module-{module}-api</artifactId>
-    <packaging>jar</packaging>
-    <name>${project.artifactId}</name>
-    <description>{模块中文名}模块 API</description>
-
     <dependencies>
+        <!-- System API（如需调用 system 模块） -->
         <dependency>
             <groupId>cn.iocoder.boot</groupId>
-            <artifactId>yudao-common</artifactId>
-        </dependency>
-
-        <!-- Validation -->
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-validation</artifactId>
-            <optional>true</optional>
-        </dependency>
-    </dependencies>
-</project>
-```
-
-**业务模块 POM（yudao-module-{module}-biz/pom.xml）：**
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
-    <parent>
-        <groupId>cn.iocoder.boot</groupId>
-        <artifactId>yudao-module-{module}</artifactId>
-        <version>${revision}</version>
-    </parent>
-    <modelVersion>4.0.0</modelVersion>
-
-    <artifactId>yudao-module-{module}-biz</artifactId>
-    <packaging>jar</packaging>
-    <name>${project.artifactId}</name>
-    <description>{模块中文名}模块业务实现</description>
-
-    <dependencies>
-        <!-- API 模块 -->
-        <dependency>
-            <groupId>cn.iocoder.boot</groupId>
-            <artifactId>yudao-module-{module}-api</artifactId>
-            <version>${revision}</version>
-        </dependency>
-
-        <!-- System API（用户、部门等） -->
-        <dependency>
-            <groupId>cn.iocoder.boot</groupId>
-            <artifactId>yudao-module-system-api</artifactId>
+            <artifactId>yudao-module-system</artifactId>
             <version>${revision}</version>
         </dependency>
 
@@ -1209,43 +1160,6 @@ public interface ErrorCodeConstants {
 }
 ```
 
-### 5.5 Spring 配置模板
-
-**application.yaml：**
-
-```yaml
-yudao:
-  info:
-    version: 1.0.0
-    base-package: cn.iocoder.yudao.module.{module}
-
-spring:
-  application:
-    name: yudao-module-{module}-biz
-
-  # 数据源配置（如使用独立数据源）
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://127.0.0.1:3306/ruoyi-vue-pro?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&nullCatalogMeansCurrent=true
-    username: root
-    password: root
-
-# MyBatis 配置
-mybatis-plus:
-  configuration:
-    map-underscore-to-camel-case: true
-  global-config:
-    db-config:
-      id-type: none
-      logic-delete-field: deleted
-  type-aliases-package: ${yudao.info.base-package}.dal.dataobject
-
-# 日志配置
-logging:
-  level:
-    cn.iocoder.yudao.module.{module}: debug
-```
-
 ---
 
 ## 附录：快速检查清单
@@ -1273,11 +1187,10 @@ logging:
 | Service 接口和实现 | @Service, @Validated 注解 | [ ] |
 | Controller 类 | @RestController, 权限注解 | [ ] |
 | VO 类 | 参数校验注解 | [ ] |
-| API 接口 | 跨模块调用支持 | [ ] |
+| API 接口 | 跨模块调用支持（如需要） | [ ] |
 | 错误码定义 | 统一错误码格式 | [ ] |
 | **配置文件** | | |
 | POM 文件 | 依赖配置正确 | [ ] |
-| Spring 配置 | 数据源、MyBatis配置 | [ ] |
 | 菜单权限 SQL | 功能权限配置 | [ ] |
 | **测试** | | |
 | 单元测试 | Service 层测试 | [ ] |
@@ -1286,6 +1199,24 @@ logging:
 
 ---
 
-**文档版本：** 1.0.0
-**最后更新：** 2026-03-18
+## 附录：yudao 原生模块架构参考
+
+| 模块 | 架构模式 | 说明 |
+|------|----------|------|
+| yudao-module-system | 单模块模式 | 用户、角色、权限、部门 |
+| yudao-module-infra | 单模块模式 | 文件、配置、定时任务、日志 |
+| yudao-module-pay | 单模块模式 | 支付、退款、钱包 |
+| yudao-module-member | 单模块模式 | 会员、积分、等级 |
+| yudao-module-bpm | 单模块模式 | 工作流 |
+| yudao-module-ai | 单模块模式 | AI 大模型 |
+| yudao-module-mp | 单模块模式 | 微信公众号 |
+| yudao-module-report | 单模块模式 | 报表 |
+| yudao-module-mall | 多子模块模式 | 商城（product/promotion/trade/statistics） |
+
+> **结论**：yudao 项目主流采用单模块模式，多子模块模式仅在复杂业务模块（如 mall）中使用。
+
+---
+
+**文档版本：** 2.0.0
+**最后更新：** 2026-06-18
 **维护者：** AI Assistant
