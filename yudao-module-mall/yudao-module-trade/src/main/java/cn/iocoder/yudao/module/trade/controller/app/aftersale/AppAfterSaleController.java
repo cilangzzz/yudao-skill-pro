@@ -17,6 +17,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
+import javax.validation.Valid;
 
 import static cn.iocoder.yudao.framework.common.pojo.CommonResult.success;
 import static cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils.getLoginUserId;
@@ -48,13 +49,13 @@ public class AppAfterSaleController {
 
     @PostMapping(value = "/create")
     @Operation(summary = "申请售后")
-    public CommonResult<Long> createAfterSale(@RequestBody AppAfterSaleCreateReqVO createReqVO) {
+    public CommonResult<Long> createAfterSale(@Valid @RequestBody AppAfterSaleCreateReqVO createReqVO) {
         return success(afterSaleService.createAfterSale(getLoginUserId(), createReqVO));
     }
 
     @PutMapping(value = "/delivery")
     @Operation(summary = "退回货物")
-    public CommonResult<Boolean> deliveryAfterSale(@RequestBody AppAfterSaleDeliveryReqVO deliveryReqVO) {
+    public CommonResult<Boolean> deliveryAfterSale(@Valid @RequestBody AppAfterSaleDeliveryReqVO deliveryReqVO) {
         afterSaleService.deliveryAfterSale(getLoginUserId(), deliveryReqVO);
         return success(true);
     }

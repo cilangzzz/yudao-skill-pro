@@ -26,6 +26,7 @@ public interface ErrorCodeConstants {
     ErrorCode BUSINESS_DELETE_FAIL_CONTRACT_EXISTS = new ErrorCode(1_020_002_001, "商机已关联合同，不能删除");
     ErrorCode BUSINESS_UPDATE_STATUS_FAIL_END_STATUS = new ErrorCode(1_020_002_002, "更新商机状态失败，原因：已经是结束状态");
     ErrorCode BUSINESS_UPDATE_STATUS_FAIL_STATUS_EQUALS = new ErrorCode(1_020_002_003, "更新商机状态失败，原因：已经是该状态");
+    ErrorCode BUSINESS_CONTACT_CUSTOMER_NOT_MATCH = new ErrorCode(1_020_002_004, "商机关联的联系人不属于该客户");
 
     // ========== 联系人管理 1-020-003-000 ==========
     ErrorCode CONTACT_NOT_EXISTS = new ErrorCode(1_020_003_000, "联系人不存在");
@@ -103,6 +104,9 @@ public interface ErrorCodeConstants {
     ErrorCode FOLLOW_UP_RECORD_NOT_EXISTS = new ErrorCode(1_020_013_000, "跟进记录不存在");
     ErrorCode FOLLOW_UP_RECORD_DELETE_DENIED = new ErrorCode(1_020_013_001, "删除跟进记录失败，原因：没有权限");
 
-    // ========== 数据统计 1_020_014_000 ==========
+    // ========== 业绩目标配置 1_020_011_000 ==========
+    ErrorCode PERFORMANCE_CONFIG_NOT_EXISTS = new ErrorCode(1_020_011_000, "业绩目标配置不存在");
+    ErrorCode PERFORMANCE_CONFIG_EXISTS = new ErrorCode(1_020_011_001, "该对象当前年份的业绩目标配置已存在");
+    ErrorCode PERFORMANCE_CONFIG_TYPE_INVALID = new ErrorCode(1_020_011_002, "目标对象类型不正确");
 
 }

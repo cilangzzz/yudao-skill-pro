@@ -152,10 +152,25 @@ public abstract class CodegenEngineAbstractTest extends BaseMockitoUnitTest {
     protected void writeResult(Map<String, String> result, String basePath) {
         // 写入文件内容
         List<Map<String, String>> asserts = new ArrayList<>();
+        Set<String> usedContentPaths = new LinkedHashSet<>();
         result.forEach((filePath, fileContent) -> {
             String lastFilePath = StrUtil.subAfter(filePath, '/', true);
-            String contentPath = StrUtil.subAfter(lastFilePath, '.', true)
-                    + '/' + StrUtil.subBefore(lastFilePath, '.', true);
+            String ext = StrUtil.subAfter(lastFilePath, '.', true);
+            String name = StrUtil.subBefore(lastFilePath, '.', true);
+            String parentPath = StrUtil.subBefore(filePath, '/' + lastFilePath, true);
+            String parentDir = StrUtil.subAfter(parentPath, '/', true);
+            // index.vue 按页面语义稳定归档，避免结果迭代顺序导致列表页和表单页的快照路径互换
+            String contentPath = "index".equals(name) && ("form".equals(parentDir) || "detail".equals(parentDir))
+                    ? ext + '/' + parentDir + '/' + name : ext + '/' + name;
+            // ERP 多个子表的 form/index.vue 仍可能撞名，继续补充祖父目录区分
+            if (usedContentPaths.contains(contentPath)) {
+                String grandParentDir = StrUtil.subAfter(StrUtil.subBefore(parentPath, '/' + parentDir, true), '/', true);
+                contentPath = ext + '/' + grandParentDir + '/' + parentDir + '/' + name;
+                for (int i = 2; usedContentPaths.contains(contentPath); i++) {
+                    contentPath = ext + '/' + grandParentDir + '/' + parentDir + '/' + name + '-' + i;
+                }
+            }
+            usedContentPaths.add(contentPath);
             asserts.add(MapUtil.<String, String>builder().put("filePath", filePath)
                     .put("contentPath", contentPath).build());
             FileUtil.writeUtf8String(fileContent, basePath + "/" + contentPath);

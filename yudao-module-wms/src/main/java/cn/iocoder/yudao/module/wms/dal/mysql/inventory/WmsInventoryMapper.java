@@ -101,7 +101,6 @@ public interface WmsInventoryMapper extends BaseMapperX<WmsInventoryDO> {
         }
         return selectList(new LambdaQueryWrapperX<WmsInventoryDO>()
                 .in(WmsInventoryDO::getId, ids)
-                .orderByAsc(WmsInventoryDO::getId)
                 .last("FOR UPDATE"));
     }
 
