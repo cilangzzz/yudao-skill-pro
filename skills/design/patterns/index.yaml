@@ -53,6 +53,6 @@ combinations:
 extension:
   new_pattern:
     steps:
-      - "创建模式知识库文件: skills/patterns/{pattern}-pattern.yaml"
+      - "创建模式知识库文件: skills/design/patterns/{pattern}-pattern.yaml"
       - "更新此索引文件"
       - "关联应用到相关模块"

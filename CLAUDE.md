@@ -62,7 +62,7 @@ references:
   design:
     - skills/design/db-designer.yaml      # 数据库设计规范
     - skills/design/entity-designer.yaml   # 实体类设计规范
-    - skills/design/api-designer.yaml      # API 接口设计规范
+    - skills/api/api-design/api-designer.yaml      # API 接口设计规范
     - skills/design/crud-designer.yaml     # CRUD 代码生成规范
   module_guide:
     mapping:
@@ -106,7 +106,7 @@ references:
 |-----|------|------|
 | 数据库设计 | [skills/design/db-designer.yaml](skills/design/db-designer.yaml) | 建表 SQL、字段命名、索引设计 |
 | 实体类设计 | [skills/design/entity-designer.yaml](skills/design/entity-designer.yaml) | 继承体系、注解规范、命名转换 |
-| API 接口设计 | [skills/design/api-designer.yaml](skills/design/api-designer.yaml) | Controller 注解、请求响应格式 |
+| API 接口设计 | [skills/api/api-design/api-designer.yaml](skills/api/api-design/api-designer.yaml) | Controller 注解、请求响应格式 |
 | CRUD 代码生成 | [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml) | 各层代码模板、命名规范 |
 
 ---
@@ -115,9 +115,9 @@ references:
 
 | 模式 | 路径 | 适用场景 |
 |-----|------|---------|
-| 工厂模式 | [skills/patterns/factory-pattern.yaml](skills/patterns/factory-pattern.yaml) | 根据条件创建不同类型的对象 |
-| 策略模式 | [skills/patterns/strategy-pattern.yaml](skills/patterns/strategy-pattern.yaml) | 多种算法或策略间切换 |
-| 模板方法模式 | [skills/patterns/template-method-pattern.yaml](skills/patterns/template-method-pattern.yaml) | 定义算法骨架，子类实现细节 |
+| 工厂模式 | [skills/design/patterns/factory-pattern.yaml](skills/design/patterns/factory-pattern.yaml) | 根据条件创建不同类型的对象 |
+| 策略模式 | [skills/design/patterns/strategy-pattern.yaml](skills/design/patterns/strategy-pattern.yaml) | 多种算法或策略间切换 |
+| 模板方法模式 | [skills/design/patterns/template-method-pattern.yaml](skills/design/patterns/template-method-pattern.yaml) | 定义算法骨架，子类实现细节 |
 
 ---
 

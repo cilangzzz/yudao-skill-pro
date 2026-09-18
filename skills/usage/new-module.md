@@ -7,12 +7,12 @@ references:
       reason: "数据库表设计规范 - 建表 SQL、字段命名、索引设计"
     - path: skills/design/entity-designer.yaml
       reason: "实体类(DO)设计规范 - 继承体系、注解规范、命名转换"
-    - path: skills/design/api-designer.yaml
+    - path: skills/api/api-design/api-designer.yaml
       reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
     - path: skills/design/crud-designer.yaml
       reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
   templates:
-    - path: skills/templates/skill-template.yaml
+    - path: skills/modules/templates/skill-template.yaml
       reason: "Skill 文档模板 - 创建新模块 Skill 文档的模板"
   reference_modules:
     - path: skills/modules/system/skill-system.yaml
@@ -150,11 +150,11 @@ references:
 
 **场景1：需要支持多种类型切换（如支付渠道、存储类型）**
 - 采用策略模式 + 工厂模式
-- 参考：skills/patterns/strategy-pattern.yaml、skills/patterns/factory-pattern.yaml
+- 参考：skills/design/patterns/strategy-pattern.yaml、skills/design/patterns/factory-pattern.yaml
 
 **场景2：需要统一处理流程（如审批流程、发送流程）**
 - 采用模板方法模式
-- 参考：skills/patterns/template-method-pattern.yaml
+- 参考：skills/design/patterns/template-method-pattern.yaml
 
 ### 3. 模块间通信设计
 - **对外API**：哪些功能需要暴露给其他模块？在 api/ 包中定义

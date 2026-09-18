@@ -1,6 +1,6 @@
 # Skill 索引文件
 # 记录所有模块/规范/模式/模板/使用样例的Skill文档位置和状态
-# 最后更新：2026-09-18（新增 im/mes/wms 模块，补录 patterns/templates/usage 三大区段）
+# 最后更新：2026-09-18（新增 im/mes/wms 模块，补录 patterns/templates/usage 三大区段；patterns 移入 design、api 独立为顶层区段）
 
 # ============================================
 # 业务模块（按优先级排序）
@@ -160,47 +160,49 @@ design:
     status: "completed"
     description: "yudao 实体类(DO)设计规范，包括继承体系、注解规范、命名转换"
     lines: 834
-  api:
-    name: "API 设计"
-    path: "skills/design/api-designer.yaml"
-    status: "completed"
-    description: "REST API 设计规范、注解、请求响应格式、权限标识"
-    lines: 708
   crud:
     name: "CRUD 代码生成"
     path: "skills/design/crud-designer.yaml"
     status: "completed"
     description: "根据数据库表结构自动生成完整CRUD功能代码"
     lines: 517
+  # 设计模式（patterns 子目录，融入 design 统一管理）
+  patterns:
+    index:
+      name: "设计模式索引"
+      path: "skills/design/patterns/index.yaml"
+      status: "completed"
+      description: "模式选择指南、组合方案、扩展步骤"
+      lines: 57
+    factory:
+      name: "工厂模式"
+      path: "skills/design/patterns/factory-pattern.yaml"
+      status: "completed"
+      description: "创建对象实例的工厂接口，支持多类型扩展（应用于 pay、infra）"
+      lines: 90
+    strategy:
+      name: "策略模式"
+      path: "skills/design/patterns/strategy-pattern.yaml"
+      status: "completed"
+      description: "封装可互换的算法族（应用于 pay、infra、ai）"
+      lines: 135
+    template-method:
+      name: "模板方法模式"
+      path: "skills/design/patterns/template-method-pattern.yaml"
+      status: "completed"
+      description: "定义算法骨架，子类实现具体步骤（应用于 pay、infra）"
+      lines: 118
 
 # ============================================
-# 设计模式
+# API 规范（独立顶层区段）
 # ============================================
-patterns:
-  index:
-    name: "设计模式索引"
-    path: "skills/patterns/index.yaml"
+api:
+  api-design:
+    name: "API 设计规范"
+    path: "skills/api/api-design/api-designer.yaml"
     status: "completed"
-    description: "模式选择指南、组合方案、扩展步骤"
-    lines: 57
-  factory:
-    name: "工厂模式"
-    path: "skills/patterns/factory-pattern.yaml"
-    status: "completed"
-    description: "创建对象实例的工厂接口，支持多类型扩展（应用于 pay、infra）"
-    lines: 90
-  strategy:
-    name: "策略模式"
-    path: "skills/patterns/strategy-pattern.yaml"
-    status: "completed"
-    description: "封装可互换的算法族（应用于 pay、infra、ai）"
-    lines: 135
-  template-method:
-    name: "模板方法模式"
-    path: "skills/patterns/template-method-pattern.yaml"
-    status: "completed"
-    description: "定义算法骨架，子类实现具体步骤（应用于 pay、infra）"
-    lines: 118
+    description: "REST API 设计规范、注解、请求响应格式、权限标识"
+    lines: 708
 
 # ============================================
 # 文档模板
@@ -208,13 +210,13 @@ patterns:
 templates:
   skill:
     name: "Skill 模板"
-    path: "skills/templates/skill-template.yaml"
+    path: "skills/modules/templates/skill-template.yaml"
     status: "completed"
     description: "模块 Skill 提取的标准格式（哲学/架构/数据模型/代码规范/扩展指南）"
     lines: 160
   extraction-prompt:
     name: "提取提示词模板"
-    path: "skills/templates/extraction-prompt.md"
+    path: "skills/modules/templates/extraction-prompt.md"
     status: "completed"
     description: "五阶段提取流程：理念→架构→数据→代码→扩展"
     lines: 138
@@ -299,11 +301,11 @@ progress:
     in_progress: 0
     pending: 0
   design:
-    total: 4
-    completed: 4
-  patterns:
-    total: 4
-    completed: 4
+    total: 7
+    completed: 7
+  api:
+    total: 1
+    completed: 1
   templates:
     total: 2
     completed: 2

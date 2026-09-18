@@ -21,7 +21,7 @@ references:
     mapping:
       mes: skills/modules/mes/skill-mes.yaml
   patterns:                  # 设计模式引用
-    - skills/patterns/factory-pattern.yaml
+    - skills/design/patterns/factory-pattern.yaml
 ---
 ```
 
@@ -56,8 +56,8 @@ references:
 | 资源类型 | 目录位置 | 说明 |
 |---------|---------|------|
 | 模块 Skills | `skills/modules/` | 各功能模块的完整技术规范 |
-| 设计模式 | `skills/patterns/` | 常用设计模式的实现模板 |
-| 文档模板 | `skills/templates/` | Skill 文档编写模板 |
+| 设计模式 | `skills/design/patterns/` | 常用设计模式的实现模板 |
+| 文档模板 | `skills/modules/templates/` | Skill 文档编写模板 |
 
 ---
 
@@ -131,7 +131,7 @@ references:
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
 | 新增业务模块 | 创建全新的业务功能模块 | [skill-template.yaml](../templates/skill-template.yaml) | Skill 文档编写模板 |
-| 应用设计模式 | 需要使用设计模式优化代码 | [patterns/](../patterns/) | 设计模式实现模板 |
+| 应用设计模式 | 需要使用设计模式优化代码 | [patterns/](../design/patterns/) | 设计模式实现模板 |
 
 **新增模块参考**：
 
@@ -156,9 +156,9 @@ references:
 
 | 模式 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 工厂模式 | 需要根据条件创建不同类型的对象 | [factory-pattern.yaml](../patterns/factory-pattern.yaml) | 对象创建的统一管理 |
-| 策略模式 | 需要在多种算法或策略间切换 | [strategy-pattern.yaml](../patterns/strategy-pattern.yaml) | 算法族的统一接口 |
-| 模板方法模式 | 需要定义算法骨架，子类实现细节 | [template-method-pattern.yaml](../patterns/template-method-pattern.yaml) | 算法骨架的固定结构 |
+| 工厂模式 | 需要根据条件创建不同类型的对象 | [factory-pattern.yaml](../design/patterns/factory-pattern.yaml) | 对象创建的统一管理 |
+| 策略模式 | 需要在多种算法或策略间切换 | [strategy-pattern.yaml](../design/patterns/strategy-pattern.yaml) | 算法族的统一接口 |
+| 模板方法模式 | 需要定义算法骨架，子类实现细节 | [template-method-pattern.yaml](../design/patterns/template-method-pattern.yaml) | 算法骨架的固定结构 |
 
 **设计模式选择指南**：
 
@@ -276,8 +276,8 @@ references:
 
 **A:** 创建新模块的 skill 文档步骤：
 
-1. 复制 `skills/templates/skill-template.yaml` 作为起点
-2. 参考 `skills/templates/extraction-prompt.md` 了解提取方法
+1. 复制 `skills/modules/templates/skill-template.yaml` 作为起点
+2. 参考 `skills/modules/templates/extraction-prompt.md` 了解提取方法
 3. 参考现有模块的 skill 文档作为示例
 4. 按照模板结构填写模块信息
 5. 更新 `skills/index.yaml` 添加新模块索引

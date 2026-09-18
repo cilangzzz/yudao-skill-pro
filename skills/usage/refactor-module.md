@@ -3,7 +3,7 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/design/api-designer.yaml
+    - path: skills/api/api-design/api-designer.yaml
       reason: "API 接口设计规范 - 改造时需保持接口兼容性"
     - path: skills/design/entity-designer.yaml
       reason: "实体类设计规范 - 改造 DO 需遵循规范"
@@ -25,9 +25,9 @@ references:
       mp: skills/modules/mp/skill-mp.yaml
       report: skills/modules/report/skill-report.yaml
   patterns:
-    - path: skills/patterns/strategy-pattern.yaml
+    - path: skills/design/patterns/strategy-pattern.yaml
       reason: "策略模式 - 重构时可引入策略模式解耦"
-    - path: skills/patterns/factory-pattern.yaml
+    - path: skills/design/patterns/factory-pattern.yaml
       reason: "工厂模式 - 重构时可引入工厂模式管理对象"
   usage_hint: "改造前请务必阅读目标模块的 Skill 文档，了解现有架构"
 ---
@@ -167,7 +167,7 @@ Skill 文档位置：skills/modules/{模块}/skill-{模块}.yaml
 - 识别受影响的上下游模块（参考 Skill 文档的 dependencies 部分）
 
 ### 3. 改造方案设计
-- 提出改造方案（如涉及设计模式，参考 skills/patterns/ 目录）
+- 提出改造方案（如涉及设计模式，参考 skills/design/patterns/ 目录）
 - 给出关键代码变更示例
 - 说明数据迁移方案（如需要）
 
@@ -1276,7 +1276,7 @@ SELECT COUNT(*) AS total_count FROM xxx_table;
 ### 相关文档
 
 - [模块 Skill 文档位置](../modules/)
-- [设计模式文档](../patterns/)
+- [设计模式文档](../design/patterns/)
 - [Skill 模板](../templates/)
 - [Skill 索引](../index.yaml)
 
@@ -1287,7 +1287,7 @@ SELECT COUNT(*) AS total_count FROM xxx_table;
 cat skills/modules/{module}/skill-{module}.yaml
 
 # 查看设计模式文档
-cat skills/patterns/{pattern}-pattern.yaml
+cat skills/design/patterns/{pattern}-pattern.yaml
 
 # 数据库备份
 mysqldump -h host -u user -p database > backup_$(date +%Y%m%d).sql

@@ -20,9 +20,10 @@
 | **Claude Code 配置** | `.claude/` | Claude Code 工作流配置 |
 | **项目开发规范** | `CLAUDE.md` | 模块索引、命名规范、分层架构、错误码速查 |
 | **模块功能文档** | `docs/` | 15 个模块的完整文档（API、数据模型、踩坑点），共 131 个文件 |
-| **设计规范** | `skills/design/` | 数据库、实体类、API 接口、CRUD 代码生成 4 套规范 |
+| **设计规范** | `skills/design/` | 数据库、实体类、CRUD 代码生成、设计模式 4 套规范 |
 | **模块 Skill** | `skills/modules/` | 15 个业务模块的结构化 Skill YAML（架构、表结构、代码模式、扩展指南） |
-| **设计模式** | `skills/patterns/` | 工厂、策略、模板方法 3 种设计模式实现指南 |
+| **设计模式** | `skills/design/patterns/` | 工厂、策略、模板方法 3 种设计模式实现指南（融入 design 统一管理） |
+| **API 规范** | `skills/api/api-design/` | REST API 接口设计规范（独立顶层目录） |
 | **使用样例** | `skills/usage/` | 实体类实现、扩展模块、新增模块、改造模块等场景的提示词模板 |
 
 > 同步方式：定期从 upstream/master 拉取最新代码合并，自定义文件始终保留。
@@ -34,8 +35,15 @@ skills/
 ├── design/                    # 设计规范
 │   ├── db-designer.yaml      # 数据库设计规范
 │   ├── entity-designer.yaml  # 实体类设计规范
-│   ├── api-designer.yaml     # API 接口设计规范
-│   └── crud-designer.yaml    # CRUD 代码生成规范
+│   ├── crud-designer.yaml    # CRUD 代码生成规范
+│   └── patterns/             # 设计模式（融入 design 统一管理）
+│       ├── index.yaml
+│       ├── factory-pattern.yaml
+│       ├── strategy-pattern.yaml
+│       └── template-method-pattern.yaml
+├── api/                       # API 规范（独立顶层目录）
+│   └── api-design/
+│       └── api-designer.yaml # API 接口设计规范
 ├── modules/                   # 模块 Skill
 │   ├── system/               # 系统管理模块
 │   ├── infra/                # 基础设施模块
@@ -52,7 +60,7 @@ skills/
 │   ├── im/                   # 即时通讯模块
 │   ├── mes/                  # 制造执行模块
 │   └── wms/                  # 仓储管理模块
-├── patterns/                  # 设计模式
+├── patterns/                  # 设计模式（已迁移至 design/patterns/）
 │   ├── factory-pattern.yaml
 │   ├── strategy-pattern.yaml
 │   └── template-method-pattern.yaml

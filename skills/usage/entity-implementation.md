@@ -7,7 +7,7 @@ references:
       reason: "数据库表设计规范 - 建表 SQL、字段命名、索引设计"
     - path: skills/design/entity-designer.yaml
       reason: "实体类(DO)设计规范 - 继承体系、注解规范、命名转换"
-    - path: skills/design/api-designer.yaml
+    - path: skills/api/api-design/api-designer.yaml
       reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
     - path: skills/design/crud-designer.yaml
       reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"

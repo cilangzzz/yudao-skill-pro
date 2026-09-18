@@ -362,7 +362,7 @@ naming_standards:
 # ============================================
 references:
   primary:
-    - path: "skills/design/api-designer.yaml"
+    - path: "skills/api/api-design/api-designer.yaml"
       description: "API设计规范、Controller模板、权限标识、错误码体系"
       sections:
         - "第二部分：接口规范（标准端点定义）"

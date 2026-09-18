@@ -798,7 +798,7 @@ related_skills:
     - skill: "api-designer"
       relationship: "输出"
       description: "实体类作为 API 设计的输入"
-      path: "skills/design/api-designer.yaml"
+      path: "skills/api/api-design/api-designer.yaml"
 
   collaboration:
     - path: "skills/usage/entity-implementation.md"

@@ -3,7 +3,7 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/design/api-designer.yaml
+    - path: skills/api/api-design/api-designer.yaml
       reason: "API 接口设计规范 - 扩展接口需遵循现有规范"
     - path: skills/design/entity-designer.yaml
       reason: "实体类设计规范 - 新增实体需遵循 DO 规范"
@@ -23,9 +23,9 @@ references:
       mp: skills/modules/mp/skill-mp.yaml
       report: skills/modules/report/skill-report.yaml
   patterns:
-    - path: skills/patterns/factory-pattern.yaml
+    - path: skills/design/patterns/factory-pattern.yaml
       reason: "工厂模式 - 渠道/平台扩展时注册到工厂"
-    - path: skills/patterns/strategy-pattern.yaml
+    - path: skills/design/patterns/strategy-pattern.yaml
       reason: "策略模式 - 新增策略实现"
   usage_hint: "使用时请在提示词中指定模块名，如：'目标模块：pay'"
 ---
@@ -1080,4 +1080,4 @@ public enum FileStorageEnum {
 **相关文档：**
 - [Skill 文档索引](../index.yaml)
 - [模块 Skill 文档](../modules/)
-- [代码模式文档](../patterns/)
+- [代码模式文档](../design/patterns/)

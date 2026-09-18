@@ -3,11 +3,11 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   patterns:
-    - path: skills/patterns/factory-pattern.yaml
+    - path: skills/design/patterns/factory-pattern.yaml
       reason: "工厂模式 - 对象创建的统一管理"
-    - path: skills/patterns/strategy-pattern.yaml
+    - path: skills/design/patterns/strategy-pattern.yaml
       reason: "策略模式 - 算法族的统一接口"
-    - path: skills/patterns/template-method-pattern.yaml
+    - path: skills/design/patterns/template-method-pattern.yaml
       reason: "模板方法模式 - 算法骨架的固定结构"
   reference_modules:
     - path: skills/modules/pay/skill-pay.yaml
