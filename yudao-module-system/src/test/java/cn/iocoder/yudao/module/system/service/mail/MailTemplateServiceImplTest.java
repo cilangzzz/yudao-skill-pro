@@ -403,7 +403,7 @@ public class MailTemplateServiceImplTest extends BaseDbUnitTest {
         // 准备参数
         Map<String, Object> params = new HashMap<>();
 
-        // 测试代码块中包含 $ 与 \（历史上 appendReplacement 会抛 IllegalArgumentException: Illegal group reference）
+        // 测试代码块中包含 $ 与 \\（历史上 appendReplacement 会抛 IllegalArgumentException: Illegal group reference）
         String content = "<pre><code>echo $HOME && ls \\root</code></pre>";
 
         // 调用，并断言内容原样保留

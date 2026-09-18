@@ -207,7 +207,7 @@ public class MailTemplateServiceImpl implements MailTemplateService {
             String codeBlock = matcher.group(1);
             // 为代码块添加样式
             String replacement = "<pre style=\"background-color: #f5f5f5; padding: 10px; border-radius: 5px; overflow-x: auto;\"><code>" + codeBlock + "</code></pre>";
-            // 代码块内容可能包含 $ 或 \，需要 quoteReplacement，否则会抛 IllegalArgumentException: Illegal group reference
+            // 代码块内容可能包含 $ 或 \\，需要 quoteReplacement，否则会抛 IllegalArgumentException: Illegal group reference
             matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
         }
         matcher.appendTail(sb);
