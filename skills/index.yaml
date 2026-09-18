@@ -1,72 +1,112 @@
 # Skill 索引文件
-# 记录所有模块的Skill文档位置和状态
+# 记录所有模块/规范/模式/模板/使用样例的Skill文档位置和状态
+# 最后更新：2026-09-18（新增 im/mes/wms 模块，补录 patterns/templates/usage 三大区段）
 
+# ============================================
+# 业务模块（按优先级排序）
+# ============================================
 skills:
-  # 核心模块
+  # ---------- 核心模块 (P1) ----------
   system:
     name: "系统管理模块"
     path: "skills/modules/system/skill-system.yaml"
     status: "completed"
     priority: 1
     lines: 839
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   infra:
     name: "基础设施模块"
     path: "skills/modules/infra/skill-infra.yaml"
     status: "completed"
     priority: 1
-    lines: 700+
+    lines: 661
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   pay:
     name: "支付模块"
     path: "skills/modules/pay/skill-pay.yaml"
     status: "completed"
     priority: 1
-    lines: 654
+    lines: 653
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
-  # 业务模块
+  # ---------- 主要业务模块 (P2) ----------
   member:
     name: "会员模块"
     path: "skills/modules/member/skill-member.yaml"
     status: "completed"
     priority: 2
     lines: 608
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   mall:
     name: "商城模块"
     path: "skills/modules/mall/skill-mall.yaml"
     status: "completed"
     priority: 2
-    lines: 650+
+    lines: 653
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   crm:
     name: "CRM模块"
     path: "skills/modules/crm/skill-crm.yaml"
     status: "completed"
     priority: 2
-    lines: 850+
+    lines: 860
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
-  erp:
-    name: "ERP模块"
-    path: "skills/modules/erp/skill-erp.yaml"
-    status: "completed"
-    priority: 3
-    lines: 900+
-
-  # 技术/平台模块
   bpm:
     name: "工作流模块"
     path: "skills/modules/bpm/skill-bpm.yaml"
     status: "completed"
     priority: 2
-    lines: 650+
+    lines: 718
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
+  erp:
+    name: "ERP模块"
+    path: "skills/modules/erp/skill-erp.yaml"
+    status: "completed"
+    priority: 2
+    lines: 967
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
+
+  mes:
+    name: "MES制造执行模块"
+    path: "skills/modules/mes/skill-mes.yaml"
+    status: "completed"
+    priority: 2
+    lines: 964
+    created_at: "2026-06-08"
+    updated_at: "2026-06-08"
+
+  wms:
+    name: "WMS仓储管理模块"
+    path: "skills/modules/wms/skill-wms.yaml"
+    status: "completed"
+    priority: 2
+    lines: 832
+    created_at: "2026-06-08"
+    updated_at: "2026-06-08"
+
+  # ---------- 扩展模块 (P3) ----------
   ai:
     name: "AI模块"
     path: "skills/modules/ai/skill-ai.yaml"
     status: "completed"
     priority: 3
-    lines: 670+
+    lines: 705
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   iot:
     name: "物联网模块"
@@ -74,40 +114,58 @@ skills:
     status: "completed"
     priority: 3
     lines: 721
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   mp:
     name: "微信公众号模块"
     path: "skills/modules/mp/skill-mp.yaml"
     status: "completed"
     priority: 3
-    lines: 660+
+    lines: 637
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
   report:
     name: "报表模块"
     path: "skills/modules/report/skill-report.yaml"
     status: "completed"
     priority: 3
-    lines: 320+
+    lines: 344
+    created_at: "2026-03-18"
+    updated_at: "2026-03-18"
 
+  im:
+    name: "即时通讯模块"
+    path: "skills/modules/im/skill-im.yaml"
+    status: "completed"
+    priority: 3
+    lines: 748
+    created_at: "2026-06-08"
+    updated_at: "2026-06-08"
+
+# ============================================
 # 设计规范
+# ============================================
 design:
   db:
     name: "数据库设计"
     path: "skills/design/db-designer.yaml"
     status: "completed"
     description: "数据库表结构设计规范、SQL文件规范、编写规范"
-    lines: 450
+    lines: 664
   entity:
     name: "实体类设计"
     path: "skills/design/entity-designer.yaml"
     status: "completed"
     description: "yudao 实体类(DO)设计规范，包括继承体系、注解规范、命名转换"
-    lines: 520
+    lines: 834
   api:
     name: "API 设计"
     path: "skills/design/api-designer.yaml"
     status: "completed"
     description: "REST API 设计规范、注解、请求响应格式、权限标识"
+    lines: 708
   crud:
     name: "CRUD 代码生成"
     path: "skills/design/crud-designer.yaml"
@@ -115,9 +173,102 @@ design:
     description: "根据数据库表结构自动生成完整CRUD功能代码"
     lines: 517
 
-# 使用样例自动引用说明
-# 使用样例文档（usage/目录）通过 YAML front matter 声明需要引用的规范文件
-# AI 读取使用样例时会自动加载相关规范，确保生成的代码符合项目标准
+# ============================================
+# 设计模式
+# ============================================
+patterns:
+  index:
+    name: "设计模式索引"
+    path: "skills/patterns/index.yaml"
+    status: "completed"
+    description: "模式选择指南、组合方案、扩展步骤"
+    lines: 57
+  factory:
+    name: "工厂模式"
+    path: "skills/patterns/factory-pattern.yaml"
+    status: "completed"
+    description: "创建对象实例的工厂接口，支持多类型扩展（应用于 pay、infra）"
+    lines: 90
+  strategy:
+    name: "策略模式"
+    path: "skills/patterns/strategy-pattern.yaml"
+    status: "completed"
+    description: "封装可互换的算法族（应用于 pay、infra、ai）"
+    lines: 135
+  template-method:
+    name: "模板方法模式"
+    path: "skills/patterns/template-method-pattern.yaml"
+    status: "completed"
+    description: "定义算法骨架，子类实现具体步骤（应用于 pay、infra）"
+    lines: 118
+
+# ============================================
+# 文档模板
+# ============================================
+templates:
+  skill:
+    name: "Skill 模板"
+    path: "skills/templates/skill-template.yaml"
+    status: "completed"
+    description: "模块 Skill 提取的标准格式（哲学/架构/数据模型/代码规范/扩展指南）"
+    lines: 160
+  extraction-prompt:
+    name: "提取提示词模板"
+    path: "skills/templates/extraction-prompt.md"
+    status: "completed"
+    description: "五阶段提取流程：理念→架构→数据→代码→扩展"
+    lines: 138
+
+# ============================================
+# 使用样例
+# ============================================
+usage:
+  index:
+    name: "使用指南总览"
+    path: "skills/usage/index.md"
+    status: "completed"
+    description: "场景分类目录、使用流程图、FAQ"
+    lines: 362
+  quick-start:
+    name: "快速上手"
+    path: "skills/usage/quick-start.md"
+    status: "completed"
+    description: "Skill 文档快速使用指南和常用提示词模板"
+    lines: 593
+  entity-implementation:
+    name: "实体类端到端实现"
+    path: "skills/usage/entity-implementation.md"
+    status: "completed"
+    description: "从 SQL 建表到完整 CRUD 接口的端到端指南"
+    lines: 1240
+  extend-module:
+    name: "扩展模块"
+    path: "skills/usage/extend-module.md"
+    status: "completed"
+    description: "在现有模块基础上添加新功能"
+    lines: 1082
+  new-module:
+    name: "新增模块"
+    path: "skills/usage/new-module.md"
+    status: "completed"
+    description: "创建全新的业务模块"
+    lines: 1221
+  refactor-module:
+    name: "改造模块"
+    path: "skills/usage/refactor-module.md"
+    status: "completed"
+    description: "修改现有功能或重构代码"
+    lines: 1306
+  pattern-usage:
+    name: "设计模式应用"
+    path: "skills/usage/pattern-usage.md"
+    status: "completed"
+    description: "常用设计模式的使用场景和实现方法"
+    lines: 1340
+
+# ============================================
+# 使用样例自动引用机制
+# ============================================
 usage_auto_reference:
   description: "使用样例通过 YAML front matter 自动引用设计规范"
   mechanism: |
@@ -138,15 +289,35 @@ usage_auto_reference:
           mes: skills/modules/mes/skill-mes.yaml
     ---
 
-# 提取进度
+# ============================================
+# 进度统计
+# ============================================
 progress:
-  total: 12
-  completed: 12
-  in_progress: 0
-  pending: 0
+  modules:
+    total: 15
+    completed: 15
+    in_progress: 0
+    pending: 0
+  design:
+    total: 4
+    completed: 4
+  patterns:
+    total: 4
+    completed: 4
+  templates:
+    total: 2
+    completed: 2
+  usage:
+    total: 7
+    completed: 7
+  total_files: 33
+  total_lines: 21626
 
-# 最后更新时间
+# ============================================
+# 元数据
+# ============================================
 metadata:
   created_at: "2026-03-18"
-  updated_at: "2026-03-31"
-  completed_at: "2026-03-18"
+  updated_at: "2026-09-18"
+  completed_at: "2026-09-18"
+  notes: "新增 im/mes/wms 模块；补录 patterns/templates/usage 三大区段；行数与进度同步"
