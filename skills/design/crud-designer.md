@@ -329,6 +329,8 @@ CRUD 代码生成按以下 5 个阶段顺序执行：
 | 所有文件包路径正确 | 基础路径 `cn.iocoder.yudao.module.{module}` |
 | VO 类添加 `@Schema` 注解 | 所有字段有 `description` |
 | 导入语句无缺失 | 所有注解有对应 import |
+| 单元测试已编写 | `src/test/.../XxxServiceTest.java` 存在，覆盖核心 CRUD/业务方法 |
+| `mvn` 编译通过 | 在 `yudao-module-{module}-biz` 下执行 `mvn test-compile` 返回码 0 |
 
 ## 第八部分：与原 skill 的差异调整
 
