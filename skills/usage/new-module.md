@@ -11,9 +11,6 @@ references:
       reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
     - path: skills/design/crud-designer.yaml
       reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
-  templates:
-    - path: docs/templates/skill-template.yaml
-      reason: "Skill 文档模板 - 创建新模块 Skill 文档的模板"
   reference_modules:
     - path: docs/system/code-patterns.md
       reason: "系统模块参考 - 基础模块结构、多租户、树形结构"

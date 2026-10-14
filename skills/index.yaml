@@ -1,6 +1,6 @@
 # Skill 索引文件
-# 记录所有模块/规范/模式/模板/使用样例的Skill文档位置和状态
-# 最后更新：2026-10-14（模块知识文档并入 docs/：原各模块 Skill YAML 统一迁移为 docs/{m}/code-patterns.md，templates 移至 docs/templates/，全仓引用同步更新；新增 im/mes/wms 模块，补录 patterns/templates/usage 三大区段；patterns 移入 design、api 独立为顶层区段）
+# 记录所有模块/规范/模式/使用样例的Skill文档位置和状态
+# 最后更新：2026-10-14（模块知识文档并入 docs/：原各模块 Skill YAML 统一迁移为 docs/{m}/code-patterns.md；docs/templates/ 模板已删除，全仓引用同步清理；新增 im/mes/wms 模块，补录 patterns/usage 两大区段；patterns 移入 design、api 独立为顶层区段）
 
 # ============================================
 # 业务模块（按优先级排序）
@@ -205,23 +205,6 @@ api:
     lines: 708
 
 # ============================================
-# 文档模板
-# ============================================
-templates:
-  skill:
-    name: "Skill 模板"
-    path: "docs/templates/skill-template.yaml"
-    status: "completed"
-    description: "模块 Skill 提取的标准格式（哲学/架构/数据模型/代码规范/扩展指南）"
-    lines: 160
-  extraction-prompt:
-    name: "提取提示词模板"
-    path: "docs/templates/extraction-prompt.md"
-    status: "completed"
-    description: "五阶段提取流程：理念→架构→数据→代码→扩展"
-    lines: 138
-
-# ============================================
 # 使用样例
 # ============================================
 usage:
@@ -322,4 +305,4 @@ metadata:
   created_at: "2026-03-18"
   updated_at: "2026-10-14"
   completed_at: "2026-09-18"
-  notes: "模块知识文档并入 docs/：skill-{module}.yaml → docs/{module}/code-patterns.md，templates 移至 docs/templates/；全仓引用路径同步更新"
+  notes: "模块知识文档并入 docs/：skill-{module}.yaml → docs/{module}/code-patterns.md；docs/templates/ 模板已删除，引用已同步清理"

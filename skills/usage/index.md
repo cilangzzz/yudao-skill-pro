@@ -57,7 +57,6 @@ references:
 |---------|---------|------|
 | 模块代码模式 | `docs/{模块}/code-patterns.md` | 各功能模块的完整技术规范 |
 | 设计模式 | `skills/design/patterns/` | 常用设计模式的实现模板 |
-| 文档模板 | `docs/templates/` | Skill 文档编写模板 |
 
 ---
 
@@ -130,7 +129,7 @@ references:
 
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 新增业务模块 | 创建全新的业务功能模块 | [templates/skill-template.yaml](../../docs/templates/skill-template.yaml) | Skill 文档编写模板 |
+| 新增业务模块 | 创建全新的业务功能模块 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 参考现有模块文档结构 |
 | 应用设计模式 | 需要使用设计模式优化代码 | [patterns/](../design/patterns/) | 设计模式实现模板 |
 
 **新增模块参考**：
@@ -143,8 +142,8 @@ references:
 
 **新增模块步骤**：
 
-1. 使用 `docs/templates/skill-template.yaml` 创建新模块文档
-2. 参考 `docs/templates/extraction-prompt.md` 提取技术规范
+1. 参考现有模块的 `code-patterns.md`（如 `docs/system/code-patterns.md`）确定文档结构
+2. 参考现有模块文档提取技术规范
 3. 按照模块规范编写代码
 4. 更新 `skills/index.yaml` 索引
 
@@ -245,7 +244,7 @@ references:
 - 快速上手：从 `docs/system/code-patterns.md` 或 `docs/infra/code-patterns.md` 开始
 - 扩展功能：选择对应业务模块的 skill 文档
 - 改造功能：重点阅读对应模块的"核心流程"部分
-- 新增模块：使用 `docs/templates/skill-template.yaml` 作为模板
+- 新增模块：参考 `docs/system/code-patterns.md` 等现有模块文档作为模板
 
 ### Q2: skill 文档包含哪些内容?
 
@@ -276,11 +275,9 @@ references:
 
 **A:** 创建新模块的 skill 文档步骤：
 
-1. 复制 `docs/templates/skill-template.yaml` 作为起点
-2. 参考 `docs/templates/extraction-prompt.md` 了解提取方法
-3. 参考现有模块的 skill 文档作为示例
-4. 按照模板结构填写模块信息
-5. 更新 `skills/index.yaml` 添加新模块索引
+1. 参考现有模块的 skill 文档（如 `docs/system/code-patterns.md`）作为模板与示例
+2. 按照现有文档结构填写模块信息
+3. 更新 `skills/index.yaml` 添加新模块索引
 
 ### Q5: 如何理解模块之间的依赖关系?
 
