@@ -1,7 +1,7 @@
 # SQL 文件管理规范
 
 > 适用范围：`sql/` 目录下所有**新增** SQL 文件（建表、表变更、索引、初始数据、数据订正等）。
-> 表结构、字段、索引的**设计**规范见 [skills/design/db-designer.yaml](../skills/design/db-designer.yaml)，本规范只规定文件「放在哪个目录、如何命名」。
+> 表结构、字段、索引的**设计**规范见 [skills/design/db-designer.md](../skills/design/db-designer.md)，本规范只规定文件「放在哪个目录、如何命名」。
 > AI 生成 SQL 文件时必须遵循本规范。
 
 ## 1. 目录规则
@@ -96,7 +96,7 @@
 ```
 
 2. 优先保证脚本可重复执行（`IF EXISTS` / `IF NOT EXISTS`）；数据库不支持的语句，在文件头注明执行前提。
-3. 字段、索引设计遵循 [db-designer.yaml](../skills/design/db-designer.yaml)（必需 `tenant_id`、审计字段，索引首列 `tenant_id` 等）。
+3. 字段、索引设计遵循 [db-designer.md](../skills/design/db-designer.md)（必需 `tenant_id`、审计字段，索引首列 `tenant_id` 等）。
 4. 文件编码 UTF-8；SQL 关键字大写，表名 / 字段名小写。反引号仅用于 MySQL 及其兼容库脚本，其他数据库变体按各自方言引用标识符。
 
 ## 4. 目录结构示例
@@ -124,4 +124,4 @@ sql/
 | 对象 | 关系 |
 |------|------|
 | `sql/master/`（本地维护的多数据库全量基线）、`sql/{db}/`（来自源项目的各数据库全量脚本） | 全量基线，保持不变；新增 SQL 一律按本规范存放，不再写入这些目录 |
-| `skills/design/db-designer.yaml` | 表 / 字段 / 索引设计仍以其为准；其文件命名与目录相关条目已同步修订（v1.1.0，2026-10-14）与本规范对齐；后续修改 db-designer.yaml 不得引入与本规范冲突的命名或目录规则 |
+| `skills/design/db-designer.md` | 表 / 字段 / 索引设计仍以其为准；其文件命名与目录相关条目已同步修订（v1.1.0，2026-10-14）与本规范对齐；后续修改 db-designer.md 不得引入与本规范冲突的命名或目录规则 |

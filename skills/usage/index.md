@@ -4,32 +4,7 @@
 
 ---
 
-## 自动引用机制说明
-
-**从 2026-03-31 起，使用样例支持自动引用设计规范**：
-
-每个使用样例文档头部包含 YAML front matter 配置，声明该场景需要引用的规范文件：
-
-```yaml
----
-references:
-  design:                    # 设计规范（全局约束）
-    - skills/design/db-designer.yaml
-    - skills/design/entity-designer.yaml
-  module_guide:              # 模块引用提示
-    prompt: "请指定目标模块"
-    mapping:
-      mes: docs/mes/code-patterns.md
-  patterns:                  # 设计模式引用
-    - skills/design/patterns/factory-pattern.yaml
----
-```
-
-**使用方式**：
-1. AI 读取使用样例时自动识别 `references` 配置
-2. AI 自动加载引用的设计规范文件内容
-3. 用户在提示词中指定模块名后，AI 加载对应模块 skill
-4. 生成的代码符合所有规范定义的标准
+> 自动引用机制（YAML front matter 字段 `design` / `module_guide` / `patterns` / `usage_hint`）说明见 [CLAUDE.md](../../CLAUDE.md) 的「自动引用机制」一节。
 
 ---
 
@@ -64,13 +39,8 @@ references:
 
 ### 一、快速上手
 
-适用于初次接触项目或快速了解某个模块的开发者。
-
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 了解项目结构 | 刚接触项目，需要快速了解整体架构 | [CLAUDE.md](../../CLAUDE.md) | 查看 15 个业务模块索引与规范入口 |
-| 系统模块入门 | 需要了解用户、角色、权限等基础功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 系统管理模块完整开发指南 |
-| 基础设施入门 | 需要了解文件、配置、任务等基础服务 | [infra/code-patterns.md](../../docs/infra/code-patterns.md) | 基础设施模块完整开发指南 |
 | **实体类实现** | 需要从 SQL 到实体类创建完整 CRUD 功能 | [entity-implementation.md](entity-implementation.md) | 从建表到完整接口的端到端指南 |
 
 **推荐使用流程**：
@@ -83,16 +53,7 @@ references:
 
 ### 二、扩展模块
 
-适用于在现有模块基础上添加新功能的场景。
-
-| 场景 | 适用情况 | 文档链接 | 一句话描述 |
-|-----|---------|---------|-----------|
-| 扩展系统模块 | 添加新的系统管理功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 遵循系统模块规范扩展功能 |
-| 扩展支付模块 | 添加新的支付渠道或支付方式 | [pay/code-patterns.md](../../docs/pay/code-patterns.md) | 遵循支付模块规范扩展功能 |
-| 扩展会员模块 | 添加会员等级、积分等功能 | [member/code-patterns.md](../../docs/member/code-patterns.md) | 遵循会员模块规范扩展功能 |
-| 扩展商城模块 | 添加商品、订单相关功能 | [mall/code-patterns.md](../../docs/mall/code-patterns.md) | 遵循商城模块规范扩展功能 |
-| 扩展 CRM 模块 | 添加客户管理相关功能 | [crm/code-patterns.md](../../docs/crm/code-patterns.md) | 遵循 CRM 模块规范扩展功能 |
-| 扩展工作流模块 | 添加流程审批相关功能 | [bpm/code-patterns.md](../../docs/bpm/code-patterns.md) | 遵循工作流模块规范扩展功能 |
+适用于在现有模块基础上添加新功能的场景。具体目标模块的「渠道/策略/业务实体」扩展模式见 [extend-module.md](extend-module.md)。
 
 **扩展开发要点**：
 
@@ -105,18 +66,11 @@ references:
 
 ### 三、改造模块
 
-适用于修改现有功能或重构代码的场景。
-
-| 场景 | 适用情况 | 文档链接 | 一句话描述 |
-|-----|---------|---------|-----------|
-| 改造系统功能 | 修改用户、角色、菜单等核心功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 系统模块改造技术规范 |
-| 改造支付流程 | 修改支付、退款等核心流程 | [pay/code-patterns.md](../../docs/pay/code-patterns.md) | 支付模块改造技术规范 |
-| 改造订单流程 | 修改订单创建、支付、发货流程 | [mall/code-patterns.md](../../docs/mall/code-patterns.md) | 商城模块改造技术规范 |
-| 改造审批流程 | 修改工作流定义和审批逻辑 | [bpm/code-patterns.md](../../docs/bpm/code-patterns.md) | 工作流模块改造技术规范 |
+适用于修改现有功能或重构代码的场景。分析框架、风险评估与回滚策略见 [refactor-module.md](refactor-module.md)。
 
 **改造开发要点**：
 
-1. 重点关注文档中的"核心流程"部分
+1. 重点阅读对应模块 code-patterns.md 的「核心流程」与「扩展指南」章节
 2. 了解模块间的依赖关系
 3. 注意数据库字段和索引的影响
 4. 遵循向后兼容原则
@@ -125,12 +79,7 @@ references:
 
 ### 四、新增模块
 
-适用于创建全新业务模块的场景。
-
-| 场景 | 适用情况 | 文档链接 | 一句话描述 |
-|-----|---------|---------|-----------|
-| 新增业务模块 | 创建全新的业务功能模块 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 参考现有模块文档结构 |
-| 应用设计模式 | 需要使用设计模式优化代码 | [patterns/](../design/patterns/) | 设计模式实现模板 |
+适用于创建全新业务模块的场景。需求分析、架构、数据库、代码、测试全流程见 [new-module.md](new-module.md)。
 
 **新增模块参考**：
 
@@ -151,13 +100,7 @@ references:
 
 ### 五、设计模式应用
 
-适用于需要使用设计模式优化代码结构的场景。
-
-| 模式 | 适用情况 | 文档链接 | 一句话描述 |
-|-----|---------|---------|-----------|
-| 工厂模式 | 需要根据条件创建不同类型的对象 | [factory-pattern.yaml](../design/patterns/factory-pattern.yaml) | 对象创建的统一管理 |
-| 策略模式 | 需要在多种算法或策略间切换 | [strategy-pattern.yaml](../design/patterns/strategy-pattern.yaml) | 算法族的统一接口 |
-| 模板方法模式 | 需要定义算法骨架，子类实现细节 | [template-method-pattern.yaml](../design/patterns/template-method-pattern.yaml) | 算法骨架的固定结构 |
+适用于需要使用设计模式优化代码结构的场景。多渠道系统的设计模式组合指南见 [pattern-usage.md](pattern-usage.md)。
 
 **设计模式选择指南**：
 
@@ -248,17 +191,7 @@ references:
 
 ### Q2: skill 文档包含哪些内容?
 
-**A:** 标准的 skill 文档包含以下部分：
-
-1. **模块概述**：模块功能和技术栈说明
-2. **目录结构**：模块的代码组织结构
-3. **核心概念**：模块涉及的核心概念和术语
-4. **技术规范**：命名规范、代码风格、注解使用等
-5. **核心流程**：关键业务流程的实现方式
-6. **数据模型**：数据库表结构和实体关系
-7. **API 规范**：接口设计和参数说明
-8. **代码示例**：常见开发场景的代码参考
-9. **注意事项**：开发中需要注意的问题
+**A:** 标准文件结构（README / api-{domain} / data-model / code-patterns / pitfalls）见 [CLAUDE.md](../../CLAUDE.md) `## 模块功能文档 / 通用结构` 一节。
 
 ### Q3: 如何使用设计模式文档?
 
@@ -318,35 +251,9 @@ system (系统管理) <-- 几乎所有模块都依赖
 
 ---
 
-## 附录
+## 索引与更新记录
 
-### 模块文档索引
-
-| 模块 | 文档路径 | 行数 | 状态 |
-|-----|---------|------|------|
-| 系统管理 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 303 | 已完成 |
-| 基础设施 | [infra/code-patterns.md](../../docs/infra/code-patterns.md) | 291 | 已完成 |
-| 支付模块 | [pay/code-patterns.md](../../docs/pay/code-patterns.md) | 373 | 已完成 |
-| 会员模块 | [member/code-patterns.md](../../docs/member/code-patterns.md) | 249 | 已完成 |
-| 商城模块 | [mall/code-patterns.md](../../docs/mall/code-patterns.md) | 329 | 已完成 |
-| CRM 模块 | [crm/code-patterns.md](../../docs/crm/code-patterns.md) | 313 | 已完成 |
-| ERP 模块 | [erp/code-patterns.md](../../docs/erp/code-patterns.md) | 373 | 已完成 |
-| 工作流模块 | [bpm/code-patterns.md](../../docs/bpm/code-patterns.md) | 429 | 已完成 |
-| AI 模块 | [ai/code-patterns.md](../../docs/ai/code-patterns.md) | 351 | 已完成 |
-| 物联网模块 | [iot/code-patterns.md](../../docs/iot/code-patterns.md) | 372 | 已完成 |
-| 公众号模块 | [mp/code-patterns.md](../../docs/mp/code-patterns.md) | 441 | 已完成 |
-| 报表模块 | [report/code-patterns.md](../../docs/report/code-patterns.md) | 255 | 已完成 |
-
-### 使用指南文档索引
-
-| 文档 | 适用场景 | 一句话描述 |
-|-----|---------|-----------|
-| [quick-start.md](quick-start.md) | 快速上手 | Skill 文档快速使用指南和常用提示词模板 |
-| [entity-implementation.md](entity-implementation.md) | 实体类开发 | 从 SQL 建表到完整 CRUD 接口的端到端指南 |
-| [extend-module.md](extend-module.md) | 扩展模块 | 在现有模块基础上添加新功能 |
-| [new-module.md](new-module.md) | 新增模块 | 创建全新的业务模块 |
-| [refactor-module.md](refactor-module.md) | 改造模块 | 修改现有功能或重构代码 |
-| [pattern-usage.md](pattern-usage.md) | 设计模式 | 常用设计模式的使用场景和实现方法 |
+> 完整 19 模块索引见 [CLAUDE.md](../../CLAUDE.md) `## 模块功能文档` 与 [docs/README.md](../../docs/README.md)；使用样例的 7 类场景入口见 [CLAUDE.md](../../CLAUDE.md) `## Skills 使用场景索引`。
 
 ### 更新记录
 

@@ -3,13 +3,13 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/design/db-designer.yaml
+    - path: skills/design/db-designer.md
       reason: "数据库表设计规范 - 建表 SQL、字段命名、索引设计"
-    - path: skills/design/entity-designer.yaml
+    - path: skills/design/entity-designer.md
       reason: "实体类(DO)设计规范 - 继承体系、注解规范、命名转换"
-    - path: skills/design/api-designer.yaml
+    - path: skills/design/api-designer.md
       reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
-    - path: skills/design/crud-designer.yaml
+    - path: skills/design/crud-designer.md
       reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
   reference_modules:
     - path: docs/system/code-patterns.md
@@ -147,11 +147,11 @@ references:
 
 **场景1：需要支持多种类型切换（如支付渠道、存储类型）**
 - 采用策略模式 + 工厂模式
-- 参考：skills/design/patterns/strategy-pattern.yaml、skills/design/patterns/factory-pattern.yaml
+- 参考：skills/design/patterns/strategy-pattern.md、skills/design/patterns/factory-pattern.md
 
 **场景2：需要统一处理流程（如审批流程、发送流程）**
 - 采用模板方法模式
-- 参考：skills/design/patterns/template-method-pattern.yaml
+- 参考：skills/design/patterns/template-method-pattern.md
 
 ### 3. 模块间通信设计
 - **对外API**：哪些功能需要暴露给其他模块？在 api/ 包中定义

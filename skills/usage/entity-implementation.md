@@ -3,13 +3,13 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/design/db-designer.yaml
+    - path: skills/design/db-designer.md
       reason: "数据库表设计规范 - 建表 SQL、字段命名、索引设计"
-    - path: skills/design/entity-designer.yaml
+    - path: skills/design/entity-designer.md
       reason: "实体类(DO)设计规范 - 继承体系、注解规范、命名转换"
-    - path: skills/design/api-designer.yaml
+    - path: skills/design/api-designer.md
       reason: "API 接口设计规范 - Controller 注解、请求响应格式、权限标识"
-    - path: skills/design/crud-designer.yaml
+    - path: skills/design/crud-designer.md
       reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
   module_guide:
     prompt: "请指定目标模块，AI 将加载对应模块的 skill 文档"

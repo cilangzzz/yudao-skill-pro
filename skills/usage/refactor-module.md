@@ -3,11 +3,11 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/design/api-designer.yaml
+    - path: skills/design/api-designer.md
       reason: "API 接口设计规范 - 改造时需保持接口兼容性"
-    - path: skills/design/entity-designer.yaml
+    - path: skills/design/entity-designer.md
       reason: "实体类设计规范 - 改造 DO 需遵循规范"
-    - path: skills/design/db-designer.yaml
+    - path: skills/design/db-designer.md
       reason: "数据库设计规范 - 表结构变更需遵循规范"
   module_guide:
     prompt: "请指定要改造的模块，AI 将加载对应模块的 skill 文档"
@@ -25,9 +25,9 @@ references:
       mp: docs/mp/code-patterns.md
       report: docs/report/code-patterns.md
   patterns:
-    - path: skills/design/patterns/strategy-pattern.yaml
+    - path: skills/design/patterns/strategy-pattern.md
       reason: "策略模式 - 重构时可引入策略模式解耦"
-    - path: skills/design/patterns/factory-pattern.yaml
+    - path: skills/design/patterns/factory-pattern.md
       reason: "工厂模式 - 重构时可引入工厂模式管理对象"
   usage_hint: "改造前请务必阅读目标模块的 Skill 文档，了解现有架构"
 ---
@@ -1286,7 +1286,7 @@ SELECT COUNT(*) AS total_count FROM xxx_table;
 cat docs/{module}/code-patterns.md
 
 # 查看设计模式文档
-cat skills/design/patterns/{pattern}-pattern.yaml
+cat skills/design/patterns/{pattern}-pattern.md
 
 # 数据库备份
 mysqldump -h host -u user -p database > backup_$(date +%Y%m%d).sql

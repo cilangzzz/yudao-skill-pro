@@ -3,9 +3,9 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/design/api-designer.yaml
+    - path: skills/design/api-designer.md
       reason: "API 接口设计规范 - 扩展接口需遵循现有规范"
-    - path: skills/design/entity-designer.yaml
+    - path: skills/design/entity-designer.md
       reason: "实体类设计规范 - 新增实体需遵循 DO 规范"
   module_guide:
     prompt: "请指定要扩展的模块，AI 将加载对应模块的 skill 文档"
@@ -23,9 +23,9 @@ references:
       mp: docs/mp/code-patterns.md
       report: docs/report/code-patterns.md
   patterns:
-    - path: skills/design/patterns/factory-pattern.yaml
+    - path: skills/design/patterns/factory-pattern.md
       reason: "工厂模式 - 渠道/平台扩展时注册到工厂"
-    - path: skills/design/patterns/strategy-pattern.yaml
+    - path: skills/design/patterns/strategy-pattern.md
       reason: "策略模式 - 新增策略实现"
   usage_hint: "使用时请在提示词中指定模块名，如：'目标模块：pay'"
 ---

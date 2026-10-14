@@ -1,0 +1,474 @@
+# 模板方法模式
+
+> **2026-10 增补**：适用时机、判定清单、JDK/Spring 经典示例、5 种变体、与相关模式辨析
+>
+> **重要修正**：`AbstractSmsClient` 实际位于 `yudao-module-system/.../framework/sms/`，而非 `yudao-module-infra`
+
+## 模式定义
+
+- **ID**：`template-method-pattern`
+- **名称**：模板方法模式
+- **分类**：行为型模式
+- **描述**：父类用 final 模板方法固定算法骨架，把其中若干步骤延迟到子类实现；子类可以重定义算法某些步骤，但不改变算法整体结构
+
+## 结构
+
+### 参与者
+
+| 角色 | 名称 | 说明 |
+|------|------|------|
+| 抽象类 | AbstractClass | 定义抽象方法（必须步骤）与模板方法（final 修饰的骨架），模板方法按顺序调用抽象方法 / 钩子方法 |
+| 具体类 | ConcreteClass | 继承抽象类，覆盖抽象方法完成差异逻辑，可选覆盖钩子方法 |
+
+## 模板流程示例（yudao 项目）
+
+### unifiedOrder / unifiedRefund / unifiedTransfer
+
+- **模块**：pay（`AbstractPayClient`）
+- **步骤**：
+  1. `ValidationUtils.validate` 参数校验
+  2. 调用 `doUnifiedOrder`（子类实现）
+  3. `ServiceException` 直抛 / `Throwable` 包为 `PayClientException` 并 log
+- **钩子方法**：
+  - `doUnifiedOrder()`（抽象，必须实现）
+  - `doInit()`（抽象，必须实现）
+  - `doParseOrderNotify()`（抽象，必须实现）
+
+### init / refresh
+
+- **模块**：pay / system / infra
+- **步骤**：
+  1. 配置变更检测（equals 比对 originalConfig）
+  2. 重新初始化（调 doInit）
+- **钩子方法**：
+  - `doInit()`（抽象）
+
+## 何时使用
+
+### 信号 1：坏味道 —— 多个类复制粘贴了同一套流程
+
+- **解释**：GoF / refactoring.guru 给出的原始场景（如导出 Excel / CSV / PDF 都是「取数→转换→写文件→上传」）。把骨架和公共步骤上提到抽象父类，子类只写差异步骤，重复代码从 N 份降为 1 份，新增一种格式 / 渠道只需实现少数方法。判断要点：重复的是「整个流程」而不只是工具方法 —— 只重复工具方法用工具类就够
+- **项目案例**：pay 模块 `AbstractPayClient.unifiedOrder` 固定「`ValidationUtils.validate` → `doUnifiedOrder` → 异常分类包装 + 日志」，微信 / 支付宝 / 银联等渠道子类的下单错误出口完全一致；infra 模块 `AbstractFileClient` 同样为 DB / Local / FTP / SFTP / S3 等 6 种存储统一封装 init / refresh
+
+### 信号 2：希望控制扩展者能改什么、不能改什么
+
+- **解释**：把模板方法声明为 `final`（或不在文档中开放它），只把 `protected` 的步骤方法留给子类 —— 流程不会被扩展者破坏，扩展点被精确圈定。`HttpServlet` 的 `service()` 按 HTTP 方法分派到 `doGet` / `doPost`，官方文档明确「几乎不应覆盖 service」，就是这种「锁死骨架、开放步骤」的设计
+- **项目案例**：`AbstractPayClient.unifiedOrder()` 固定「校验→`doUnifiedOrder`→异常转换」，渠道实现类无法跳过校验或吞；`IotCoapAbstractHandler.handle()` 固定「前置认证 `beforeHandle`→`handle0`→`writeResponse`→异常分类响应」，设备协议子类只能替换业务步骤
+
+### 信号 3：公共流程中有每次都必须执行的「基础设施」逻辑
+
+- **解释**：把基础设施逻辑写进模板方法，调用方与子类都绕不过去。AQS 是极致范例：`acquire()` / `release()` 等 final 模板方法固定排队 / 阻塞 / 唤醒全套并发骨架（这些最难写对），子类只实现 `tryAcquire` / `tryRelease` 等状态判断钩子；Spring `AbstractApplicationContext#refresh()` 固定了容器启动 12 步顺序
+- **项目案例**：`AbstractPayClient` 用 `catch(ServiceException)` 与 `catch(Throwable)` 统一记录日志并转成 `PayClientException`；`AbstractApplicationContext.refresh()` 强制执行 `prepareRefresh`→`obtainFreshBeanFactory`→`postProcessBeanFactory`→`invokeBeanFactoryPostProcessors`→`registerBeanPostProcessors`→`initMessageSource`→`initApplicationEventMulticaster`→`onRefresh`→`registerListeners`→`finishBeanFactoryInitialization`→`finishRefresh` 的固定顺序
+
+### 信号 4：需要设计「分级的扩展点」
+
+- **解释**：用两种签名区分扩展点等级：抽象方法 = 必须步骤；带默认实现（尤其空实现）的方法 = 可选钩子（hook），常放在关键步骤前后；钩子默认抛 `UnsupportedOperationException` 时，语义变成「该子类必须覆盖、否则显式报错」，能尽早暴露错误。JDK `InputStream` 的 `read(byte[], off, len)` 默认实现反复调用抽象 `read()` 是这种契约的范本
+- **项目案例**：`IotCoapAbstractHandler` 同时使用三种等级 —— `handle0()` 抽象方法（必须实现业务）、`requiresAuthentication()` 默认 `false` 的可选项（按场景决定是否走认证）、`getProductKey()` / `getDeviceName()` 默认抛 `UnsupportedOperationException` 的强约束钩子（需要认证的子类必须覆盖）；`AbstractRegexDesensitizationHandler.desensitize()` 是「先 SpEL 判断是否禁用（钩子）→ 再用 `getRegex` / `getReplacer`（抽象）」的同构结构
+
+### 信号 5：多个子类的差异集中在「如何创建某个对象」，而创建前后的流程一致
+
+- **解释**：GoF 在 Factory Method 与 Template Method 两章 Related Patterns 互引：「Factory methods are usually called within Template methods」，并把「创建某对象」这一差异点放在模板的一个钩子里，比让子类硬编码创建更可控。当某一步「怎么创建依赖对象」是差异点时（如各渠道创建自己的 SDK Client），把这个动作做成 `protected` 钩子
+- **项目案例**：`AbstractPayClient.init()` 调 `doInit()`，`AbstractWxPayClient.doInit` 内部 `new WxPayServiceImpl` 并应用 config；`AbstractAlipayPayClient.doInit` 内部 `new DefaultAlipayClient`（`doInit` 本身就作为 yudao 多渠道中「创建渠道 SDK Client」的工厂钩子）
+
+### 信号 6：步骤之间存在必须遵守的顺序约束，不希望调用方自行拼装
+
+- **解释**：把「步骤的先后与条件组合」封装在一处，调用方只面对一个入口方法（`export()` / `refresh()` / `acquire()`），无法把步骤拆散乱用。若把步骤公开为独立方法让调用方自己编排，每处调用都可能漏掉或打乱顺序；模板方法消除这种「流程散落在调用方」的坏味道。注意：这一优点同时是约束 —— 调用方无法重排流程，需重排时应改用策略 / 管道
+- **项目案例**：`AbstractFileClient.refresh()` 强制先比对 originalConfig、再更新 config、再 init —— 避免子类在覆盖时漏掉「配置变更检测」或重复初始化；`AbstractRegexDesensitizationHandler.desensitize()` 强制「判断禁用→执行替换」两步，禁止子类把禁用判断挪到执行替换之后
+
+## 何时不该使用
+
+### 反模式 1：只有一个实现类，或步骤差异只有一两行
+
+- **理由**：为单一实现引入抽象父类是典型的过度设计：读者要跳两个文件才能看到真实逻辑，抽象层没有换来任何多态价值。GoF 的前提是「多个类的公共行为上提」，只有一个实现时这个前提不成立
+- **替代方案**：普通类 + 私有方法顺序调用；公共逻辑用工具类或接口默认方法复用
+
+### 反模式 2：需要运行时切换算法，或同一骨架存在多个并发实例
+
+- **理由**：模板方法用继承绑定，实现关系在编译期固定，一个子类实例只能表现一种行为；要切换只能整体 `new` 另一个子类（「继承锁死」）。策略模式用组合持有算法对象，运行时可任意替换、可注入 mock 测试
+- **替代方案**：策略模式（组合 + 依赖注入）：`PayClient` 接口 + Map 注册表 + 构造器注入，运行时可换可测
+
+### 反模式 3：差异逻辑只是一个小的无状态片段，却要求每个调用点都建子类
+
+- **理由**：为每个变体建一个类的类数量爆炸问题（`JdbcTemplate` 若用继承式模板，每个查询都要一个子类）。回调以 lambda 传入更轻，Spring 正是用回调把模板思路「组合化」
+- **替代方案**：回调 / 函数式接口（Spring `JdbcTemplate` + `RowMapper` 模式）：把差异步骤做成方法参数传入，零子类
+
+### 反模式 4：变化不仅是步骤实现，还有步骤的数量、增删或顺序
+
+- **理由**：模板方法前提是骨架稳定，若骨架本身经常变，每次都要改父类并波及所有子类，父类成为修改热点，违背了使用它的初衷
+- **替代方案**：责任链 / 管道（Pipeline）或组合式的 Step 接口列表，把步骤变成可插拔对象
+
+### 反模式 5：子类同时还需要继承自另一个基类
+
+- **理由**：Java 单继承：子类继承模板父类后无法再继承其他基类（Spring 的 XxxAdapter 体系因此常常很深）。同时 yudao 的 `PayClientFactoryImpl.createPayClient` 是用 `new` 创建渠道 client（见 `yudao-module-pay/.../impl/PayClientFactoryImpl.java`），子类因此无法被 Spring 字段注入；当差异步骤依赖其他 Spring Bean 时，组合（模板骨架注入 `XxxHandler`）比让子类继承更可控
+- **替代方案**：组合：骨架类注入 `XxxHandler` 策略接口，按场景注入不同实现
+
+### 反模式 6：两个流程只是「看起来像」，步骤语义并不真正相同（伪共享）
+
+- **理由**：为消除表面重复强行上提父类会制造脆弱基类：后续一个流程变化被迫在父类加 if 区分子类语义，演变成反模式「参数化继承」。重复到第三次、且语义确认一致时再抽象
+- **替代方案**：先接受少量重复（Rule of Three，重复第三次再抽象），或直接写成两个独立 Service
+
+## 动手前自检清单
+
+- [ ] 骨架是否真的稳定？把流程顺序、公共逻辑（校验 / 资源 / 异常处理）写进父类后，未来一年内步骤的「数量或顺序」是否可能变化？会变就先别上模板方法
+- [ ] 变化点到底有几个？如果只有一个小的差异逻辑（如结果映射、文件格式），用回调接口 / lambda 参数即可；只有在「多个步骤组合差异 + 公共步骤复用价值高」时模板方法才划算
+- [ ] 子类与父类是真正的 is-a（「Excel 导出器是一种订单导出器」），还是仅仅共享代码？仅为复用代码应优先组合（策略 / 委托）
+- [ ] 是否需要运行时切换实现、或同一骨架存在多个并发实例？需要则用策略模式 + 依赖注入；模板方法是编译期绑定的，实例化后行为固定
+- [ ] 这个类是否还要继承别的基类？Java 单继承，把继承名额花在模板父类上之前要想清楚；子类又需要被 Spring 容器注入依赖、由工厂 `new` 构造的场景（见 `PayClientFactoryImpl`）也属于同一类约束
+- [ ] 你是否能接受把模板方法声明为 `final` 来锁死骨架 —— 若不敢，说明骨架并不真的稳定，调用方想重排步骤，应改用策略 + 委托，或管道 / Pipeline 让步骤可重排
+
+## 权威框架经典示例
+
+### JDK 17 (java.base)
+
+- **位置**：`java.util.concurrent.locks.AbstractQueuedSynchronizer`
+- **描述**：AQS 是模板方法模式的教科书实现：`acquire` / `release` / `acquireShared` / `releaseShared` 等 public final 模板方法固定「入队→阻塞→唤醒→出队」的排队 / 挂起骨架（不可改动），子类只需覆盖 protected 钩子 `tryAcquire(int)` / `tryRelease(int)` / `tryAcquireShared(int)` / `tryReleaseShared(int)` 来定义「什么算获取 / 释放成功」的状态判断逻辑；这些钩子默认 throw `UnsupportedOperationException`，`ReentrantLock` / `Semaphore` / `CountDownLatch` 等都通过内部 Sync 类只覆盖与自己模式对应的钩子。Doug Lea 把最难写对的并发排队逻辑固化在父类，把易变同步语义留给子类
+
+### JDK 17 (java.base)
+
+- **位置**：`java.util.AbstractList`，子类包括 `ArrayList`、`AbstractSequentialList` 等
+- **描述**：Effective Java Item 20「骨架实现（skeletal implementation）」的经典案例：接口 `List` 定义契约，`AbstractList` 提供骨架 —— `iterator()` 和 `listIterator()` 在 `get(int)` 之上实现遍历逻辑，`indexOf()` / `hashCode()` / `equals()` 也有通用实现；子类实现不可变列表只需提供 `get(int)` 和 `size()` 两个方法（Javadoc 原话：「To implement an unmodifiable list, the programmer needs only to extend this class and provide implementations for the get(int) and size() methods」），`ArrayList` 等可变列表再覆盖 `set()` / `add()` / `remove()`
+
+### Servlet 规范 (jakarta.servlet.http)
+
+- **位置**：`jakarta.servlet.http.HttpServlet`（原 `javax.servlet.http.HttpServlet`）
+- **描述**：`service()` 是固定骨架的模板方法：public `service(ServletRequest, ServletResponse)` 做类型转换后调用 protected `service(HttpServletRequest, HttpServletResponse)`，后者解析 HTTP 方法并把请求分派到 `doGet` / `doPost` / `doPut` / `doDelete` / `doTrace` / `doOptions` 这些可覆盖步骤。类级 Javadoc 明确写有「There's almost no reason to override the service method」，protected service 的 Javadoc 也写「There's no need to override this method」—— 框架通过模板方法保证请求解析、方法分派、405 错误返回等公共逻辑不被破坏，开发者只能替换个别 doXxx 步骤。这是好模则的范本
+
+### Spring Framework (spring-context)
+
+- **位置**：`org.springframework.context.support.AbstractApplicationContext#refresh()`
+- **描述**：Spring 类级 Javadoc 第一段明示「Uses the Template Method design pattern, requiring concrete subclasses to implement abstract methods」。`refresh()` 固定容器启动的完整 12 步骨架（`prepareRefresh` → `obtainFreshBeanFactory` → `prepareBeanFactory` → `postProcessBeanFactory` → `invokeBeanFactoryPostProcessors` → `registerBeanPostProcessors` → `initMessageSource` → `initApplicationEventMulticaster` → `onRefresh` → `registerListeners` → `finishBeanFactoryInitialization` → `finishRefresh`），其中 `refreshBeanFactory()` 是必须实现 abstract 方法，`onRefresh()` 的 Javadoc 写「Template method which can be overridden to add context-specific refresh work... This implementation is empty」。Spring Boot 的 `ServletWebServerApplicationContext` 正是通过覆盖 `onRefresh()` 创建内嵌 Web 服务器；`AbstractRefreshableWebApplicationContext` 覆盖 `postProcessBeanFactory()` 注册 `ServletContextAwareProcessor` 与 web 作用域（request / session）
+
+### yudao-vue-pro（项目源码）
+
+- **位置**：`yudao-module-pay/.../pay/core/client/impl/AbstractPayClient.java`
+- **描述**：`AbstractPayClient` 以泛型抽象类承载支付渠道的公共骨架：`unifiedOrder(PayOrderUnifiedReqDTO)` 作为 public final 模板方法先 `ValidationUtils.validate` 统一参数校验，再调子类实现的 `doUnifiedOrder()`，并用 `catch(ServiceException)` 直抛 / `catch(Throwable)` 统一日志 + `buildPayException` 异常转换；同类结构还有 init / refresh、`unifiedRefund` / `parseRefundNotify` / `getRefund`、`unifiedTransfer` 等共 8 个 final 模板方法。微信侧再叠一层 `AbstractWxPayClient` 统一 `API_VERSION_V2` / `V3` 分发与 `WxPayException` 翻译；支付宝侧有对偶的 `AbstractAlipayPayClient`。新增渠道只写 `AbstractPayClient` 子类实现 `doInit` / `doUnifiedOrder` 等差异步骤，校验、异常、日志逻辑零重复 —— 这是 yudao 知识库中「模板方法 + 工厂（`PayClientFactoryImpl` 按 channelCode 选择 PayClient）+ 策略（渠道差异行为）」组合的标准入口
+
+## 最小可读示例
+
+### 订单报表导出：Excel / CSV 共享「取数→生成→上传」骨架
+
+**场景**：贴合 yudao 业务：管理后台导出订单报表，Excel / CSV 两种格式共享「取数→生成→上传」流程，与 infra 文件上传、pay 模块的 `doInit` 步骤创建渠道 SDK Client 思路一致
+
+```java
+import java.io.ByteArrayOutputStream;
+import java.util.List;
+import cn.idev.excel.FastExcelFactory;
+
+/**
+ * 场景：管理后台「订单报表导出」，支持 Excel / CSV 多种格式。
+ * 流程骨架固定：取数 → 生成文件 → 上传文件；差异只在生成文件的格式。
+ */
+public abstract class AbstractOrderExporter {
+
+    protected final OrderMapper orderMapper;   // 实际项目由 Spring 构造器注入
+
+    protected AbstractOrderExporter(OrderMapper orderMapper) {
+        this.orderMapper = orderMapper;
+    }
+
+    /** 模板方法：声明为 final，禁止子类改动流程骨架 */
+    public final String export(OrderExportReqVO reqVO) {
+        List<OrderDO> orders = orderMapper.selectList(reqVO);  // 公共步骤：取数
+        byte[] content = writeContent(orders);                 // 差异步骤：子类实现
+        return upload(content, buildFileName(reqVO));          // 公共步骤：上传
+    }
+
+    /** 差异步骤：必须由子类实现 */
+    protected abstract byte[] writeContent(List<OrderDO> orders);
+
+    /** 钩子步骤：有默认实现，子类可选覆盖 */
+    protected String buildFileName(OrderExportReqVO reqVO) {
+        return "order-export-" + System.currentTimeMillis();
+    }
+
+    private String upload(byte[] content, String fileName) {
+        // 调用 infra 文件服务上传，所有格式共用
+        return "https://file.example.com/" + fileName;
+    }
+}
+
+/** Excel 导出器：只实现差异步骤（使用 yudao 实际依赖的 FastExcel） */
+public class ExcelOrderExporter extends AbstractOrderExporter {
+
+    public ExcelOrderExporter(OrderMapper orderMapper) {
+        super(orderMapper);
+    }
+
+    @Override
+    protected byte[] writeContent(List<OrderDO> orders) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        FastExcelFactory.write(baos, OrderExcelVO.class)
+                .sheet("orders")
+                .doWrite(orders);
+        return baos.toByteArray();
+    }
+}
+
+/** CSV 导出器：实现差异步骤 + 按需覆盖钩子 */
+public class CsvOrderExporter extends AbstractOrderExporter {
+
+    public CsvOrderExporter(OrderMapper orderMapper) {
+        super(orderMapper);
+    }
+
+    @Override
+    protected byte[] writeContent(List<OrderDO> orders) {
+        StringBuilder sb = new StringBuilder("id,amount\n");
+        for (OrderDO o : orders) {
+            sb.append(o.getId()).append(',').append(o.getAmount()).append('\n');
+        }
+        return sb.toString().getBytes();
+    }
+
+    @Override
+    protected String buildFileName(OrderExportReqVO reqVO) {   // 覆盖钩子定制文件名
+        return "order-export.csv";
+    }
+}
+```
+
+**关键点**：
+
+- `export()` 用 final 锁死「取数 → `writeContent` → 上传」骨架，取数 / 上传两个公共步骤在父类只写一次
+- `writeContent()` 是抽象方法 = 必须实现的差异步骤，新增格式 = 新增一个子类 + 一个方法
+- `buildFileName()` 是带默认实现的钩子 = 可选扩展点，子类按需覆盖（`CsvOrderExporter` 演示了覆盖）
+- `ExcelOrderExporter` 使用 yudao 实际依赖的 `cn.idev.excel.FastExcelFactory`：构造 `ByteArrayOutputStream`、写入流后返回字节数组，与 `AbstractPayClient` 的「父类骨架 + 子类实现 doXxx」结构同构
+- 判断适用性：差异（写文件格式）嵌在流程中间，且公共步骤有真实复用价值 —— 若只需运行时切换格式或差异只有一行，应改用策略 / 回调而非继承
+
+## 项目中的应用
+
+### pay · AbstractPayClient
+
+- **目的**：用 final 模板方法统一封装支付渠道客户端的「参数校验 → doXxx 渠道实现 → 异常分类包装与日志」骨架（共 8 个 final 模板方法）
+- **代码路径**：`yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/impl/AbstractPayClient.java`
+
+```java
+public final PayOrderRespDTO unifiedOrder(PayOrderUnifiedReqDTO reqDTO) {
+    ValidationUtils.validate(reqDTO);
+    PayOrderRespDTO resp;
+    try {
+        resp = doUnifiedOrder(reqDTO);
+    } catch (ServiceException ex) { // 业务异常，由实现类翻译，直接抛
+        throw ex;
+    } catch (Throwable ex) {
+        log.error("[unifiedOrder][客户端({}) request({}) 发起支付异常]", getId(), toJsonString(reqDTO), ex);
+        throw buildPayException(ex);
+    }
+    return resp;
+}
+protected abstract PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO) throws Throwable;
+// 抽象钩子：doInit / doUnifiedOrder / doUnifiedRefund / doUnifiedTransfer / doParseOrderNotify / doGetOrder 等
+```
+
+### pay · AbstractWxPayClient（二级抽象模板）
+
+- **目的**：在 `AbstractPayClient` 之下再抽一层微信支付公共骨架：`doInit` 内部 `new WxPayServiceImpl` 并按 V2 / V3 应用密钥；`doUnifiedOrder` 做 API 版本分发与 `WxPayException` 到渠道错误码的统一翻译
+- **代码路径**：`yudao-module-pay/src/main/java/cn/iocoder/yudao/module/pay/framework/pay/core/client/impl/weixin/AbstractWxPayClient.java`
+
+```java
+@Override
+protected PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO) throws Exception {
+    try {
+        switch (config.getApiVersion()) {
+            case API_VERSION_V2: return doUnifiedOrderV2(reqDTO);
+            case API_VERSION_V3:
+                client.getConfig().setApiV3HttpClient(null);
+                return doUnifiedOrderV3(reqDTO);
+            default: throw new IllegalArgumentException(String.format("未知的 API 版本(%s)", config.getApiVersion()));
+        }
+    } catch (WxPayException e) {
+        log.error("[doUnifiedOrder][支付({}) 发起微信支付异常", reqDTO, e);
+        return PayOrderRespDTO.closedOf(getErrorCode(e), getErrorMsg(e),
+                reqDTO.getOutTradeNo(), e.getXmlString());
+    }
+}
+// 6 个具体客户端 WxApp / Bar / Lite / Native / Pub / WapPayClient 只需实现 doUnifiedOrderV2 / V3，体现模板方法的多层复用
+```
+
+### system · AbstractSmsClient
+
+- **目的**：用 final 的 init / refresh 固定短信客户端「配置变更检测 → 重新初始化」流程
+- **代码路径**：`yudao-module-system/src/main/java/cn/iocoder/yudao/module/system/framework/sms/core/client/impl/AbstractSmsClient.java`
+
+```java
+public final void init() {
+    log.debug("[init][配置({}) 初始化完成]", properties);
+}
+public final void refresh(SmsChannelProperties properties) {
+    if (properties.equals(this.properties)) return;  // 配置未变
+    log.info("[refresh][配置({})发生变化，重新初始化]", properties);
+    this.properties = properties;
+    this.init();
+}
+// 注意：该文件实际位于 yudao-module-system 模块（不是 infra）
+// AliyunSmsClient / TencentSmsClient / HuaweiSmsClient / QiniuSmsClient / DebugDingTalkSmsClient 等 5 个渠道子类无需各自处理配置热更新
+```
+
+### infra · AbstractFileClient
+
+- **目的**：用 final 的 init / refresh 固定文件客户端初始化与配置变更比对流程；用 originalConfig 保存原始配置，避免子类改写 config 后把变更误判为未变更
+- **代码路径**：`yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/framework/file/core/client/AbstractFileClient.java`
+
+```java
+public final void init() {
+    doInit();
+    log.debug("[init][配置({}) 初始化完成]", config);
+}
+protected abstract void doInit();
+
+public final void refresh(Config config) {
+    if (config.equals(this.originalConfig)) return;
+    log.info("[refresh][配置({})发生变化，重新初始化]", config);
+    this.config = config;
+    this.originalConfig = config;
+    this.init();
+}
+// DB / Local / FTP / SFTP / S3 等 6 个存储子类只实现 doInit
+```
+
+### iot · IotCoapAbstractHandler
+
+- **目的**：final `handle()` 固定 CoAP 上行请求「前置认证 `beforeHandle` → 业务处理 `handle0` → `writeResponse` → 按 `ServiceException` / `IllegalArgumentException` / `Exception` 三档分类响应」骨架；同时演示「生命周期钩子式」与「默认抛异常的可选协议式（AQS 变体）」两种变体
+- **代码路径**：`yudao-module-iot/yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/coap/handler/upstream/IotCoapAbstractHandler.java`
+
+```java
+public final void handle(CoapExchange exchange) {
+    try {
+        beforeHandle(exchange);                              // 1. 前置处理
+        CommonResult<Object> result = handle0(exchange);     // 2. 业务（抽象）
+        writeResponse(exchange, result);
+    } catch (ServiceException e) {
+        writeResponse(exchange, CommonResult.error(e.getCode(), e.getMessage()));
+    } catch (IllegalArgumentException e) {
+        writeResponse(exchange, CommonResult.error(BAD_REQUEST.getCode(), e.getMessage()));
+    } catch (Exception e) {
+        log.error("[handle][CoAP 请求处理异常]", e);
+        writeResponse(exchange, CommonResult.error(IN_SERVER_ERROR));
+    }
+}
+protected abstract CommonResult<Object> handle0(CoapExchange exchange);
+// 扩展点分三级：handle0 抽象方法（必须实现业务）、requiresAuthentication() 默认 false 的可选钩子、
+// getProductKey() / getDeviceName() 默认抛 UnsupportedOperationException 的强约束钩子（需要认证的子类必须覆盖）
+```
+
+### yudao-framework · AbstractRegexDesensitizationHandler
+
+- **目的**：`desensitize()` 模板方法固定「SpEL 判断是否禁用（钩子 `getDisable`）→ 从注解取 regex / replacer（抽象 `getRegex` / `getReplacer`）→ 正则替换」脱敏流程
+- **代码路径**：`yudao-framework/yudao-spring-boot-starter-web/src/main/java/cn/iocoder/yudao/framework/desensitize/core/regex/handler/AbstractRegexDesensitizationHandler.java`
+
+```java
+@Override
+public String desensitize(String origin, T annotation) {
+    Object disable = SpringExpressionUtils.parseExpression(getDisable(annotation));
+    if (Boolean.TRUE.equals(disable)) return origin;        // 钩子：判断是否禁用
+    String regex = getRegex(annotation);
+    String replacer = getReplacer(annotation);
+    return origin.replaceAll(regex, replacer);
+}
+abstract String getRegex(T annotation);
+abstract String getReplacer(T annotation);
+// EmailDesensitizationHandler / DefaultRegexDesensitizationHandler，以及 AbstractSliderDesensitizationHandler
+// 下的 8 个实现（BankCard / CarLicense / ChineseName / FixedPhone / IdCard / Mobile / Password + Default）只需提供差异步骤
+```
+
+## 变体
+
+### 经典继承式模板方法
+
+- **描述**：GoF 原版：抽象父类用 final 模板方法固定步骤顺序，暴露抽象方法（必须步骤）与带默认实现的方法（钩子步骤），子类继承并覆盖差异步骤
+- **适用**：骨架非常稳定、扩展方愿意写子类、需要锁死流程防误改（如 `HttpServlet`、yudao `AbstractPayClient`）
+
+### 骨架实现（Skeletal Implementation，接口+抽象类）
+
+- **描述**：Effective Java Item 20 的接口 + 抽象类组合：接口定义行为契约，抽象类提供基于少量原语方法的骨架实现，实现类只需覆盖原语即可获得完整接口实现（继承接口的其他样板方法全部免费）
+- **适用**：设计对外 API / SDK，想让使用者「实现两个方法就得到一个完整实现」（如 JDK 集合框架的 `AbstractList` / `AbstractMap`、yudao 各模块的 `AbstractXxx` 基类）
+
+### 回调式模板（组合替代继承）
+
+- **描述**：用组合替代继承：把差异步骤定义为回调接口（`RowMapper` / `PreparedStatementCreator`），调用方以 lambda / 匿名类在方法参数中传入；Spring `JdbcTemplate` 是范本 —— 资源获取释放骨架由 `JdbcTemplate` 固定，结果映射由回调注入
+- **适用**：差异点很小且无状态、不想为每个变体建类、需要运行时决定行为；Java 8+ 业务代码应优先考虑此变体再考虑继承
+
+### 生命周期钩子式（框架扩展点）
+
+- **描述**：模板方法即生命周期方法（`refresh()` / `start()`），扩展点是空实现的钩子方法（`onRefresh()` / `postProcessBeanFactory()`），常再配合事件发布（`ContextRefreshedEvent`）与 `BeanPostProcessor` 形成多通道扩展体系
+- **适用**：开发框架或平台代码，需要给使用者一组标准的、可选择性介入的扩展点（Spring `AbstractApplicationContext`、Spring Boot `ServletWebServerApplicationContext#onRefresh()` 启动内嵌 Web 服务器、`IotCoapAbstractHandler#handle` 内的 `beforeHandle` 钩子）
+
+### 默认抛异常的可选协议式（AQS 变体）
+
+- **描述**：钩子方法默认抛 `UnsupportedOperationException` 而非空实现，子类只覆盖自己支持的那部分钩子（独占模式覆盖 `tryAcquire` / `tryRelease`，共享模式覆盖 `tryAcquireShared` / `tryReleaseShared`），模板方法内部按需调用
+- **适用**：钩子多但彼此独立、并非每个子类都要全部实现时，用异常显式标记「不支持」比空实现更安全，能尽早暴露错误而非静默失败。yudao 的 `IotCoapAbstractHandler.getProductKey()` / `getDeviceName()` 也使用同一模式 ——「需要认证的子类必须覆盖，否则直接抛」
+
+## 与相关模式辨析
+
+### 策略模式（Strategy）
+
+最重要的对照。两者解决同一问题（分离不变流程与可变实现，均源于依赖倒置），区别在机制：模板方法用继承在编译期固定骨架、只换个别步骤；策略用组合在运行时整体替换算法。选模板方法：骨架稳定、公共逻辑多、不需要运行时切换；选策略：算法需动态切换 / 多实例并存 / 需单测替换。yudao 中两者组合：`AbstractPayClient`（模板方法固定校验 / 异常骨架）+ `PayClientFactoryImpl.createPayClient`（按 channelCode / type 用 `new` 构造具体渠道 client（PayClient 策略），再交给 `AbstractPayClient` 模板骨架执行）
+
+### 工厂方法模式（Factory Method）
+
+GoF 在两章 Related Patterns 互引：「Factory methods are usually called within Template methods」，并把「创建某对象」放在模板的钩子里。yudao 中的标准组合：`PayClientFactoryImpl` 按 channelCode / type 用 `new` 构造具体渠道 client（PayClient 策略），再交给 `AbstractPayClient` 模板骨架执行；`skills/design/patterns/index.md` 的 combinations 段落已收录「工厂 + 模板方法」「工厂 + 策略」两套
+
+### 回调 / 函数式接口（Callback，如 Spring JdbcTemplate + RowMapper）
+
+回调是模板方法的「组合化替身」：把差异步骤做成回调接口参数（`RowMapper` / `PreparedStatementCreator`），调用方以 lambda 传入，Spring 由此避免了「每写一个查询就建一个子类」。差异点小、无状态、随调用点变化时优先回调；差异点多或需共享公共字段时才升级为模板方法。可以把回调理解为「实例级别、方法参数级别」的模板方法
+
+### 状态模式（State）
+
+状态模式按对象内部状态整体切换行为且状态间存在迁移逻辑（订单 待支付→已支付→已关闭）；模板方法不涉及状态迁移，只固定一次流程的步骤顺序。行为随生命周期阶段「整体」改变且需要状态机 → 状态；只是一次流程内个别步骤不同 → 模板方法
+
+### 命令模式（Command）
+
+命令把「一次请求 / 操作」封装成对象以支持排队、撤销、日志、宏；模板方法把「一个流程」的骨架固定到父类。目的正交：需要撤销 / 重做 / 队列 → 命令；需要复用流程骨架并开放步骤 → 模板方法。命令的 `execute()` 内部也可以调用一个模板方法骨架，二者可叠加
+
+## 优点
+
+- 复用公共代码
+- 控制算法流程（final 锁死骨架）
+- 符合开闭原则
+- 便于维护和扩展
+
+## 缺点
+
+- 每个实现都需要定义子类（Java 单继承约束）
+- 增加了类的数量
+- 差异点越多、越碎，模板方法越笨重（应改用策略 / 回调）
+
+## 扩展指南
+
+### 如何新增具体实现
+
+1. **创建具体类**：继承抽象基类
+2. **实现抽象方法**：`doUnifiedOrder()`、`doInit()` 等
+3. **注册到工厂**：在工厂中添加创建逻辑
+4. **设计钩子覆盖策略**：默认钩子行为是否够用？是否需要覆盖？参考 when_to_use 中「分级的扩展点」的判断
+
+**示例：新增支付渠道**
+
+```java
+public class XxxPayClient extends AbstractPayClient<XxxPayClientConfig> {
+
+    @Override
+    protected void doInit() {
+        // 初始化第三方 SDK
+    }
+
+    @Override
+    protected PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO) throws Throwable {
+        // 调用第三方下单 API
+    }
+
+    @Override
+    protected PayRefundRespDTO doUnifiedRefund(PayRefundUnifiedReqDTO reqDTO) throws Throwable {
+        // 调用第三方退款 API
+    }
+}
+```
+
+## 参考文献
+
+- <https://refactoring.guru/design-patterns/template-method>
+- <https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/context/support/AbstractApplicationContext.html>
+- <https://docs.oracle.com/javaee/5/api/javax/servlet/http/HttpServlet.html>
+- <https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/locks/AbstractQueuedSynchronizer.html>
+- <https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/AbstractList.html>
+- <https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/jdbc/core/JdbcTemplate.html>
