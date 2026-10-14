@@ -1110,6 +1110,10 @@ tables_to_ignore:
 - [ ] 已准备回滚方案
 - [ ] 已配置监控告警
 - [ ] 已通知相关干系人
+
+### 完成判据
+- [ ] 单元测试已编写（[crud-designer.md §生成后](../../design/crud-designer.md)）
+- [ ] `mvn` 编译通过（在 `yudao-module-{module}-biz` 下执行 `mvn test-compile` 返回码 0）
 ```
 
 ---

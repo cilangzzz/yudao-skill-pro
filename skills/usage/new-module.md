@@ -1197,6 +1197,10 @@ public interface ErrorCodeConstants {
 | 单元测试 | Service 层测试 | [ ] |
 | 集成测试 | Controller 层测试 | [ ] |
 | 功能测试 | 业务场景测试 | [ ] |
+| **完成判据** | | |
+| `mvn` 编译通过 | 在 `yudao-module-{module}-biz` 下执行 `mvn test-compile` 返回码 0 | [ ] |
+
+> 完整约束见 [crud-designer.md §生成后](../../design/crud-designer.md)。
 
 ---
 

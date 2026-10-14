@@ -1238,6 +1238,15 @@ cn.iocoder.yudao.module.{模块}
 - 操作类接口区分 create/update/delete
 - 导出接口单独设置 export 权限
 
+## 九、完成判据
+
+> 以下两项与 [crud-designer.md §生成后](../../design/crud-designer.md) 保持一致；任意一项不满足即视为本次实现未完成。
+
+| 检查项 | 校验内容 |
+|--------|----------|
+| 单元测试已编写 | `src/test/.../XxxServiceTest.java` 存在，覆盖核心 CRUD/业务方法 |
+| `mvn` 编译通过 | 在 `yudao-module-{module}-biz` 下执行 `mvn test-compile` 返回码 0 |
+
 ---
 
 > 提示：使用本文档的提示词模板，可以让 AI 快速生成符合项目规范的完整实体功能代码。

@@ -150,6 +150,9 @@ references:
 - [ ] 事务处理正确（@Transactional 使用）
 - [ ] 权限控制配置（@PreAuthorize）
 - [ ] 单元测试覆盖核心逻辑
+- [ ] `mvn` 编译通过（在 `yudao-module-{module}-biz` 下执行 `mvn test-compile` 返回码 0）
+
+> 完整约束见 [crud-designer.md §生成后](../../design/crud-designer.md)。
 
 ## 输出要求
 
