@@ -183,3 +183,4 @@
 - [api-tenant.md](api-tenant.md) - 租户管理接口详情
 - [data-model.md](data-model.md) - 数据模型详情（DO/DTO/VO及关系）
 - [pitfalls.md](pitfalls.md) - 注意事项与已知坑点
+- [code-patterns.md](code-patterns.md) - 代码模式与扩展指南

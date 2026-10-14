@@ -1,106 +1,57 @@
-# GoView 数据查询 API
+# GoView 数据查询接口 (GoViewDataController)
 
-> 路径前缀：`/report/go-view/data`
-> Controller：`GoViewDataController`
+> 为 GoView 大屏提供数据源查询能力，支持通过 SQL 直接查询项目数据源，并提供 HTTP 查询示例接口。
 
-## 概述
+## 接口路径前缀
 
-GoView 数据查询提供大屏报表的数据源接入能力，采用**策略模式**支持多种查询方式。当前支持 SQL 查询和 HTTP 查询两种数据源策略，可按需扩展（如 Elasticsearch、ClickHouse 等）。
+/report/go-view/data  (Controller: GoViewDataController)
 
-所有查询统一返回 `GoViewDataRespVO` 结构，包含 `dimensions`（维度）和 `source`（数据明细）。
+## 1. 数据查询（GoViewDataController）
 
-## 接口列表
+### 1.1 使用 SQL 查询数据
 
-### 1. SQL 数据源查询
+- **路径**: 任意 HTTP 方法（`@RequestMapping` 未限定，常用 POST） /report/go-view/data/get-by-sql
+- **权限**: report:go-view-data:get-by-sql
+- **说明**: 接收前端传入的 SQL 语句，在项目配置的默认数据源上执行查询，返回数据维度（列名）与数据明细列表，供 GoView 大屏图表渲染。
 
-- **路径**：`POST /report/go-view/data/get-by-sql`
-- **权限**：`report:go-view-data:get-by-sql`
-- **请求体**：`GoViewDataGetBySqlReqVO`
+**请求参数 (GoViewDataGetBySqlReqVO)**:
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| sql | String | 是 | SQL 查询语句 |
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|-----|-----|---------|-----|
+| sql | String | 是 | @NotEmpty | SQL 语句，如 `SELECT * FROM user` |
 
-- **响应**：`CommonResult<GoViewDataRespVO>`
-- **业务逻辑**：
-  1. 接收 SQL 查询语句
-  2. 通过 `JdbcTemplate` 执行查询
-  3. 解析结果集，提取列名作为 `dimensions`，行数据作为 `source`
-  4. 返回统一数据结构
-
-### 2. HTTP 数据源查询
-
-- **路径**：`POST /report/go-view/data/get-by-http`
-- **权限**：`report:go-view-data:get-by-http`
-- **请求体**：`GoViewDataGetByHttpReqVO`
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| url | String | 是 | HTTP 数据接口地址 |
-| method | String | 否 | 请求方法（默认 GET） |
-| params | Map | 否 | 请求参数 |
-
-- **响应**：`CommonResult<GoViewDataRespVO>`
-- **业务逻辑**：
-  1. 接收 HTTP 请求配置
-  2. 发起 HTTP 请求获取数据
-  3. 解析 JSON 响应，转换为统一数据结构
-  4. 返回 `GoViewDataRespVO`
-
-## 响应数据结构
-
-### GoViewDataRespVO
-
-```json
-{
-  "dimensions": ["column1", "column2", "column3"],
-  "source": [
-    { "column1": "value1", "column2": "value2", "column3": "value3" },
-    { "column1": "value4", "column2": "value5", "column3": "value6" }
-  ]
-}
-```
+**响应**: CommonResult<GoViewDataRespVO>
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| dimensions | List\<String\> | 维度/列名列表 |
-| source | List\<Map\> | 数据明细，每行为一个 Map |
+|-----|-----|-----|
+| dimensions | List&lt;String&gt; | 数据维度，即查询结果的全部列名 |
+| source | List&lt;Map&lt;String, Object&gt;&gt; | 数据明细列表，每行为「列名 -&gt; 值」的 Map |
 
-## 服务层设计
+**业务逻辑** (GoViewDataServiceImpl):
+1. 通过 `jdbcTemplate.queryForRowSet(sql)` 在项目配置的默认数据源上执行传入的 SQL，获得 `SqlRowSet` 结果集
+2. 通过 `SqlRowSetMetaData` 解析结果集元数据，取全部列名数组作为数据维度 `dimensions`
+3. 逐行遍历结果集，将每一行的各列以「列名 -&gt; 值」写入 Map，追加到 `source` 明细列表（使用 LinkedList，避免数据量不确定时的扩容复制开销）
+4. 返回组装好的 GoViewDataRespVO
 
-### GoViewDataService
+> 补充说明（来自 Service 实现）：默认使用 jdbcTemplate 查询项目配置的数据源；如需查询其它数据源，可新建对应数据源的 jdbcTemplate 来实现。默认数据源为 MySQL 关系型数据源，数据量较大时查询可能较慢，可考虑后续改用 ClickHouse 等分析型数据库。
 
-```java
-public interface GoViewDataService {
-    GoViewDataRespVO getDataBySQL(GoViewDataGetBySqlReqVO reqVO);
-    GoViewDataRespVO getDataByHttp(GoViewDataGetByHttpReqVO reqVO);
-}
-```
+### 1.2 使用 HTTP 查询数据
 
-### 策略扩展
+- **路径**: 任意 HTTP 方法（`@RequestMapping` 未限定，常用 POST） /report/go-view/data/get-by-http
+- **权限**: report:go-view-data:get-by-http
+- **说明**: 示例接口，返回固定维度加随机生成的模拟数据，演示 GoView 大屏数据源的对接格式；实际使用时应为每个查询编写真实的业务接口。
 
-新增数据源类型时，按以下步骤操作：
+**请求参数**: 无固定 ReqVO —— 接口按需可选接收 query 参数 `params`（Map&lt;String, String&gt;，required = false）与请求体 `body`（String，required = false），两者仅作为示例占位，接口逻辑并不使用其内容。
 
-1. 在 `GoViewDataController` 中新增查询方法
-2. 在 `GoViewDataService` 接口中定义新方法
-3. 在 `GoViewDataServiceImpl` 中实现查询逻辑
-4. 创建对应的请求 VO
-5. 添加权限注解
+**响应**: CommonResult<GoViewDataRespVO>
 
-**扩展示例**（Elasticsearch 数据源）：
+| 字段 | 类型 | 说明 |
+|-----|-----|-----|
+| dimensions | List&lt;String&gt; | 固定为 `["日期", "PV", "UV"]`（PV 为每天访问次数，UV 为每天访问人数） |
+| source | List&lt;Map&lt;String, Object&gt;&gt; | 12 条明细数据，覆盖 2021-01 至 2021-12 月份，PV 随机取值 1000~10000、UV 随机取值 100~1000 |
 
-```java
-@RequestMapping("/get-by-es")
-@Operation(summary = "使用 Elasticsearch 查询数据")
-@PreAuthorize("@ss.hasPermission('report:go-view-data:get-by-es')")
-public CommonResult<GoViewDataRespVO> getDataByEs(
-        @Valid @RequestBody GoViewDataGetByEsReqVO reqVO) {
-    return success(goViewDataService.getDataByEs(reqVO));
-}
-```
-
-## 数据源底层实现
-
-- **默认实现**：使用 Spring `JdbcTemplate` 执行 SQL 查询
-- **可扩展**：支持切换至 ClickHouse 等大数据引擎
-- **注意**：SQL 查询直接执行用户传入的 SQL，需注意 SQL 注入风险，生产环境建议增加白名单或参数化机制
+**业务逻辑** (Controller 内直接实现):
+1. 新建 GoViewDataRespVO 响应对象
+2. 设置数据维度 `dimensions` 为 `["日期", "PV", "UV"]`
+3. 循环生成 12 个月份（2021-01 ~ 2021-12）的明细，随机生成 PV（1000~10000）与 UV（100~1000），以「日期/PV/UV」键值 Map 形式追加到 `source` 明细列表
+4. 返回组装好的模拟数据结果

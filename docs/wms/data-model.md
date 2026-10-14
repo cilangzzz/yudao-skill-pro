@@ -1,352 +1,402 @@
 # 数据模型详情
 
-## 实体继承体系
+> wms 模块的核心数据模型，包括 DO、DTO、VO 及其之间的关系。
 
-所有 DO 实体继承 `BaseDO`，包含以下公共字段：
+wms 是轻量级仓库管理系统：主数据（仓库/商品/SKU/分类/品牌/往来企业）+ 入库/出库/移库/盘库四类单据驱动的库存与流水管理。共 16 张业务表，全部 DO 位于 `yudao-module-wms` 的 `cn.iocoder.yudao.module.wms.dal.dataobject` 包下。
 
-| 字段 | 类型 | 说明 |
-|-----|------|------|
-| creator | VARCHAR | 创建人 |
-| createTime | DATETIME | 创建时间 |
-| updater | VARCHAR | 更新人 |
-| updateTime | DATETIME | 更新时间 |
-| deleted | BIT | 是否删除（逻辑删除） |
+## 1. 实体继承体系
 
-## 表关系总览
+```text
+cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类，实现 Serializable / TransPojo）
+├── creator     String          创建者（SysUser 用户编号，INSERT 时自动填充）
+├── createTime  LocalDateTime   创建时间（INSERT 时自动填充）
+├── updater     String          更新者（SysUser 用户编号，INSERT/UPDATE 时自动填充）
+├── updateTime  LocalDateTime   最后更新时间（INSERT/UPDATE 时自动填充）
+└── deleted     Boolean         逻辑删除标记（@TableLogic，查询自动拼接 deleted = 0）
+     │
+     └── TenantBaseDO（yudao-spring-boot-starter-biz-tenant，在 BaseDO 上扩展）
+          └── tenantId  Long  多租户编号
 
-```
-wms_item_brand (品牌)
-    |
-    | 1:N
-    v
-wms_item (物料) <-- wms_item_category (分类，树结构 parentId)
-    |
-    | 1:N
-    v
-wms_item_sku (物料SKU)
-    |
-    | 1:N (SKU + 仓库 维度)
-    v
-wms_inventory (库存余额) --> wms_warehouse (仓库)
-    |
-    | 1:N
-    v
-wms_inventory_history (库存变动历史)
-
-wms_merchant (商户) ----+
-    |                   |
-    | 1:N               | 1:N
-    v                   v
-wms_receipt_order (入库单)      wms_shipment_order (出库单)
-    |                               |
-    | 1:N                           | 1:N
-    v                               v
-wms_receipt_order_detail        wms_shipment_order_detail
-
-wms_movement_order (移库单) --> wms_warehouse (源仓库)
-                             --> wms_warehouse (目标仓库)
-    |
-    | 1:N
-    v
-wms_movement_order_detail
-
-wms_check_order (盘点单) --> wms_warehouse (仓库)
-    |
-    | 1:N
-    v
-wms_check_order_detail
+cn.iocoder.yudao.module.wms.dal.dataobject（全部 16 个 DO 直接继承 BaseDO）
+├── md.warehouse.WmsWarehouseDO            （wms_warehouse）
+├── md.item.WmsItemDO                      （wms_item）
+├── md.item.WmsItemSkuDO                   （wms_item_sku）
+├── md.item.WmsItemCategoryDO              （wms_item_category）
+├── md.item.WmsItemBrandDO                 （wms_item_brand）
+├── md.merchant.WmsMerchantDO              （wms_merchant）
+├── inventory.WmsInventoryDO               （wms_inventory）
+├── inventory.WmsInventoryHistoryDO        （wms_inventory_history）
+├── order.receipt.WmsReceiptOrderDO        （wms_receipt_order）
+├── order.receipt.WmsReceiptOrderDetailDO  （wms_receipt_order_detail）
+├── order.shipment.WmsShipmentOrderDO      （wms_shipment_order）
+├── order.shipment.WmsShipmentOrderDetailDO（wms_shipment_order_detail）
+├── order.movement.WmsMovementOrderDO      （wms_movement_order）
+├── order.movement.WmsMovementOrderDetailDO（wms_movement_order_detail）
+├── order.check.WmsCheckOrderDO            （wms_check_order）
+└── order.check.WmsCheckOrderDetailDO      （wms_check_order_detail）
 ```
 
-## 物料聚合
-
-### wms_item_brand（品牌表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 品牌编号 |
-| name | VARCHAR | | 品牌名称 |
-| sort | INT | | 排序 |
-| remark | VARCHAR | | 备注 |
-
-### wms_item_category（分类表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 分类编号 |
-| name | VARCHAR | | 分类名称 |
-| parent_id | BIGINT | | 父分类编号（0=顶级） |
-| sort | INT | | 排序 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_parent_id(parent_id)
-
-### wms_item（物料表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 物料编号 |
-| name | VARCHAR | | 物料名称 |
-| code | VARCHAR | UNIQUE | 物料编码 |
-| unit | VARCHAR | | 计量单位 |
-| category_id | BIGINT | FK -> wms_item_category.id | 分类编号 |
-| brand_id | BIGINT | FK -> wms_item_brand.id | 品牌编号 |
-| status | TINYINT | | 物料状态 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_code(code), idx_category_id(category_id), idx_brand_id(brand_id)
-
-### wms_item_sku（物料 SKU 表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | SKU 编号 |
-| item_id | BIGINT | FK -> wms_item.id | 物料编号 |
-| sku_no | VARCHAR | | SKU 编号/条码 |
-| specifications | VARCHAR | | 规格属性 |
-| bar_code | VARCHAR | | 条形码 |
-| weight | DECIMAL | | 重量 |
-| volume | DECIMAL | | 体积 |
-| purchase_price | DECIMAL | | 采购价格 |
-| selling_price | DECIMAL | | 销售价格 |
-| status | TINYINT | | SKU 状态 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_item_id(item_id), idx_sku_no(sku_no)
+**使用规则**
 
----
-
-## 商户与仓库
-
-### wms_merchant（商户表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 商户编号 |
-| name | VARCHAR | | 商户名称 |
-| type | TINYINT | | 商户类型（1=客户 2=供应商 3=两者） |
-| contact | VARCHAR | | 联系人 |
-| phone | VARCHAR | | 联系电话 |
-| address | VARCHAR | | 地址 |
-| remark | VARCHAR | | 备注 |
-
-### wms_warehouse（仓库表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 仓库编号 |
-| code | VARCHAR | UNIQUE | 仓库编码 |
-| name | VARCHAR | | 仓库名称 |
-| sort | INT | | 排序 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_code(code)
+- 本模块 16 个 DO **全部直接继承 BaseDO，无一使用 TenantBaseDO**：wms 各表均不含 `tenant_id` 字段，未启用多租户（需要租户隔离的模块如 system/mall 才继承 TenantBaseDO）。
+- BaseDO 的 5 个公共字段（`creator`/`create_time`/`updater`/`update_time`/`deleted`）由框架字段填充器与 `@TableLogic` 统一维护，下文各 DO 字段表不再重复列出。
+- 所有 DO 均标注 `@TableName("wms_xxx")` 与 `@KeySequence("wms_xxx_seq")`，后者供 Oracle/PostgreSQL 等序列型数据库生成主键，MySQL 下不生效。
+- 仓库 `sql/` 目录的初始化 SQL **不含 wms 业务表 DDL**（仅部分方言文件含 wms 字典与菜单 INSERT），建表语句需另行维护；因此下文索引信息除特别标注外均从代码推断，仅有主键 id 可确认。
+
+## 2. 核心 DO 实体
+
+### 2.1 主数据聚合（md）
+
+#### WmsWarehouseDO（wms_warehouse）
+
+WMS 仓库。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| code | String | code | 仓库编号 |
+| name | String | name | 名称 |
+| remark | String | remark | 备注 |
+| sort | Integer | sort | 排序 |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsItemDO（wms_item）
+
+WMS 商品（SPU）。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| code | String | code | 商品编号 |
+| name | String | name | 商品名称 |
+| unit | String | unit | 单位 |
+| categoryId | Long | category_id | 商品分类编号，关联 wms_item_category.id |
+| brandId | Long | brand_id | 商品品牌编号，关联 wms_item_brand.id |
+| remark | String | remark | 备注 |
 
----
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsItemSkuDO（wms_item_sku）
+
+WMS 商品 SKU。SKU 无独立写接口，随 WmsItemController 商品接口一并维护（新增/修改/删除）。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| name | String | name | 规格名称 |
+| itemId | Long | item_id | 商品编号，关联 wms_item.id |
+| barCode | String | bar_code | 条码 |
+| code | String | code | 规格编号 |
+| length | BigDecimal | length | 长，单位 cm |
+| width | BigDecimal | width | 宽，单位 cm |
+| height | BigDecimal | height | 高，单位 cm |
+| grossWeight | BigDecimal | gross_weight | 毛重，单位 kg |
+| netWeight | BigDecimal | net_weight | 净重，单位 kg |
+| costPrice | BigDecimal | cost_price | 成本价，单位元 |
+| sellingPrice | BigDecimal | selling_price | 销售价，单位元 |
+
+**继承**: BaseDO
+**索引**: 主键 id；库存/单据明细均以 sku_id 引用本表
 
-## 库存聚合
-
-### wms_inventory（库存表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 库存编号 |
-| sku_id | BIGINT | FK -> wms_item_sku.id | SKU 编号 |
-| warehouse_id | BIGINT | FK -> wms_warehouse.id | 仓库编号 |
-| quantity | DECIMAL | | 库存数量 |
-| price | DECIMAL | | 库存均价 |
-
-**索引**: uk_sku_warehouse(sku_id, warehouse_id) UNIQUE
-
-> 库存以 SKU + 仓库为唯一维度，每条记录代表某 SKU 在某仓库的库存余额。
-
-### wms_inventory_history（库存历史表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 历史编号 |
-| sku_id | BIGINT | FK -> wms_item_sku.id | SKU 编号 |
-| warehouse_id | BIGINT | FK -> wms_warehouse.id | 仓库编号 |
-| before_quantity | DECIMAL | | 变动前数量 |
-| after_quantity | DECIMAL | | 变动后数量 |
-| quantity | DECIMAL | | 变动数量（正=增加，负=减少） |
-| price | DECIMAL | | 变动价格 |
-| source_order_type | INTEGER | | 来源单据类型 |
-| source_order_id | BIGINT | | 来源单据编号 |
-| source_order_no | VARCHAR | | 来源单号 |
-
-**索引**: idx_sku_warehouse(sku_id, warehouse_id), idx_source_order(source_order_type, source_order_id)
-
----
-
-## 入库单聚合
-
-### wms_receipt_order（入库单表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 入库单编号 |
-| no | VARCHAR | UNIQUE | 入库单号 |
-| warehouse_id | BIGINT | FK -> wms_warehouse.id | 仓库编号 |
-| merchant_id | BIGINT | FK -> wms_merchant.id | 商户编号 |
-| status | TINYINT | | 单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED） |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_no(no), idx_warehouse_id(warehouse_id), idx_status(status)
-
-### wms_receipt_order_detail（入库明细表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 明细编号 |
-| order_id | BIGINT | FK -> wms_receipt_order.id | 入库单编号 |
-| sku_id | BIGINT | FK -> wms_item_sku.id | SKU 编号 |
-| quantity | DECIMAL | | 入库数量 |
-| price | DECIMAL | | 入库单价 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_order_id(order_id)
-
----
-
-## 出库单聚合
-
-### wms_shipment_order（出库单表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 出库单编号 |
-| no | VARCHAR | UNIQUE | 出库单号 |
-| warehouse_id | BIGINT | FK -> wms_warehouse.id | 仓库编号 |
-| merchant_id | BIGINT | FK -> wms_merchant.id | 商户编号 |
-| status | TINYINT | | 单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED） |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_no(no), idx_warehouse_id(warehouse_id), idx_status(status)
-
-### wms_shipment_order_detail（出库明细表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 明细编号 |
-| order_id | BIGINT | FK -> wms_shipment_order.id | 出库单编号 |
-| sku_id | BIGINT | FK -> wms_item_sku.id | SKU 编号 |
-| quantity | DECIMAL | | 出库数量 |
-| price | DECIMAL | | 出库单价 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_order_id(order_id)
-
----
-
-## 移库单聚合
-
-### wms_movement_order（移库单表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 移库单编号 |
-| no | VARCHAR | UNIQUE | 移库单号 |
-| from_warehouse_id | BIGINT | FK -> wms_warehouse.id | 源仓库编号 |
-| to_warehouse_id | BIGINT | FK -> wms_warehouse.id | 目标仓库编号 |
-| status | TINYINT | | 单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED） |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_no(no), idx_from_warehouse_id(from_warehouse_id), idx_to_warehouse_id(to_warehouse_id), idx_status(status)
-
-### wms_movement_order_detail（移库明细表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 明细编号 |
-| order_id | BIGINT | FK -> wms_movement_order.id | 移库单编号 |
-| sku_id | BIGINT | FK -> wms_item_sku.id | SKU 编号 |
-| quantity | DECIMAL | | 移库数量 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_order_id(order_id)
-
----
-
-## 盘点单聚合
-
-### wms_check_order（盘点单表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 盘点单编号 |
-| no | VARCHAR | UNIQUE | 盘点单号 |
-| warehouse_id | BIGINT | FK -> wms_warehouse.id | 仓库编号 |
-| status | TINYINT | | 单据状态（0=PREPARE, 4=FINISHED, 5=CANCELED） |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_no(no), idx_warehouse_id(warehouse_id), idx_status(status)
-
-### wms_check_order_detail（盘点明细表）
-
-| 字段 | 类型 | 约束 | 说明 |
-|-----|------|-----|------|
-| id | BIGINT | PK | 明细编号 |
-| order_id | BIGINT | FK -> wms_check_order.id | 盘点单编号 |
-| sku_id | BIGINT | FK -> wms_item_sku.id | SKU 编号 |
-| system_quantity | DECIMAL | | 系统数量 |
-| actual_quantity | DECIMAL | | 实际数量 |
-| remark | VARCHAR | | 备注 |
-
-**索引**: idx_order_id(order_id)
-
----
-
-## ER 关系定义
-
-| 关系 | 类型 | 外键 | 说明 |
-|-----|------|------|------|
-| wms_item -> wms_item_category | N:1 | category_id | 物料属于某个分类 |
-| wms_item -> wms_item_brand | N:1 | brand_id | 物料属于某个品牌 |
-| wms_item_sku -> wms_item | N:1 | item_id | SKU 属于某个物料 |
-| wms_inventory -> wms_item_sku | N:1 | sku_id | 库存关联 SKU |
-| wms_inventory -> wms_warehouse | N:1 | warehouse_id | 库存关联仓库 |
-| wms_inventory_history -> wms_item_sku | N:1 | sku_id | 库存历史关联 SKU |
-| wms_inventory_history -> wms_warehouse | N:1 | warehouse_id | 库存历史关联仓库 |
-| wms_receipt_order -> wms_warehouse | N:1 | warehouse_id | 入库单关联仓库 |
-| wms_receipt_order -> wms_merchant | N:1 | merchant_id | 入库单关联商户 |
-| wms_receipt_order_detail -> wms_receipt_order | N:1 | order_id | 入库明细属于入库单 |
-| wms_receipt_order_detail -> wms_item_sku | N:1 | sku_id | 入库明细关联 SKU |
-| wms_shipment_order -> wms_warehouse | N:1 | warehouse_id | 出库单关联仓库 |
-| wms_shipment_order -> wms_merchant | N:1 | merchant_id | 出库单关联商户 |
-| wms_shipment_order_detail -> wms_shipment_order | N:1 | order_id | 出库明细属于出库单 |
-| wms_shipment_order_detail -> wms_item_sku | N:1 | sku_id | 出库明细关联 SKU |
-| wms_movement_order -> wms_warehouse | N:1 | from_warehouse_id | 移库单关联源仓库 |
-| wms_movement_order -> wms_warehouse | N:1 | to_warehouse_id | 移库单关联目标仓库 |
-| wms_movement_order_detail -> wms_movement_order | N:1 | order_id | 移库明细属于移库单 |
-| wms_movement_order_detail -> wms_item_sku | N:1 | sku_id | 移库明细关联 SKU |
-| wms_check_order -> wms_warehouse | N:1 | warehouse_id | 盘点单关联仓库 |
-| wms_check_order_detail -> wms_check_order | N:1 | order_id | 盘点明细属于盘点单 |
-| wms_check_order_detail -> wms_item_sku | N:1 | sku_id | 盘点明细关联 SKU |
-
-## Mapper 规范
-
-所有 Mapper 继承 `BaseMapperX<T>`，获得通用 CRUD 方法：
-
-```java
-public interface InventoryMapper extends BaseMapperX<InventoryDO> {
-    default PageResult<InventoryDO> selectPage(InventoryPageReqVO reqVO) {
-        return selectPage(reqVO, new LambdaQueryWrapperX<InventoryDO>()
-                .eqIfPresent(InventoryDO::getSkuId, reqVO.getSkuId())
-                .eqIfPresent(InventoryDO::getWarehouseId, reqVO.getWarehouseId())
-                .orderByDesc(InventoryDO::getId));
-    }
-}
+#### WmsItemCategoryDO（wms_item_category）
+
+WMS 商品分类，parentId 自关联的树形结构。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| parentId | Long | parent_id | 父级编号，关联本表 id；根节点固定 0（PARENT_ID_ROOT） |
+| code | String | code | 分类编号 |
+| name | String | name | 分类名称 |
+| sort | Integer | sort | 排序 |
+| status | Integer | status | 状态，枚举 CommonStatusEnum（0 开启 / 1 禁用） |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsItemBrandDO（wms_item_brand）
+
+WMS 商品品牌。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| code | String | code | 品牌编号 |
+| name | String | name | 品牌名称 |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsMerchantDO（wms_merchant）
+
+WMS 往来企业（客户/供应商共用一张表，靠 type 区分）。入库单引用的 merchantId 必须是供应商（或客供两用），出库单必须是客户，由 WmsMerchantTypeEnum 在单据服务中校验。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| code | String | code | 往来企业编号 |
+| name | String | name | 往来企业名称 |
+| type | Integer | type | 企业类型，枚举 WmsMerchantTypeEnum（1 客户 / 2 供应商 / 3 客户与供应商），字典 merchant_type |
+| level | String | level | 级别 |
+| bankName | String | bank_name | 开户行 |
+| bankAccount | String | bank_account | 银行账户 |
+| address | String | address | 地址 |
+| mobile | String | mobile | 手机号 |
+| telephone | String | telephone | 座机号 |
+| contact | String | contact | 联系人 |
+| email | String | email | Email |
+| remark | String | remark | 备注 |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+### 2.2 库存聚合（inventory）
+
+#### WmsInventoryDO（wms_inventory）
+
+WMS 库存余额表，按「SKU + 仓库」维度一行一条，是整个模块的核心表。所有入库/出库/移库/盘库单据的完成动作都汇聚到 `WmsInventoryServiceImpl.changeInventory/checkInventory` 两个入口更新本表。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| skuId | Long | sku_id | 商品 SKU 编号，关联 wms_item_sku.id |
+| warehouseId | Long | warehouse_id | 仓库编号，关联 wms_warehouse.id |
+| quantity | BigDecimal | quantity | 库存数量（不允许为负，扣减前校验） |
+| remark | String | remark | 备注 |
+
+**继承**: BaseDO
+**索引**: 主键 id；**(sku_id, warehouse_id) 唯一索引**——从代码推断：`WmsInventoryMapper.selectBySkuIdAndWarehouseId` 按「唯一键」查询，并发补建库存行时捕获 `DuplicateKeyException` 后按维度回查已有行。并发更新通过 `selectByIdForUpdate`/`selectListByIdsForUpdate`（`FOR UPDATE` 悲观锁）按库存行加锁。
+
+#### WmsInventoryHistoryDO（wms_inventory_history）
+
+WMS 库存流水表，每次库存变动（入库/出库/移库/盘库）生成一条，记录变化前后数量与来源单据，不可修改删除。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| warehouseId | Long | warehouse_id | 仓库编号，关联 wms_warehouse.id |
+| skuId | Long | sku_id | 商品 SKU 编号，关联 wms_item_sku.id |
+| quantity | BigDecimal | quantity | 库存变化数量（带符号，正增负减） |
+| beforeQuantity | BigDecimal | before_quantity | 变化前库存数量 |
+| afterQuantity | BigDecimal | after_quantity | 变化后库存数量 |
+| price | BigDecimal | price | 单价 |
+| totalPrice | BigDecimal | total_price | 库存变化金额（单价 × 变化数量） |
+| remark | String | remark | 备注 |
+| orderId | Long | order_id | 来源单据编号（四类单据的 id） |
+| orderNo | String | order_no | 来源单据号 |
+| orderType | Integer | order_type | 来源单据类型，枚举 WmsOrderTypeEnum（1 入库单 / 2 出库单 / 3 移库单 / 4 盘库单），字典 wms_order_type |
+
+**继承**: BaseDO
+**索引**: 主键 id；按 order_id + order_type 查询单据相关流水（代码中存在按单据维度的查询）
+
+### 2.3 单据聚合（order）
+
+四类单据均为「主表 + 明细表」结构，状态统一使用 `WmsOrderStatusEnum`（0 草稿 PREPARE / 4 已完成 FINISHED / 5 已作废 CANCELED，字典 wms_order_status），仅草稿态允许修改、删除、完成、作废。完成单据时按明细逐行写库存流水并增减 wms_inventory。
+
+#### WmsReceiptOrderDO（wms_receipt_order）
+
+WMS 入库单主表。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| no | String | no | 入库单号 |
+| type | Integer | type | 入库类型，枚举 WmsReceiptOrderTypeEnum（100 生产入库 / 101 采购入库 / 102 退货入库 / 103 归还入库），字典 wms_receipt_order_type |
+| orderTime | LocalDateTime | order_time | 单据日期 |
+| status | Integer | status | 入库状态，枚举 WmsOrderStatusEnum（0 草稿 / 4 已完成 / 5 已作废），字典 wms_order_status |
+| bizOrderNo | String | biz_order_no | 业务订单号（上游业务单据号） |
+| merchantId | Long | merchant_id | 供应商编号，关联 wms_merchant.id（校验必须为供应商类型） |
+| remark | String | remark | 备注 |
+| warehouseId | Long | warehouse_id | 入库仓库编号，关联 wms_warehouse.id |
+| totalQuantity | BigDecimal | total_quantity | 总数量（明细汇总） |
+| totalPrice | BigDecimal | total_price | 总金额（明细汇总） |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsReceiptOrderDetailDO（wms_receipt_order_detail）
+
+WMS 入库单明细表。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| orderId | Long | order_id | 入库单编号，关联 wms_receipt_order.id |
+| skuId | Long | sku_id | 商品 SKU 编号，关联 wms_item_sku.id |
+| warehouseId | Long | warehouse_id | 入库仓库编号，关联 wms_warehouse.id |
+| quantity | BigDecimal | quantity | 入库数量（完成时为库存增量） |
+| price | BigDecimal | price | 单价 |
+| totalPrice | BigDecimal | total_price | 行金额（数量 × 单价） |
+
+**继承**: BaseDO
+**索引**: 主键 id；按 order_id 查询明细（list-by-order-id 接口）
+
+#### WmsShipmentOrderDO（wms_shipment_order）
+
+WMS 出库单主表。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| no | String | no | 出库单号 |
+| type | Integer | type | 出库类型，枚举 WmsShipmentOrderTypeEnum（200 退货出库 / 201 销售出库 / 202 生产出库），字典 wms_shipment_order_type |
+| orderTime | LocalDateTime | order_time | 单据日期 |
+| status | Integer | status | 出库状态，枚举 WmsOrderStatusEnum（0 草稿 / 4 已完成 / 5 已作废），字典 wms_order_status |
+| bizOrderNo | String | biz_order_no | 业务订单号 |
+| merchantId | Long | merchant_id | 客户编号，关联 wms_merchant.id（校验必须为客户类型） |
+| remark | String | remark | 备注 |
+| warehouseId | Long | warehouse_id | 出库仓库编号，关联 wms_warehouse.id |
+| totalQuantity | BigDecimal | total_quantity | 总数量（明细汇总） |
+| totalPrice | BigDecimal | total_price | 总金额（明细汇总） |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsShipmentOrderDetailDO（wms_shipment_order_detail）
+
+WMS 出库单明细表。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| orderId | Long | order_id | 出库单编号，关联 wms_shipment_order.id |
+| skuId | Long | sku_id | 商品 SKU 编号，关联 wms_item_sku.id |
+| warehouseId | Long | warehouse_id | 出库仓库编号，关联 wms_warehouse.id |
+| quantity | BigDecimal | quantity | 出库数量（完成时为库存减量，不足则报错） |
+| price | BigDecimal | price | 单价 |
+| totalPrice | BigDecimal | total_price | 行金额（数量 × 单价） |
+
+**继承**: BaseDO
+**索引**: 主键 id；按 order_id 查询明细（list-by-order-id 接口）
+
+#### WmsMovementOrderDO（wms_movement_order）
+
+WMS 移库单主表，来源仓库与目标仓库必须不同（服务层校验）。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| no | String | no | 移库单号 |
+| orderTime | LocalDateTime | order_time | 单据日期 |
+| status | Integer | status | 移库状态，枚举 WmsOrderStatusEnum（0 草稿 / 4 已完成 / 5 已作废），字典 wms_order_status |
+| remark | String | remark | 备注 |
+| sourceWarehouseId | Long | source_warehouse_id | 来源仓库编号，关联 wms_warehouse.id（≠ targetWarehouseId） |
+| targetWarehouseId | Long | target_warehouse_id | 目标仓库编号，关联 wms_warehouse.id |
+| totalQuantity | BigDecimal | total_quantity | 总数量（明细汇总） |
+| totalPrice | BigDecimal | total_price | 总金额（明细汇总） |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsMovementOrderDetailDO（wms_movement_order_detail）
+
+WMS 移库单明细表。完成时按行生成两条流水：来源仓库出库（负）、目标仓库入库（正）。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| orderId | Long | order_id | 移库单编号，关联 wms_movement_order.id |
+| skuId | Long | sku_id | 商品 SKU 编号，关联 wms_item_sku.id |
+| sourceWarehouseId | Long | source_warehouse_id | 来源仓库编号，关联 wms_warehouse.id |
+| targetWarehouseId | Long | target_warehouse_id | 目标仓库编号，关联 wms_warehouse.id |
+| quantity | BigDecimal | quantity | 移库数量 |
+| price | BigDecimal | price | 单价 |
+| totalPrice | BigDecimal | total_price | 行金额（数量 × 单价） |
+
+**继承**: BaseDO
+**索引**: 主键 id；按 order_id 查询明细（list-by-order-id 接口）
+
+#### WmsCheckOrderDO（wms_check_order）
+
+WMS 盘库单主表，针对单一仓库盘点。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| no | String | no | 盘库单号 |
+| orderTime | LocalDateTime | order_time | 单据日期 |
+| status | Integer | status | 盘库状态，枚举 WmsOrderStatusEnum（0 草稿 / 4 已完成 / 5 已作废），字典 wms_order_status |
+| remark | String | remark | 备注 |
+| warehouseId | Long | warehouse_id | 盘点仓库编号，关联 wms_warehouse.id |
+| totalQuantity | BigDecimal | total_quantity | 盈亏数量（实盘数量 - 账面数量） |
+| totalPrice | BigDecimal | total_price | 总金额（账面数量 × 单价） |
+| actualPrice | BigDecimal | actual_price | 实际金额（实盘数量 × 单价） |
+
+**继承**: BaseDO
+**索引**: 主键 id
+
+#### WmsCheckOrderDetailDO（wms_check_order_detail）
+
+WMS 盘库单明细表，逐条对应一行库存（inventoryId）。盘库完成时以实盘数量直接覆盖库存（`checkInventory`），并按差额生成流水。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 主键编号 |
+| orderId | Long | order_id | 盘库单编号，关联 wms_check_order.id |
+| skuId | Long | sku_id | 商品 SKU 编号，关联 wms_item_sku.id |
+| warehouseId | Long | warehouse_id | 盘点仓库编号，关联 wms_warehouse.id |
+| inventoryId | Long | inventory_id | 库存编号，关联 wms_inventory.id（存量库存行） |
+| receiptTime | LocalDateTime | receipt_time | 入库时间 |
+| quantity | BigDecimal | quantity | 账面数量 |
+| checkQuantity | BigDecimal | check_quantity | 实盘数量 |
+| price | BigDecimal | price | 单价 |
+
+**继承**: BaseDO
+**索引**: 主键 id；按 order_id 查询明细（list-by-order-id 接口）
+
+## 3. 实体关系
+
+- **主数据**：分类（parentId 自关联树）、品牌、仓库、往来企业均为独立主数据；商品挂在分类 + 品牌下，一个商品（wms_item）下挂多个 SKU（wms_item_sku），SKU 是库存与单据明细的最小计量单元。
+- **库存**：wms_inventory 由 (sku_id, warehouse_id) 唯一定位，逻辑上是 wms_item_sku × wms_warehouse 的交集实体；wms_inventory_history 是它的变动流水，通过 order_id + order_type 弱关联到四类单据（无数据库外键，仅逻辑关联）。
+- **单据**：四类单据（入库/出库/移库/盘库）均为 1:N 主明细结构；主表引用仓库（入库/出库/盘库单仓库，移库单来源+目标仓库）与往来企业（入库=供应商、出库=客户），明细行引用 SKU 与仓库；盘库明细额外引用库存行（inventory_id）。
+- 所有跨表引用均为逻辑外键（代码层 `@link` 注释约定），数据库层不建立 FOREIGN KEY 约束。
+
+```text
+wms_item_category ──(parent_id 自关联树)──┐
+wms_item_brand ──────────────────────────┤
+                                         ▼
+                                    wms_item (category_id, brand_id)
+                                         │ 1:N item_id
+                                         ▼
+                                    wms_item_sku (item_id)
+                                         │ 1:N sku_id
+              ┌──────────────────────────┼──────────────────────────────┐
+              ▼                          ▼                              │
+      wms_inventory ◄──1:1── wms_check_order_detail (inventory_id)      │
+     (sku_id+warehouse_id 唯一)         │ N:1 order_id                  │
+              │ 流动                    ▼                              │
+              ▼                   wms_check_order (warehouse_id)        │
+      wms_inventory_history                                             │
+     (sku_id, warehouse_id,                                             │
+      order_id+order_type 弱关联四类单据)                                │
+                                                                       │
+wms_warehouse (id) ──┬── wms_receipt_order (warehouse_id, merchant_id[供应商]) ──1:N── wms_receipt_order_detail (sku_id, warehouse_id)
+                     ├── wms_shipment_order (warehouse_id, merchant_id[客户])   ──1:N── wms_shipment_order_detail (sku_id, warehouse_id)
+                     ├── wms_movement_order (source/target_warehouse_id)        ──1:N── wms_movement_order_detail (sku_id, source/target_warehouse_id)
+                     └── wms_check_order (warehouse_id)
+wms_merchant (id) ──── 被 wms_receipt_order.merchant_id（供应商）/ wms_shipment_order.merchant_id（客户）引用
 ```
 
-## 订单类型常量
+## 4. 全部数据表清单
 
-WmsOrderTypeConstants 定义各单据类型范围：
-
-| 常量 | 范围 | 说明 |
-|-----|------|------|
-| RECEIPT_ORDER_TYPE | [100, 200) | 入库单类型 |
-| SHIPMENT_ORDER_TYPE | [200, 300) | 出库单类型 |
-| MOVEMENT_ORDER_TYPE | [300, 400) | 移库单类型 |
-| CHECK_ORDER_TYPE | [400, 500) | 盘点单类型 |
-
-> 此常量用于库存历史记录的 sourceOrderType 字段，标识库存变动的来源单据类型。
+| 表名 | DO | 说明 |
+|-----|-----|------|
+| wms_warehouse | WmsWarehouseDO | 仓库 |
+| wms_item | WmsItemDO | 商品（SPU） |
+| wms_item_sku | WmsItemSkuDO | 商品 SKU（规格/条码/重量体积/价格） |
+| wms_item_category | WmsItemCategoryDO | 商品分类（树形） |
+| wms_item_brand | WmsItemBrandDO | 商品品牌 |
+| wms_merchant | WmsMerchantDO | 往来企业（客户/供应商） |
+| wms_inventory | WmsInventoryDO | 库存余额（SKU + 仓库 唯一） |
+| wms_inventory_history | WmsInventoryHistoryDO | 库存流水（含来源单据信息） |
+| wms_receipt_order | WmsReceiptOrderDO | 入库单主表 |
+| wms_receipt_order_detail | WmsReceiptOrderDetailDO | 入库单明细 |
+| wms_shipment_order | WmsShipmentOrderDO | 出库单主表 |
+| wms_shipment_order_detail | WmsShipmentOrderDetailDO | 出库单明细 |
+| wms_movement_order | WmsMovementOrderDO | 移库单主表 |
+| wms_movement_order_detail | WmsMovementOrderDetailDO | 移库单明细 |
+| wms_check_order | WmsCheckOrderDO | 盘库单主表 |
+| wms_check_order_detail | WmsCheckOrderDetailDO | 盘库单明细 |

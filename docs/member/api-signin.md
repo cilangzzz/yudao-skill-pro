@@ -1,141 +1,155 @@
-# 签到系统 API
+# 签到接口 (MemberSignInConfigController / MemberSignInRecordController)
 
-> 会员签到相关接口，包含每日签到、签到规则配置、签到记录查询等功能。
+> 会员签到域：管理端维护「签到规则」（第 x 天奖励积分/经验），并查询会员的「签到记录」分页；App 端用户签到动作会按规则发放积分与经验。
 
-## 1. 概述
+## 接口路径前缀
 
-| 项目 | 说明 |
-|------|------|
-| 管理后台 Controller | `admin/signin/MemberSignInConfigController` |
-| C端 Controller | `app/signin/AppMemberSignInRecordController` |
-| Service | `MemberSignInRecordService` / `MemberSignInConfigService` |
+- `/member/sign-in/config` (Controller: MemberSignInConfigController) —— 签到规则
+- `/member/sign-in/record` (Controller: MemberSignInRecordController) —— 签到记录
 
-## 2. C端接口
+## 1. 签到规则（MemberSignInConfigController）
 
-### 2.1 每日签到
+### 1.1 创建签到规则
 
-| 项目 | 说明 |
-|------|------|
-| 接口 | 每日签到 |
-| 说明 | 用户执行签到，获得积分和经验奖励 |
+- **路径**: POST /member/sign-in/config/create
+- **权限**: point:sign-in-config:create
+- **说明**: 新增一条签到天数奖励规则，签到天数不允许重复。
 
-**业务流程：**
+**请求参数 (MemberSignInConfigCreateReqVO)**:
 
-1. 校验今日是否已签到（防重复签到）
-2. 计算连续签到天数
-3. 根据签到配置获取对应天数的奖励
-4. 增加积分（调用 `MemberPointRecordService.createPointRecord`，类型为 `SIGN`）
-5. 增加经验（调用 `MemberLevelApi.addExperience`，类型为 `SIGN_IN`）
-6. 写入签到记录
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|-----|---------|------|
+| day | Integer | 是 | @NotNull | 签到第 x 天 |
+| point | Integer | 是 | @NotNull、@PositiveOrZero、@AssertTrue(isConfigAward) | 奖励积分，不能小于 0 |
+| experience | Integer | 是 | @NotNull、@PositiveOrZero、@AssertTrue(isConfigAward) | 奖励经验，不能小于 0 |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态（0 开启 / 1 禁用） |
 
-**错误码：**
+> 类级校验 `isConfigAward`：奖励积分和经验不能同时为 0。
+
+**响应**: CommonResult&lt;Long&gt; —— 新规则的编号
+
+**业务逻辑**: 1. 校验签到天数 day 是否已存在（重复则抛 SIGN_IN_CONFIG_EXISTS）；2. VO 转换为 MemberSignInConfigDO；3. 插入数据库并返回自增主键 id。
+
+**错误码**:
 
 | 错误码 | 说明 |
-|--------|------|
-| 1_004_010_000 | 今日已签到，请勿重复签到 |
+|-------|------|
+| 1_004_009_001 | 签到天数规则已存在 |
 
-### 2.2 查询签到记录
+### 1.2 更新签到规则
 
-| 项目 | 说明 |
-|------|------|
-| 接口 | 查询当前用户的签到记录 |
-| 说明 | 支持按月查询签到日历 |
+- **路径**: PUT /member/sign-in/config/update
+- **权限**: point:sign-in-config:update
+- **说明**: 修改指定签到规则，同样校验天数不与其它规则重复。
 
-### 2.3 查询连续签到天数
+**请求参数 (MemberSignInConfigUpdateReqVO)**:
 
-| 项目 | 说明 |
-|------|------|
-| 接口 | 获取当前连续签到天数 |
-| 说明 | 用于前端展示签到进度 |
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|-----|---------|------|
+| id | Long | 是 | @NotNull | 规则自增主键 |
+| day | Integer | 是 | @NotNull | 签到第 x 天 |
+| point | Integer | 是 | @NotNull、@PositiveOrZero、@AssertTrue(isConfigAward) | 奖励积分，不能小于 0 |
+| experience | Integer | 是 | @NotNull、@PositiveOrZero、@AssertTrue(isConfigAward) | 奖励经验，不能小于 0 |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态（0 开启 / 1 禁用） |
 
-## 3. 管理后台接口
+**响应**: CommonResult&lt;Boolean&gt; —— 固定返回 true
 
-### 3.1 签到规则配置管理
+**业务逻辑**: 1. 校验规则 id 是否存在（不存在抛 SIGN_IN_CONFIG_NOT_EXISTS）；2. 校验签到天数是否与其它规则重复（排除自身，重复抛 SIGN_IN_CONFIG_EXISTS）；3. 转换为 DO 后按 id 更新。
 
-#### 查询签到配置列表
+**错误码**:
 
-| 项目 | 说明 |
-|------|------|
-| 权限 | `member:sign-in-config:query` |
-| 说明 | 查询所有签到天数的奖励配置 |
+| 错误码 | 说明 |
+|-------|------|
+| 1_004_009_000 | 签到天数规则不存在 |
+| 1_004_009_001 | 签到天数规则已存在 |
 
-#### 创建签到配置
+### 1.3 删除签到规则
 
-| 项目 | 说明 |
-|------|------|
-| 权限 | `member:sign-in-config:create` |
-| 说明 | 新增签到天数的奖励规则 |
+- **路径**: DELETE /member/sign-in/config/delete
+- **权限**: point:sign-in-config:delete
+- **说明**: 按编号删除签到规则。
 
-#### 修改签到配置
+**请求参数**: 无（Query 参数 `id`：编号，必填）
 
-| 项目 | 说明 |
-|------|------|
-| 权限 | `member:sign-in-config:update` |
-| 说明 | 修改签到奖励规则 |
+**响应**: CommonResult&lt;Boolean&gt; —— 固定返回 true
 
-#### 删除签到配置
+**业务逻辑**: 1. 校验规则 id 是否存在（不存在抛 SIGN_IN_CONFIG_NOT_EXISTS）；2. 按 id 删除记录。
 
-| 项目 | 说明 |
-|------|------|
-| 权限 | `member:sign-in-config:delete` |
-| 说明 | 删除签到规则 |
+**错误码**:
 
-## 4. 签到规则配置
+| 错误码 | 说明 |
+|-------|------|
+| 1_004_009_000 | 签到天数规则不存在 |
 
-签到规则存储在 `member_sign_in_config` 表中，支持连续签到奖励递增：
+### 1.4 获得签到规则
 
-### 配置示例
+- **路径**: GET /member/sign-in/config/get
+- **权限**: point:sign-in-config:query
+- **说明**: 按编号查询单条签到规则详情。
 
-| day | point | experience | 说明 |
-|-----|-------|------------|------|
-| 1 | 10 | 5 | 第1天签到 |
-| 2 | 15 | 8 | 第2天连续签到 |
-| 3 | 20 | 10 | 第3天连续签到 |
-| 7 | 50 | 30 | 第7天连续签到（大奖） |
-| 14 | 100 | 50 | 第14天连续签到 |
-| 30 | 200 | 100 | 第30天连续签到 |
+**请求参数**: 无（Query 参数 `id`：编号，必填）
 
-### 连续签到规则
-
-- 连续签到天数按自然日计算
-- 中断一天则重新从第 1 天开始
-- 如果当前天数超过最大配置天数，使用最后一条配置的奖励
-- 签到同时奖励积分和经验
-
-## 5. 数据模型
-
-### member_sign_in_config 表
+**响应**: CommonResult&lt;MemberSignInConfigRespVO&gt;
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| id | Long | 配置 ID |
-| day | Integer | 签到第 N 天 |
+|-----|------|------|
+| id | Integer | 自增主键 |
+| day | Integer | 签到第 x 天 |
 | point | Integer | 奖励积分 |
 | experience | Integer | 奖励经验 |
-| status | Integer | 状态（0-启用，1-禁用） |
+| status | Integer | 状态（0 开启 / 1 禁用） |
+| createTime | LocalDateTime | 创建时间 |
 
-### member_sign_in_record 表
+**业务逻辑**: 1. 按 id 查询 MemberSignInConfigDO；2. 转换为 RespVO 返回（id 不存在时返回 null 数据）。
+
+### 1.5 获得签到规则列表
+
+- **路径**: GET /member/sign-in/config/list
+- **权限**: point:sign-in-config:query
+- **说明**: 查询全部签到规则，按签到天数升序排列（不分页）。
+
+**请求参数**: 无
+
+**响应**: CommonResult&lt;List&lt;MemberSignInConfigRespVO&gt;&gt;，元素字段同 1.4 响应表。
+
+**业务逻辑**: 1. 查询全部签到规则记录；2. 按 day（签到天数）升序排序后返回。
+
+## 2. 签到记录（MemberSignInRecordController）
+
+### 2.1 获得签到记录分页
+
+- **路径**: GET /member/sign-in/record/page
+- **权限**: point:sign-in-record:query
+- **说明**: 分页查询会员签到记录，支持按用户昵称、天数、时间范围筛选，结果拼接用户昵称。
+
+**请求参数 (MemberSignInRecordPageReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|-----|---------|------|
+| pageNo | Integer | 否 | （继承 PageParam，默认 1） | 页码 |
+| pageSize | Integer | 否 | （继承 PageParam，默认 10） | 每页条数 |
+| nickname | String | 否 | 无 | 签到用户昵称（模糊匹配） |
+| day | Integer | 否 | 无 | 第几天签到 |
+| userId | Long | 否 | 无 | 用户编号 |
+| createTime | LocalDateTime[] | 否 | @DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 签到时间范围（区间查询） |
+
+**响应**: CommonResult&lt;PageResult&lt;MemberSignInRecordRespVO&gt;&gt;
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| id | Long | 记录 ID |
-| user_id | Long | 用户 ID |
-| day | Integer | 第几天签到 |
-| point | Integer | 签到获得积分 |
-| experience | Integer | 签到获得经验 |
+|-----|------|------|
+| id | Long | 签到自增 id |
+| userId | Long | 签到用户编号 |
+| nickname | String | 用户昵称（关联会员表拼接） |
+| day | Integer | 第几天签到（连续签到的天数序号） |
+| point | Integer | 该次签到获得的积分 |
+| createTime | LocalDateTime | 签到时间 |
 
-## 6. 关联业务
+**业务逻辑**: 1. 若传入 nickname 非空，先按昵称查询会员用户列表，结果为空则直接返回空分页；2. 将匹配到的用户 id 集合与其它条件组合，执行签到记录分页查询；3. Controller 层将分页结果中的 userId 批量查询会员用户，拼接昵称（nickname）后返回。
 
-签到会触发以下业务：
+**错误码**:
 
-| 业务 | 调用方式 | 说明 |
-|------|----------|------|
-| 积分增加 | `MemberPointRecordService.createPointRecord` | 业务类型为 `SIGN` |
-| 经验增加 | `MemberLevelApi.addExperience` | 业务类型为 `SIGN_IN`，可能触发等级升级 |
+| 错误码 | 说明 |
+|-------|------|
+| 1_004_010_000 | 今日已签到，请勿重复签到 |
 
-## 7. 注意事项
-
-- 签到操作需要防重复提交，使用日期 + 用户 ID 唯一约束
-- 签到配置的 day 值必须连续递增
-- 修改签到配置不影响已签到的历史记录
-- 签到积分和经验的变更在同一事务中完成
+> 说明：`1_004_010_000` 由 App 端签到动作（Service `createSignRecord`）触发，管理端记录查询接口本身不会抛出；`1_004_009_000` / `1_004_009_001` 为签到规则的校验错误码，见第 1 节各端点。

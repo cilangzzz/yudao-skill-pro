@@ -19,7 +19,7 @@ references:
   module_guide:              # 模块引用提示
     prompt: "请指定目标模块"
     mapping:
-      mes: skills/modules/mes/skill-mes.yaml
+      mes: docs/mes/code-patterns.md
   patterns:                  # 设计模式引用
     - skills/design/patterns/factory-pattern.yaml
 ---
@@ -55,9 +55,9 @@ references:
 
 | 资源类型 | 目录位置 | 说明 |
 |---------|---------|------|
-| 模块 Skills | `skills/modules/` | 各功能模块的完整技术规范 |
+| 模块代码模式 | `docs/{模块}/code-patterns.md` | 各功能模块的完整技术规范 |
 | 设计模式 | `skills/design/patterns/` | 常用设计模式的实现模板 |
-| 文档模板 | `skills/modules/templates/` | Skill 文档编写模板 |
+| 文档模板 | `docs/templates/` | Skill 文档编写模板 |
 
 ---
 
@@ -69,15 +69,15 @@ references:
 
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 了解项目结构 | 刚接触项目，需要快速了解整体架构 | `skills/index.yaml` | 查看 12 个核心模块的技术规范索引 |
-| 系统模块入门 | 需要了解用户、角色、权限等基础功能 | [skill-system.yaml](../modules/system/skill-system.yaml) | 系统管理模块完整开发指南 |
-| 基础设施入门 | 需要了解文件、配置、任务等基础服务 | [skill-infra.yaml](../modules/infra/skill-infra.yaml) | 基础设施模块完整开发指南 |
+| 了解项目结构 | 刚接触项目，需要快速了解整体架构 | `skills/index.yaml` | 查看 15 个业务模块的技术规范索引 |
+| 系统模块入门 | 需要了解用户、角色、权限等基础功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 系统管理模块完整开发指南 |
+| 基础设施入门 | 需要了解文件、配置、任务等基础服务 | [infra/code-patterns.md](../../docs/infra/code-patterns.md) | 基础设施模块完整开发指南 |
 | **实体类实现** | 需要从 SQL 到实体类创建完整 CRUD 功能 | [entity-implementation.md](entity-implementation.md) | 从建表到完整接口的端到端指南 |
 
 **推荐使用流程**：
 
 ```
-阅读 index.yaml --> 选择目标模块 --> 阅读对应 skill-*.yaml --> 开始开发
+阅读 index.yaml --> 选择目标模块 --> 阅读对应 code-patterns.md --> 开始开发
 ```
 
 ---
@@ -88,12 +88,12 @@ references:
 
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 扩展系统模块 | 添加新的系统管理功能 | [skill-system.yaml](../modules/system/skill-system.yaml) | 遵循系统模块规范扩展功能 |
-| 扩展支付模块 | 添加新的支付渠道或支付方式 | [skill-pay.yaml](../modules/pay/skill-pay.yaml) | 遵循支付模块规范扩展功能 |
-| 扩展会员模块 | 添加会员等级、积分等功能 | [skill-member.yaml](../modules/member/skill-member.yaml) | 遵循会员模块规范扩展功能 |
-| 扩展商城模块 | 添加商品、订单相关功能 | [skill-mall.yaml](../modules/mall/skill-mall.yaml) | 遵循商城模块规范扩展功能 |
-| 扩展 CRM 模块 | 添加客户管理相关功能 | [skill-crm.yaml](../modules/crm/skill-crm.yaml) | 遵循 CRM 模块规范扩展功能 |
-| 扩展工作流模块 | 添加流程审批相关功能 | [skill-bpm.yaml](../modules/bpm/skill-bpm.yaml) | 遵循工作流模块规范扩展功能 |
+| 扩展系统模块 | 添加新的系统管理功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 遵循系统模块规范扩展功能 |
+| 扩展支付模块 | 添加新的支付渠道或支付方式 | [pay/code-patterns.md](../../docs/pay/code-patterns.md) | 遵循支付模块规范扩展功能 |
+| 扩展会员模块 | 添加会员等级、积分等功能 | [member/code-patterns.md](../../docs/member/code-patterns.md) | 遵循会员模块规范扩展功能 |
+| 扩展商城模块 | 添加商品、订单相关功能 | [mall/code-patterns.md](../../docs/mall/code-patterns.md) | 遵循商城模块规范扩展功能 |
+| 扩展 CRM 模块 | 添加客户管理相关功能 | [crm/code-patterns.md](../../docs/crm/code-patterns.md) | 遵循 CRM 模块规范扩展功能 |
+| 扩展工作流模块 | 添加流程审批相关功能 | [bpm/code-patterns.md](../../docs/bpm/code-patterns.md) | 遵循工作流模块规范扩展功能 |
 
 **扩展开发要点**：
 
@@ -110,10 +110,10 @@ references:
 
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 改造系统功能 | 修改用户、角色、菜单等核心功能 | [skill-system.yaml](../modules/system/skill-system.yaml) | 系统模块改造技术规范 |
-| 改造支付流程 | 修改支付、退款等核心流程 | [skill-pay.yaml](../modules/pay/skill-pay.yaml) | 支付模块改造技术规范 |
-| 改造订单流程 | 修改订单创建、支付、发货流程 | [skill-mall.yaml](../modules/mall/skill-mall.yaml) | 商城模块改造技术规范 |
-| 改造审批流程 | 修改工作流定义和审批逻辑 | [skill-bpm.yaml](../modules/bpm/skill-bpm.yaml) | 工作流模块改造技术规范 |
+| 改造系统功能 | 修改用户、角色、菜单等核心功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 系统模块改造技术规范 |
+| 改造支付流程 | 修改支付、退款等核心流程 | [pay/code-patterns.md](../../docs/pay/code-patterns.md) | 支付模块改造技术规范 |
+| 改造订单流程 | 修改订单创建、支付、发货流程 | [mall/code-patterns.md](../../docs/mall/code-patterns.md) | 商城模块改造技术规范 |
+| 改造审批流程 | 修改工作流定义和审批逻辑 | [bpm/code-patterns.md](../../docs/bpm/code-patterns.md) | 工作流模块改造技术规范 |
 
 **改造开发要点**：
 
@@ -130,21 +130,21 @@ references:
 
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 新增业务模块 | 创建全新的业务功能模块 | [skill-template.yaml](../templates/skill-template.yaml) | Skill 文档编写模板 |
+| 新增业务模块 | 创建全新的业务功能模块 | [templates/skill-template.yaml](../../docs/templates/skill-template.yaml) | Skill 文档编写模板 |
 | 应用设计模式 | 需要使用设计模式优化代码 | [patterns/](../design/patterns/) | 设计模式实现模板 |
 
 **新增模块参考**：
 
 参考现有模块的 skill 文档结构：
 
-- 核心模块参考：`skill-system.yaml`、`skill-infra.yaml`
-- 业务模块参考：`skill-mall.yaml`、`skill-crm.yaml`
-- 技术模块参考：`skill-bpm.yaml`、`skill-ai.yaml`
+- 核心模块参考：`docs/system/code-patterns.md`、`docs/infra/code-patterns.md`
+- 业务模块参考：`docs/mall/code-patterns.md`、`docs/crm/code-patterns.md`
+- 技术模块参考：`docs/bpm/code-patterns.md`、`docs/ai/code-patterns.md`
 
 **新增模块步骤**：
 
-1. 使用 `skill-template.yaml` 创建新模块文档
-2. 参考 `extraction-prompt.md` 提取技术规范
+1. 使用 `docs/templates/skill-template.yaml` 创建新模块文档
+2. 参考 `docs/templates/extraction-prompt.md` 提取技术规范
 3. 按照模块规范编写代码
 4. 更新 `skills/index.yaml` 索引
 
@@ -242,10 +242,10 @@ references:
 
 **A:** 根据你的开发任务类型选择：
 
-- 快速上手：从 `skill-system.yaml` 或 `skill-infra.yaml` 开始
+- 快速上手：从 `docs/system/code-patterns.md` 或 `docs/infra/code-patterns.md` 开始
 - 扩展功能：选择对应业务模块的 skill 文档
 - 改造功能：重点阅读对应模块的"核心流程"部分
-- 新增模块：使用 `skill-template.yaml` 作为模板
+- 新增模块：使用 `docs/templates/skill-template.yaml` 作为模板
 
 ### Q2: skill 文档包含哪些内容?
 
@@ -276,8 +276,8 @@ references:
 
 **A:** 创建新模块的 skill 文档步骤：
 
-1. 复制 `skills/modules/templates/skill-template.yaml` 作为起点
-2. 参考 `skills/modules/templates/extraction-prompt.md` 了解提取方法
+1. 复制 `docs/templates/skill-template.yaml` 作为起点
+2. 参考 `docs/templates/extraction-prompt.md` 了解提取方法
 3. 参考现有模块的 skill 文档作为示例
 4. 按照模板结构填写模块信息
 5. 更新 `skills/index.yaml` 添加新模块索引
@@ -327,18 +327,18 @@ system (系统管理) <-- 几乎所有模块都依赖
 
 | 模块 | 文档路径 | 行数 | 状态 |
 |-----|---------|------|------|
-| 系统管理 | [skill-system.yaml](../modules/system/skill-system.yaml) | 839 | 已完成 |
-| 基础设施 | [skill-infra.yaml](../modules/infra/skill-infra.yaml) | 700+ | 已完成 |
-| 支付模块 | [skill-pay.yaml](../modules/pay/skill-pay.yaml) | 654 | 已完成 |
-| 会员模块 | [skill-member.yaml](../modules/member/skill-member.yaml) | 608 | 已完成 |
-| 商城模块 | [skill-mall.yaml](../modules/mall/skill-mall.yaml) | 650+ | 已完成 |
-| CRM 模块 | [skill-crm.yaml](../modules/crm/skill-crm.yaml) | 850+ | 已完成 |
-| ERP 模块 | [skill-erp.yaml](../modules/erp/skill-erp.yaml) | 900+ | 已完成 |
-| 工作流模块 | [skill-bpm.yaml](../modules/bpm/skill-bpm.yaml) | 650+ | 已完成 |
-| AI 模块 | [skill-ai.yaml](../modules/ai/skill-ai.yaml) | 670+ | 已完成 |
-| 物联网模块 | [skill-iot.yaml](../modules/iot/skill-iot.yaml) | 721 | 已完成 |
-| 公众号模块 | [skill-mp.yaml](../modules/mp/skill-mp.yaml) | 660+ | 已完成 |
-| 报表模块 | [skill-report.yaml](../modules/report/skill-report.yaml) | 320+ | 已完成 |
+| 系统管理 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 303 | 已完成 |
+| 基础设施 | [infra/code-patterns.md](../../docs/infra/code-patterns.md) | 291 | 已完成 |
+| 支付模块 | [pay/code-patterns.md](../../docs/pay/code-patterns.md) | 373 | 已完成 |
+| 会员模块 | [member/code-patterns.md](../../docs/member/code-patterns.md) | 249 | 已完成 |
+| 商城模块 | [mall/code-patterns.md](../../docs/mall/code-patterns.md) | 329 | 已完成 |
+| CRM 模块 | [crm/code-patterns.md](../../docs/crm/code-patterns.md) | 313 | 已完成 |
+| ERP 模块 | [erp/code-patterns.md](../../docs/erp/code-patterns.md) | 373 | 已完成 |
+| 工作流模块 | [bpm/code-patterns.md](../../docs/bpm/code-patterns.md) | 429 | 已完成 |
+| AI 模块 | [ai/code-patterns.md](../../docs/ai/code-patterns.md) | 351 | 已完成 |
+| 物联网模块 | [iot/code-patterns.md](../../docs/iot/code-patterns.md) | 372 | 已完成 |
+| 公众号模块 | [mp/code-patterns.md](../../docs/mp/code-patterns.md) | 441 | 已完成 |
+| 报表模块 | [report/code-patterns.md](../../docs/report/code-patterns.md) | 255 | 已完成 |
 
 ### 使用指南文档索引
 

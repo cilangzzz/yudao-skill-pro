@@ -1,99 +1,164 @@
-# 数据权限 API
+# CRM 数据权限接口 (CrmPermissionController)
 
-## 概述
+> 提供 CRM 各业务数据（客户、联系人、商机、合同等）的团队成员协作权限管理：为成员授予/调整/移除数据权限级别，并支持负责人变更记录（CrmOwnerRecordService 为内部服务，无独立 admin 端点，供客户转移、公海领取/放入及公海统计调用）。
 
-CRM 模块采用独立的数据权限机制，通过 CrmPermissionDO 实现细粒度的数据访问控制。每个业务记录都有对应的权限记录，控制哪些用户可以访问以及访问级别。权限校验通过 `@CrmPermission` 注解配合 AOP 切面实现声明式控制。
+## 接口路径前缀
 
-## Controller
+/crm/permission  (Controller: CrmPermissionController)
 
-| Controller | 路径前缀 | 说明 |
-|------------|----------|------|
-| CrmPermissionController | `/crm/permission` | 数据权限管理接口 |
+说明：
 
-## 权限级别
+- `bizType` 对应 `CrmBizTypeEnum`（如 1=线索、2=客户、3=联系人、5=商机、6=合同 等），`bizId` 为对应业务数据编号。
+- `level` 对应 `CrmPermissionLevelEnum`（READ 只读、WRITE 读写、OWNER 负责人）。
+- 本控制器端点均未使用 `@PreAuthorize` 菜单权限，仅要求登录；数据级权限通过 CRM 专属 `@CrmPermission` 注解（AOP 切面）在业务数据维度校验。
 
-| 级别 | 代码 | 说明 |
-|------|------|------|
-| OWNER | 1 | 负责人权限，拥有所有操作权限，可以删除、转移 |
-| READ | 2 | 只读权限，只能查看数据 |
-| WRITE | 3 | 读写权限，可以编辑数据但不能删除 |
+## 1. 数据权限管理 (CrmPermissionController)
 
-## 业务类型枚举（CrmBizTypeEnum）
+### 1.1 创建数据权限
 
-权限系统通过业务类型枚举区分不同业务实体的权限控制：
+- **路径**: POST /crm/permission/create
+- **权限**: 已认证（Service 层 `@CrmPermission` 校验当前操作人为该数据的 OWNER 负责人）
+- **说明**: 为指定用户添加某条 CRM 业务数据的团队协作权限，支持"同时添加"至该客户下的联系人、商机、合同。
 
-| 枚举值 | 说明 |
-|--------|------|
-| CRM_CUSTOMER | 客户 |
-| CRM_CLUE | 线索 |
-| CRM_CONTACT | 联系人 |
-| CRM_BUSINESS | 商机 |
-| CRM_CONTRACT | 合同 |
-| CRM_RECEIVABLE | 回款 |
-| CRM_PRODUCT | 产品 |
+**请求参数 (CrmPermissionSaveReqVO)**:
 
-## 接口列表
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| userId | Long | 是 | @NotNull | 用户编号 |
+| bizType | Integer | 是 | @NotNull、@InEnum(CrmBizTypeEnum) | CRM 类型 |
+| bizId | Long | 是 | @NotNull | CRM 类型数据编号 |
+| level | Integer | 是 | @NotNull、@InEnum(CrmPermissionLevelEnum) | 权限级别 |
+| toBizTypes | List&lt;Integer&gt; | 否 | 无 | 同时添加的业务类型列表（添加客户团队成员时，可同时为该用户添加其联系人/商机/合同的权限） |
 
-| 接口 | 方法 | 路径 | 权限 | 说明 |
-|------|------|------|------|------|
-| 获取权限列表 | GET | `/crm/permission/list` | `crm:permission:query` | 查询某条记录的权限列表 |
-| 转移权限 | PUT | `/crm/permission/transfer` | `crm:permission:update` | 将负责人权限转移给其他用户 |
-| 共享权限 | POST | `/crm/permission/share` | `crm:permission:update` | 为其他用户添加只读/读写权限 |
-| 删除权限 | DELETE | `/crm/permission/delete` | `crm:permission:delete` | 移除某用户的权限 |
+**响应**: CommonResult&lt;Boolean&gt;（成功返回 true）
 
-## 核心数据模型
+**业务逻辑**:
+1. 通过 `@CrmPermission` 切面校验当前操作人是该数据（bizType + bizId）的负责人（OWNER 级别）。
+2. 校验待创建的权限不存在重复（同 bizType + bizId + userId 已有权限则抛出创建失败错误码），并校验被添加用户真实存在。
+3. 插入一条 CrmPermissionDO 数据权限记录。
+4. 若 `toBizTypes` 非空，按类型分别查询该客户（bizId）下归属于当前操作人的联系人、商机、合同列表。
+5. 对每条关联数据校验被添加用户是否已拥有权限，已拥有则抛出"同时添加失败"错误码（含用户昵称、模块名、数据名、已有级别）；否则组装对应权限记录。
+6. 批量插入"同时添加"生成的全部权限记录。
 
-### CrmPermissionDO
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_020_007_008 | 创建数据权限失败，原因：所加用户已有权限 |
+| 1_020_007_009 | 同时添加数据权限失败，原因：用户【{}】已有模块【{}】数据【{}】的【{}】权限 |
+
+### 1.2 编辑数据权限
+
+- **路径**: PUT /crm/permission/update
+- **权限**: 已认证（控制器 `@CrmPermission` 校验当前操作人为该数据的 OWNER 负责人）
+- **说明**: 将指定的一批数据权限记录统一调整为新的权限级别。
+
+**请求参数 (CrmPermissionUpdateReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| ids | List&lt;Long&gt; | 是 | @NotNull | 数据权限编号列表 |
+| bizType | Integer | 是 | @NotNull、@InEnum(CrmBizTypeEnum) | CRM 类型 |
+| bizId | Long | 是 | @NotNull | CRM 类型数据编号 |
+| level | Integer | 是 | @NotNull、@InEnum(CrmPermissionLevelEnum) | 权限级别 |
+
+**响应**: CommonResult&lt;Boolean&gt;（成功返回 true）
+
+**业务逻辑**:
+1. 校验 `ids` 对应的数据权限记录是否全部存在，数量不一致则抛出"数据权限不存在"错误。
+2. 将这批权限记录的 `level` 批量更新为请求中的权限级别。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_020_007_000 | 数据权限不存在 |
+
+### 1.3 删除数据权限
+
+- **路径**: DELETE /crm/permission/delete
+- **权限**: 已认证（Service 层校验当前操作人为该数据的 OWNER 负责人）
+- **说明**: 负责人批量移除某条业务数据上其他团队成员的数据权限。
+
+**请求参数**: 无（Query 参数）
+
+| 参数 | 类型 | 必填 | 说明 |
+|-----|------|------|------|
+| ids | Collection&lt;Long&gt; | 是 | 数据权限编号（支持逗号分隔多个） |
+
+**响应**: CommonResult&lt;Boolean&gt;（成功返回 true）
+
+**业务逻辑**:
+1. 根据 `ids` 查询数据权限记录，记录为空则抛出"数据权限不存在"错误。
+2. 校验所有记录属于同一个 `bizId`（同一业务数据），否则抛出"删除失败：只能属于同一个 bizId"错误。
+3. 校验当前操作人在该 bizType + bizId 下存在权限记录，且级别为 OWNER 负责人，否则抛出"删除失败：没有权限"错误。
+4. 批量删除这些数据权限记录。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_020_007_000 | 数据权限不存在 |
+| 1_020_007_004 | 删除数据权限失败，原因：批量删除权限的时候，只能属于同一个 bizId 下 |
+| 1_020_007_006 | 删除数据权限失败，原因：没有权限 |
+
+### 1.4 删除自己的数据权限
+
+- **路径**: DELETE /crm/permission/delete-self
+- **权限**: 已认证
+- **说明**: 团队成员主动退出协作，移除自己在某条业务数据上的数据权限（负责人不可退出）。
+
+**请求参数**: 无（Query 参数）
+
+| 参数 | 类型 | 必填 | 说明 |
+|-----|------|------|------|
+| id | Long | 是 | 数据权限编号 |
+
+**响应**: CommonResult&lt;Boolean&gt;（成功返回 true）
+
+**业务逻辑**:
+1. 查询该 `id` 且归属当前登录用户的数据权限记录，不存在则抛出"数据权限不存在"错误。
+2. 校验该记录级别不是 OWNER 负责人，负责人不允许删除自身权限，否则抛出"不能删除负责人"错误。
+3. 删除该数据权限记录。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_020_007_000 | 数据权限不存在 |
+| 1_020_007_007 | 删除数据权限失败，原因：不能删除负责人 |
+
+### 1.5 获得数据权限列表
+
+- **路径**: GET /crm/permission/list
+- **权限**: 已认证
+- **说明**: 查询某条业务数据（如某客户）的全部团队成员数据权限，并补充用户昵称、部门、岗位信息。
+
+**请求参数**: 无（Query 参数）
+
+| 参数 | 类型 | 必填 | 说明 |
+|-----|------|------|------|
+| bizType | Integer | 是 | CRM 类型 |
+| bizId | Long | 是 | CRM 类型数据编号 |
+
+**响应**: CommonResult&lt;List&lt;CrmPermissionRespVO&gt;&gt;
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT | 主键ID |
-| biz_type | INT | 业务类型（对应 CrmBizTypeEnum） |
-| biz_id | BIGINT | 业务ID（关联具体记录） |
-| user_id | BIGINT | 用户ID |
-| level | INT | 权限级别（对应 CrmPermissionLevelEnum） |
+|-----|------|------|
+| id | Long | 数据权限编号 |
+| userId | Long | 用户编号 |
+| bizType | Integer | CRM 类型 |
+| bizId | Long | CRM 类型数据编号 |
+| level | Integer | 权限级别 |
+| nickname | String | 用户昵称 |
+| deptName | String | 部门名称 |
+| postNames | Set&lt;String&gt; | 岗位名称数组 |
+| createTime | LocalDateTime | 创建时间 |
 
-### 索引
+**业务逻辑**:
+1. 根据 bizType + bizId 查询该业务数据的全部数据权限记录，为空直接返回空列表。
+2. 批量查询权限记录涉及的用户信息（AdminUserApi）。
+3. 根据用户所属部门批量查询部门信息（DeptApi），并根据用户岗位编号批量查询岗位信息（PostApi）。
+4. 逐条拼接返回结果：补充用户昵称、部门名称、岗位名称集合。
 
-| 索引名 | 列 | 说明 |
-|--------|-----|------|
-| idx_biz | biz_type, biz_id | 按业务查询权限 |
-| idx_user | user_id | 按用户查询权限 |
-
-## 使用方式
-
-### 注解声明式权限校验
-
-```java
-// 查询需要 READ 权限
-@CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#id", level = CrmPermissionLevelEnum.READ)
-public CrmCustomerDO getCustomer(Long id)
-
-// 更新需要 WRITE 权限
-@CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#updateReqVO.id", level = CrmPermissionLevelEnum.WRITE)
-public void updateCustomer(CrmCustomerSaveReqVO updateReqVO)
-
-// 删除需要 OWNER 权限
-@CrmPermission(bizType = CrmBizTypeEnum.CRM_CUSTOMER, bizId = "#id", level = CrmPermissionLevelEnum.OWNER)
-public void deleteCustomer(Long id)
-```
-
-## 业务规则
-
-1. **自动创建**：创建业务记录时自动为创建者创建 OWNER 级别权限
-2. **权限转移**：转移负责人时，原负责人的 OWNER 权限降为 WRITE，新负责人获得 OWNER 权限
-3. **权限共享**：可以为其他用户添加 READ 或 WRITE 级别权限
-4. **公海池影响**：客户放入公海时，相关权限会被清理
-5. **AOP 校验**：`CrmPermissionAspect` 拦截 `@CrmPermission` 注解方法，自动校验当前用户是否满足权限要求
-
-## 关键文件
-
-| 文件 | 说明 |
-|------|------|
-| `service/permission/CrmPermissionService.java` | 权限服务接口 |
-| `controller/admin/permission/CrmPermissionController.java` | 权限控制器 |
-| `dal/dataobject/permission/CrmPermissionDO.java` | 权限实体类 |
-| `enums/common/CrmBizTypeEnum.java` | 业务类型枚举 |
-| `enums/permission/CrmPermissionLevelEnum.java` | 权限级别枚举 |
-| `framework/permission/core/annotations/CrmPermission.java` | 权限注解定义 |
-| `framework/permission/core/aspect/CrmPermissionAspect.java` | 权限 AOP 切面 |
+**错误码**: 无专属错误码

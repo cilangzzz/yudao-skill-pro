@@ -1,169 +1,200 @@
-# Member 模块文档
+# 会员模块 (member)
 
-> 会员中心模块 (`yudao-module-member`)，负责管理C端用户的会员体系。
+> 会员中心：C 端用户体系，提供会员注册登录、资料、收件地址、等级经验、积分签到、标签分组，是商城的用户主数据源。
 
-## 1. 模块概述
+## 模块概述
 
-会员模块是系统的核心业务模块之一，定位为 **C端用户的核心数据层**，与 `system` 模块的 AdminUser 区分。主要职责：
+- **模块路径**: yudao-module-member
+- **业务定位**: 承载平台 C 端会员的完整生命周期：App 端手机验证码/微信社交登录自动注册会员，管理端维护会员资料、等级、积分、标签、分组；同时以积分/等级/地址等形式向商城交易、促销模块提供用户能力支撑。
+- **技术栈**: Spring Boot 2.7.18（JDK8） / MyBatis-Plus / Swagger v3（springdoc） / Spring Security + @PreAuthorize 权限 / Spring 事件（用户创建消息） / Redis
 
-- 为 mall 模块提供会员信息、积分抵扣、等级折扣等支持
-- 通过 API 接口对外暴露会员服务，支持跨模块调用
-- 管理会员全生命周期：注册、登录、等级成长、积分消费
-
-### 设计原则
+## 设计原则
 
 | 原则 | 说明 |
-|------|------|
-| 领域驱动设计 | MemberUser 作为聚合根，关联等级、积分、标签等实体 |
-| 分层架构 | Controller -> Service -> DAL 清晰分层 |
-| 单一职责 | 每个 Service 专注一个业务领域 |
-| 开闭原则 | 通过枚举定义业务类型，便于扩展新的积分/经验来源 |
-| 事务一致性 | 积分变更、等级变更使用 `@Transactional` 保证数据一致性 |
-| 多租户隔离 | MemberUserDO 继承 TenantBaseDO，支持多租户 |
+|-----|------|
+| 双端 API 分离 | controller/admin 管理端与 controller/app 用户端独立成包，App 端有自己的认证体系（手机验证码、微信小程序/公众号登录） |
+| 多租户 | 会员主表 MemberUserDO 继承 TenantBaseDO，会员数据按 tenantId 隔离；其余配置/记录类表继承 BaseDO |
+| 变更留痕 | 等级、经验、积分每次变动都写流水表（member_level_record / member_experience_record / member_point_record），正负数区分增减 |
+| 事务后事件 | 创建会员在事务提交后（TransactionSynchronization.afterCommit）发布 MemberUserCreateMessage（Spring 事件），下游模块（如促销注册发券）订阅响应 |
+| 服务间解耦 | 对 mall 系列模块只通过 api 包（MemberUserApi 等 5 个 Api + RespDTO）暴露，不泄露 DO 内部结构 |
+| 经验驱动等级 | 经验变动统一走 MemberLevelService#addExperience 入口，自动计算升级（calculateNewLevel）并写等级变更记录 |
 
-## 2. 核心功能
+## 核心功能点
 
-| 功能域 | 说明 | 关键服务 |
-|--------|------|----------|
-| 会员认证 | 注册、登录、登出、Token 刷新、社交登录 | MemberAuthService |
-| 用户管理 | 个人信息、状态管理、用户查询 | MemberUserService |
-| 等级体系 | 等级配置、经验累积、自动升降级 | MemberLevelService |
-| 积分系统 | 积分获取、消费、记录追踪 | MemberPointRecordService |
-| 签到功能 | 每日签到、连续签到奖励、签到规则配置 | MemberSignInRecordService / MemberSignInConfigService |
-| 收货地址 | 多地址管理、默认地址切换 | AddressService |
-| 标签分组 | 会员标签、会员分组分类管理 | MemberTagService / MemberGroupService |
-| 会员配置 | 积分抵扣开关、抵扣比例等全局配置 | MemberConfigService |
+| 功能域 | 说明 | 关键实体 |
+|-------|------|---------|
+| 会员用户 | 会员资料管理、分页查询、调整等级/积分；App 端注册登录、修改手机/密码 | MemberUserDO |
+| 收件地址 | 查询用户收件地址列表（供交易模块下单使用） | MemberAddressDO |
+| 会员配置 | 积分抵扣开关、抵扣单价/上限、1 元赠送积分等全局配置 | MemberConfigDO |
+| 用户分组 | 会员分组维护（启用状态），用于营销圈选 | MemberGroupDO |
+| 会员等级 | 等级配置（经验门槛、折扣）、等级变更记录、经验变动记录 | MemberLevelDO、MemberLevelRecordDO、MemberExperienceRecordDO |
+| 积分 | 积分变动流水查询，提供 MemberPointApi 供下单抵扣/奖励 | MemberPointRecordDO |
+| 签到 | 签到规则（第 x 天奖励积分/经验）配置、签到记录查询 | MemberSignInConfigDO、MemberSignInRecordDO |
+| 会员标签 | 会员标签维护，标签 ID 列表挂在会员上 | MemberTagDO |
 
-## 3. API 索引
+## API 接口索引
 
-### 3.1 跨模块 API（供其他模块调用）
+### 会员用户 (MemberUserController)
 
-| API 接口 | 方法 | 消费方 |
-|----------|------|--------|
-| MemberUserApi | getUser / getUserList / getUserByMobile / validateUser | pay, mall-trade, mall-promotion |
-| MemberPointApi | addPoint / reducePoint | mall-trade, mall-promotion |
-| MemberLevelApi | getMemberLevel / addExperience / reduceExperience | mall-trade |
-| MemberAddressApi | getAddress / getDefaultAddress | mall-trade |
-| MemberConfigApi | getConfig | mall-trade |
+前缀：`/member/user`
 
-### 3.2 HTTP 接口
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/user/update | PUT | 更新会员用户 | member:user:update |
+| /member/user/update-level | PUT | 更新会员用户等级 | member:user:update-level |
+| /member/user/update-point | PUT | 更新会员用户积分 | member:user:update-point |
+| /member/user/get | GET | 获得会员用户 | member:user:query |
+| /member/user/page | GET | 获得会员用户分页 | member:user:query |
 
-| 接口分组 | Controller | 说明 | 详情链接 |
-|----------|-----------|------|----------|
-| 管理后台 - 用户 | MemberUserController | 会员用户管理 | [api-user.md](api-user.md) |
-| 管理后台 - 等级 | MemberLevelController | 等级配置管理 | [api-level.md](api-level.md) |
-| 管理后台 - 积分 | MemberPointRecordController | 积分记录查询 | [api-point.md](api-point.md) |
-| 管理后台 - 签到 | MemberSignInConfigController | 签到规则配置 | [api-signin.md](api-signin.md) |
-| 管理后台 - 标签 | MemberTagController | 标签管理 | [api-tag-group.md](api-tag-group.md) |
-| 管理后台 - 分组 | MemberGroupController | 分组管理 | [api-tag-group.md](api-tag-group.md) |
-| C端 - 认证 | AppAuthController | 登录、注册、登出 | [api-auth.md](api-auth.md) |
-| C端 - 地址 | AppAddressController | 收货地址 | [api-address.md](api-address.md) |
-| C端 - 签到 | AppMemberSignInRecordController | 每日签到 | [api-signin.md](api-signin.md) |
+### 用户收件地址 (AddressController)
 
-## 4. 数据模型
+前缀：`/member/address`
 
-详见 [data-model.md](data-model.md)。
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/address/list | GET | 获得用户收件地址列表（按 userId） | member:user:query |
 
-### 核心实体关系
+### 会员设置 (MemberConfigController)
 
-```
-MemberUser (聚合根)
-  |-- N:1 --> MemberLevel (等级)
-  |-- N:1 --> MemberGroup (分组)
-  |-- N:N --> MemberTag  (标签, JSON数组)
-  |-- 1:N --> MemberPointRecord (积分记录)
-  |-- 1:N --> MemberExperienceRecord (经验记录)
-  |-- 1:N --> MemberLevelRecord (等级记录)
-  |-- 1:N --> MemberSignInRecord (签到记录)
-  |-- 1:N --> MemberAddress (收货地址)
-```
+前缀：`/member/config`
 
-### 数据表清单
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/config/save | PUT | 保存会员配置 | member:config:save |
+| /member/config/get | GET | 获得会员配置 | member:config:query |
 
-| 表名 | 实体类 | 说明 | 继承 |
-|------|--------|------|------|
-| member_user | MemberUserDO | 会员用户表 | TenantBaseDO |
-| member_level | MemberLevelDO | 会员等级表 | BaseDO |
-| member_point_record | MemberPointRecordDO | 积分记录表 | BaseDO |
-| member_experience_record | MemberExperienceRecordDO | 经验记录表 | BaseDO |
-| member_level_record | MemberLevelRecordDO | 等级变更记录表 | BaseDO |
-| member_sign_in_config | MemberSignInConfigDO | 签到配置表 | BaseDO |
-| member_sign_in_record | MemberSignInRecordDO | 签到记录表 | BaseDO |
-| member_tag | MemberTagDO | 会员标签表 | BaseDO |
-| member_group | MemberGroupDO | 会员分组表 | BaseDO |
-| member_address | MemberAddressDO | 收货地址表 | BaseDO |
-| member_config | MemberConfigDO | 会员配置表 | BaseDO |
+### 用户分组 (MemberGroupController)
 
-## 5. 设计模式
+前缀：`/member/group`
 
-| 模式 | 位置 | 用途 |
-|------|------|------|
-| DTO 转换模式 | `api/*/dto/*.java` | API 层使用 DTO 隔离内部 DO，保护领域模型 |
-| 策略模式（枚举实现） | `MemberPointBizTypeEnum` | 定义积分业务类型，支持多种积分来源 |
-| 模板方法 | `MemberLevelServiceImpl` | 等级变更流程：记录变更 -> 更新经验 -> 计算新等级 -> 通知用户 |
-| Facade 模式 | `*ApiImpl.java` | API 实现类封装 Service 调用，简化跨模块交互 |
-| 观察者模式（MQ） | `MemberUserProducer` | 用户创建后发送消息，解耦后续处理逻辑 |
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/group/create | POST | 创建用户分组 | member:group:create |
+| /member/group/update | PUT | 更新用户分组 | member:group:update |
+| /member/group/delete | DELETE | 删除用户分组 | member:group:delete |
+| /member/group/get | GET | 获得用户分组 | member:group:query |
+| /member/group/list-all-simple | GET | 获取会员分组精简信息列表（下拉选项） | 已认证（无 @PreAuthorize） |
+| /member/group/page | GET | 获得用户分组分页 | member:group:query |
 
-## 6. 依赖关系
+### 会员等级 (MemberLevelController)
 
-### 6.1 内部依赖（本模块依赖其他模块）
+前缀：`/member/level`
 
-| 模块 | API | 用途 |
-|------|-----|------|
-| system | SmsCodeApi | 短信验证码校验（登录、修改手机、重置密码） |
-| system | SocialClientApi | 社交登录（微信、QQ 等）、微信小程序登录 |
-| infra | 文件存储 | 头像上传存储 |
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/level/create | POST | 创建会员等级 | member:level:create |
+| /member/level/update | PUT | 更新会员等级 | member:level:update |
+| /member/level/delete | DELETE | 删除会员等级 | member:level:delete |
+| /member/level/get | GET | 获得会员等级 | member:level:query |
+| /member/level/list-all-simple | GET | 获取会员等级精简信息列表（下拉选项） | 已认证（无 @PreAuthorize） |
+| /member/level/list | GET | 获得会员等级列表 | member:level:query |
 
-### 6.2 外部依赖（第三方库）
+### 会员等级记录 (MemberLevelRecordController)
 
-| 库 | 版本 | 用途 |
-|----|------|------|
-| spring-security-crypto | Spring Boot 自带 | 密码加密（BCryptPasswordEncoder） |
-| mybatis-plus | 3.x | ORM 框架，数据访问增强 |
-| hutool | 5.x | 工具类库 |
+前缀：`/member/level-record`
 
-## 7. 枚举定义
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/level-record/get | GET | 获得会员等级记录 | member:level-record:query |
+| /member/level-record/page | GET | 获得会员等级记录分页 | member:level-record:query |
 
-### 积分业务类型 (MemberPointBizTypeEnum)
+### 会员经验记录 (MemberExperienceRecordController)
 
-| type | name | 说明 | 增减 |
-|------|------|------|------|
-| 1 | SIGN | 签到 | + |
-| 2 | ADMIN | 管理员修改 | + |
-| 11 | ORDER_USE | 订单积分抵扣 | - |
-| 21 | ORDER_GIVE | 订单积分奖励 | + |
+前缀：`/member/experience-record`
 
-### 经验业务类型 (MemberExperienceBizTypeEnum)
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/experience-record/get | GET | 获得会员经验记录 | member:experience-record:query |
+| /member/experience-record/page | GET | 获得会员经验记录分页 | member:experience-record:query |
 
-| type | name | 说明 | 增减 |
-|------|------|------|------|
-| 0 | ADMIN | 管理员调整 | + |
-| 1 | INVITE_REGISTER | 邀新奖励 | + |
-| 4 | SIGN_IN | 签到奖励 | + |
-| 11 | ORDER_GIVE | 下单奖励 | + |
+### 积分记录 (MemberPointRecordController)
 
-## 8. 错误码
+前缀：`/member/point/record`（类上 @Tag 误写为"签到记录"，实际是积分记录）
 
-错误码前缀：`1_004_XXX_XXX`
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/point/record/page | GET | 获得用户积分记录分页 | point:record:query |
 
-| 错误码 | 说明 |
-|--------|------|
-| 1_004_001_000 | 用户不存在 |
-| 1_004_001_003 | 用户积分余额不足 |
-| 1_004_003_000 | 登录失败，账号密码不正确 |
-| 1_004_006_000 | 用户标签不存在 |
-| 1_004_008_000 | 用户积分记录业务类型不支持 |
-| 1_004_010_000 | 今日已签到，请勿重复签到 |
-| 1_004_011_000 | 用户等级不存在 |
+### 签到规则 (MemberSignInConfigController)
 
-## 9. 详细文档链接
+前缀：`/member/sign-in/config`
 
-- [api-auth.md](api-auth.md) - 会员认证（注册、登录、登出、社交登录）
-- [api-user.md](api-user.md) - 会员用户管理
-- [api-level.md](api-level.md) - 会员等级体系
-- [api-point.md](api-point.md) - 积分系统
-- [api-signin.md](api-signin.md) - 签到系统
-- [api-address.md](api-address.md) - 收货地址管理
-- [api-tag-group.md](api-tag-group.md) - 标签与分组管理
-- [data-model.md](data-model.md) - 数据模型详细设计
-- [pitfalls.md](pitfalls.md) - 常见陷阱与注意事项
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/sign-in/config/create | POST | 创建签到规则 | point:sign-in-config:create |
+| /member/sign-in/config/update | PUT | 更新签到规则 | point:sign-in-config:update |
+| /member/sign-in/config/delete | DELETE | 删除签到规则 | point:sign-in-config:delete |
+| /member/sign-in/config/get | GET | 获得签到规则 | point:sign-in-config:query |
+| /member/sign-in/config/list | GET | 获得签到规则列表 | point:sign-in-config:query |
+
+### 签到记录 (MemberSignInRecordController)
+
+前缀：`/member/sign-in/record`
+
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/sign-in/record/page | GET | 获得签到记录分页 | point:sign-in-record:query |
+
+### 会员标签 (MemberTagController)
+
+前缀：`/member/tag`
+
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /member/tag/create | POST | 创建会员标签 | member:tag:create |
+| /member/tag/update | PUT | 更新会员标签 | member:tag:update |
+| /member/tag/delete | DELETE | 删除会员标签 | member:tag:delete |
+| /member/tag/get | GET | 获得会员标签 | member:tag:query |
+| /member/tag/list-all-simple | GET | 获取会员标签精简信息列表（下拉选项） | 已认证（无 @PreAuthorize） |
+| /member/tag/list | GET | 获得会员标签列表（按 ids） | member:tag:query |
+| /member/tag/page | GET | 获得会员标签分页 | member:tag:query |
+
+## 数据模型
+
+| 表名 | 说明 | 继承基类 | 关键字段 |
+|-----|------|---------|---------|
+| member_user | 会员用户（mobile 唯一索引） | TenantBaseDO | mobile、password、status、point、tagIds（LongListTypeHandler 逗号分隔）、levelId、experience、groupId、areaId |
+| member_address | 用户收件地址 | BaseDO | userId、name、mobile、areaId、detailAddress、defaultStatus |
+| member_config | 会员配置 | BaseDO | pointTradeDeductEnable、pointTradeDeductUnitPrice、pointTradeDeductMaxPrice、pointTradeGivePoint |
+| member_group | 用户分组 | BaseDO | name、remark、status |
+| member_level | 会员等级 | BaseDO | name、level、experience（升级经验）、discountPercent、icon、backgroundUrl、status |
+| member_level_record | 会员等级变更记录 | BaseDO | userId、levelId、level、discountPercent、experience（变动经验）、userExperience、description |
+| member_experience_record | 会员经验变动记录 | BaseDO | userId、bizType（MemberExperienceBizTypeEnum）、bizId、title、experience、totalExperience |
+| member_point_record | 用户积分变动记录 | BaseDO | userId、bizType（MemberPointBizTypeEnum）、bizId、point（正得负耗）、totalPoint |
+| member_sign_in_config | 签到规则（第 x 天奖励） | BaseDO | day、point、experience、status |
+| member_sign_in_record | 签到记录 | BaseDO | userId、day、point、experience |
+| member_tag | 会员标签 | BaseDO | name |
+
+## 依赖关系
+
+- **上游**（本模块依赖）:
+  - 业务模块：yudao-module-system（SmsCodeApi、SocialClientApi、SocialUserApi、LoginLogApi、OAuth2TokenCommonApi、SexEnum）、yudao-module-infra
+  - framework starter：yudao-spring-boot-starter-biz-tenant、yudao-spring-boot-starter-security、yudao-spring-boot-starter-mybatis、yudao-spring-boot-starter-redis、yudao-spring-boot-starter-mq、yudao-spring-boot-starter-excel、yudao-spring-boot-starter-biz-ip（Area 地区）
+- **下游**（依赖本模块）:
+  - yudao-module-mall：yudao-module-product、yudao-module-trade（MemberUserApi/MemberAddressApi/MemberConfigApi/MemberLevelApi/MemberPointApi）、yudao-module-promotion、yudao-module-statistics
+  - yudao-server（服务装配）
+
+## 对外暴露的 API
+
+| API接口 | 方法 | 消费方 |
+|---------|------|-------|
+| MemberUserApi | getUser、getUserList 等 | mall-trade、mall-promotion、mall-statistics |
+| MemberAddressApi | getAddress（下单收货地址） | mall-trade |
+| MemberConfigApi | getMemberConfig（积分抵扣/赠送规则） | mall-trade |
+| MemberLevelApi | getMemberLevel（等级折扣） | mall-trade |
+| MemberPointApi | reducePoint / addPoint（下单抵扣与奖励） | mall-trade |
+| MemberUserCreateMessage（Spring 事件） | 用户注册事件 | mall-promotion（CouponTakeByRegisterConsumer 注册发券） |
+
+## 详细文档
+
+- [api-user.md](api-user.md) - 会员用户
+- [api-address.md](api-address.md) - 收件地址
+- [api-config.md](api-config.md) - 会员配置
+- [api-group.md](api-group.md) - 用户分组
+- [api-level.md](api-level.md) - 会员等级与经验
+- [api-point.md](api-point.md) - 积分记录
+- [api-signin.md](api-signin.md) - 签到
+- [api-tag.md](api-tag.md) - 会员标签
+- [data-model.md](data-model.md) - 数据模型详情
+- [code-patterns.md](code-patterns.md) - 代码模式与扩展指南
+- [pitfalls.md](pitfalls.md) - 注意事项与已知坑点

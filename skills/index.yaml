@@ -1,6 +1,6 @@
 # Skill 索引文件
 # 记录所有模块/规范/模式/模板/使用样例的Skill文档位置和状态
-# 最后更新：2026-09-18（新增 im/mes/wms 模块，补录 patterns/templates/usage 三大区段；patterns 移入 design、api 独立为顶层区段）
+# 最后更新：2026-10-14（模块知识文档并入 docs/：原各模块 Skill YAML 统一迁移为 docs/{m}/code-patterns.md，templates 移至 docs/templates/，全仓引用同步更新；新增 im/mes/wms 模块，补录 patterns/templates/usage 三大区段；patterns 移入 design、api 独立为顶层区段）
 
 # ============================================
 # 业务模块（按优先级排序）
@@ -9,138 +9,138 @@ skills:
   # ---------- 核心模块 (P1) ----------
   system:
     name: "系统管理模块"
-    path: "skills/modules/system/skill-system.yaml"
+    path: "docs/system/code-patterns.md"
     status: "completed"
     priority: 1
-    lines: 839
+    lines: 303
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   infra:
     name: "基础设施模块"
-    path: "skills/modules/infra/skill-infra.yaml"
+    path: "docs/infra/code-patterns.md"
     status: "completed"
     priority: 1
-    lines: 661
+    lines: 291
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   pay:
     name: "支付模块"
-    path: "skills/modules/pay/skill-pay.yaml"
+    path: "docs/pay/code-patterns.md"
     status: "completed"
     priority: 1
-    lines: 653
+    lines: 373
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   # ---------- 主要业务模块 (P2) ----------
   member:
     name: "会员模块"
-    path: "skills/modules/member/skill-member.yaml"
+    path: "docs/member/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 608
+    lines: 249
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   mall:
     name: "商城模块"
-    path: "skills/modules/mall/skill-mall.yaml"
+    path: "docs/mall/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 653
+    lines: 329
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   crm:
     name: "CRM模块"
-    path: "skills/modules/crm/skill-crm.yaml"
+    path: "docs/crm/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 860
+    lines: 313
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   bpm:
     name: "工作流模块"
-    path: "skills/modules/bpm/skill-bpm.yaml"
+    path: "docs/bpm/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 718
+    lines: 429
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   erp:
     name: "ERP模块"
-    path: "skills/modules/erp/skill-erp.yaml"
+    path: "docs/erp/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 967
+    lines: 373
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   mes:
     name: "MES制造执行模块"
-    path: "skills/modules/mes/skill-mes.yaml"
+    path: "docs/mes/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 964
+    lines: 292
     created_at: "2026-06-08"
     updated_at: "2026-06-08"
 
   wms:
     name: "WMS仓储管理模块"
-    path: "skills/modules/wms/skill-wms.yaml"
+    path: "docs/wms/code-patterns.md"
     status: "completed"
     priority: 2
-    lines: 832
+    lines: 373
     created_at: "2026-06-08"
     updated_at: "2026-06-08"
 
   # ---------- 扩展模块 (P3) ----------
   ai:
     name: "AI模块"
-    path: "skills/modules/ai/skill-ai.yaml"
+    path: "docs/ai/code-patterns.md"
     status: "completed"
     priority: 3
-    lines: 705
+    lines: 351
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   iot:
     name: "物联网模块"
-    path: "skills/modules/iot/skill-iot.yaml"
+    path: "docs/iot/code-patterns.md"
     status: "completed"
     priority: 3
-    lines: 721
+    lines: 372
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   mp:
     name: "微信公众号模块"
-    path: "skills/modules/mp/skill-mp.yaml"
+    path: "docs/mp/code-patterns.md"
     status: "completed"
     priority: 3
-    lines: 637
+    lines: 441
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   report:
     name: "报表模块"
-    path: "skills/modules/report/skill-report.yaml"
+    path: "docs/report/code-patterns.md"
     status: "completed"
     priority: 3
-    lines: 344
+    lines: 255
     created_at: "2026-03-18"
     updated_at: "2026-03-18"
 
   im:
     name: "即时通讯模块"
-    path: "skills/modules/im/skill-im.yaml"
+    path: "docs/im/code-patterns.md"
     status: "completed"
     priority: 3
-    lines: 748
+    lines: 277
     created_at: "2026-06-08"
     updated_at: "2026-06-08"
 
@@ -210,13 +210,13 @@ api:
 templates:
   skill:
     name: "Skill 模板"
-    path: "skills/modules/templates/skill-template.yaml"
+    path: "docs/templates/skill-template.yaml"
     status: "completed"
     description: "模块 Skill 提取的标准格式（哲学/架构/数据模型/代码规范/扩展指南）"
     lines: 160
   extraction-prompt:
     name: "提取提示词模板"
-    path: "skills/modules/templates/extraction-prompt.md"
+    path: "docs/templates/extraction-prompt.md"
     status: "completed"
     description: "五阶段提取流程：理念→架构→数据→代码→扩展"
     lines: 138
@@ -288,7 +288,7 @@ usage_auto_reference:
       module_guide:
         prompt: "请指定目标模块"
         mapping:
-          mes: skills/modules/mes/skill-mes.yaml
+          mes: docs/mes/code-patterns.md
     ---
 
 # ============================================
@@ -313,13 +313,13 @@ progress:
     total: 7
     completed: 7
   total_files: 33
-  total_lines: 21626
+  total_lines: 15737
 
 # ============================================
 # 元数据
 # ============================================
 metadata:
   created_at: "2026-03-18"
-  updated_at: "2026-09-18"
+  updated_at: "2026-10-14"
   completed_at: "2026-09-18"
-  notes: "新增 im/mes/wms 模块；补录 patterns/templates/usage 三大区段；行数与进度同步"
+  notes: "模块知识文档并入 docs/：skill-{module}.yaml → docs/{module}/code-patterns.md，templates 移至 docs/templates/；全仓引用路径同步更新"

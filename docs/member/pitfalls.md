@@ -1,217 +1,131 @@
-# Member 模块常见陷阱与注意事项
+# 注意事项与已知坑点
 
-> 开发和维护会员模块时需要注意的常见问题、踩坑点和最佳实践。
+> 使用 member 模块时的常见问题、易踩坑点和最佳实践。
 
-## 1. 积分相关陷阱
+## 1. 多租户相关
 
-### 1.1 积分余额一致性
+### 1.1 仅 member_user 表有租户隔离，其余 10 张表均为全局数据
 
-**问题：** 用户表的 `point` 字段是冗余的实时余额，如果直接操作 Mapper 修改积分而不走 Service 层，会导致余额与积分记录不一致。
+**问题**: 多租户环境下，会员标签、等级、分组、积分记录、签到记录、收件地址等数据全局共享，不随租户隔离；而通过 `MemberUserApi` 查询用户时又会自动带上租户过滤，两类行为不一致容易踩坑。
 
-**正确做法：** 始终通过 `MemberPointRecordService.createPointRecord` 或 `MemberPointApi` 进行积分变更，该方法在同一事务内更新用户余额和写入积分记录。
+**原因**: `cn.iocoder.yudao.module.member.dal.dataobject` 下 11 个 DO 中只有 `MemberUserDO` 继承 `TenantBaseDO`（`member_user` 表有 `tenant_id`），`MemberTagDO`、`MemberLevelDO`、`MemberGroupDO`、`MemberPointRecordDO`、`MemberSignInRecordDO`、`MemberSignInConfigDO`、`MemberLevelRecordDO`、`MemberExperienceRecordDO`、`MemberAddressDO`、`MemberConfigDO` 均继承 `BaseDO`，MyBatis 租户插件不会为这些表拼接 `tenant_id`。
 
-**错误示范：**
+**解决**:
+- 在 member 模块上扩展新表时明确选择：需要租户隔离的 DO 继承 `TenantBaseDO` 并加 `tenant_id` 字段；
+- 在无租户上下文的线程（定时任务、自建线程池）中调用 `MemberUserApi` 前需先设置 `TenantContextHolder`，否则连 `selectById` 都会因租户过滤查不到数据。
+
+## 2. 消息与事务相关
+
+### 2.1 "注册发券"消息是 Spring 事件而非 MQ，且在事务提交后才发布
+
+**问题**: `MemberUserServiceImpl#createUser` 中注释写"发送 MQ 消息：用户创建"，实际是通过 `TransactionSynchronizationManager.registerSynchronization` 的 `afterCommit` 回调，由 `MemberUserProducer#sendUserCreateMessage` 调用 `applicationContext.publishEvent` 发布 `MemberUserCreateMessage`（Spring ApplicationEvent）。消费方是 mall-promotion 模块的 `CouponTakeByRegisterConsumer#onMessage`（`@EventListener + @Async`）。后果：事件无持久化、无重试，应用发布/崩溃窗口内提交的事件直接丢失，注册发券静默失效；若把 member 与 promotion 拆成独立服务部署，事件根本不会送达。
+
+**原因**: `MemberUserCreateMessage` 位于 `member.api.message` 包，走的是进程内 Spring 事件总线；`@Async` 消费的上下文传递依赖 yudao-spring-boot-starter-job 的 `YudaoAsyncAutoConfiguration`（`@EnableAsync` + `executor.setTaskDecorator(TtlRunnable::get)`），`TenantContextHolder` 基于 `TransmittableThreadLocal`。另外 `MemberAuthServiceImpl#smsLogin`/`socialLogin` 标注了 `@Transactional`，整个登录事务（含 `useSmsCode`、`createUserIfAbsent`、`bindSocialUser`、`createAccessToken` 多个跨模块写操作）提交后事件才会发出；事务中途任一步失败，注册整体回滚、事件不发。
+
+**解决**:
+- 单体部署下可用；对发券可靠性有要求时改为本地消息表 + MQ 投递；
+- 自定义异步线程池必须套 `TtlRunnable` 装饰器，否则异步消费丢失租户上下文；
+- "注册后做 X"的扩展逻辑走同一个事件监听，不要塞进 `createUser` 事务内同步执行。
+
+## 3. 积分相关
+
+### 3.1 积分余额不足时静默跳过，调用方无法感知失败
+
+**问题**: `MemberPointRecordServiceImpl#createPointRecord` 中，Java 层预计算 `totalPoint < 0` 时只 `log.error(USER_POINT_NOT_ENOUGH)` 后直接 `return`——不抛异常、不扣积分、不写流水。管理后台"更新积分"（`MemberUserController#updateUserPoint`，`MemberUserUpdatePointReqVO.point` 允许负数）调整负积分遇到余额不足时，接口仍返回 `success(true)` 假成功。类似地，`MemberPointApiImpl#addPoint` 在 bizType 非法时也只 `log.error` 后 `return`，而 `reducePoint` 同场景却抛 `POINT_RECORD_BIZ_NOT_SUPPORT`，加/扣行为不对称。
+
+**原因**: 真正抛 `USER_POINT_NOT_ENOUGH` 的分支只有 `memberUserService.updateUserPoint` 更新行数为 0（用户不存在）这一种；余额不足被实现为"记日志跳过"。
+
+**解决**: 外部调用（如订单积分抵扣 `MemberPointApi#reducePoint`）前自行校验用户余额；或修改 `createPointRecord`，将 `totalPoint < 0` 分支改为抛出 `USER_POINT_NOT_ENOUGH`。
+
+### 3.2 积分扣减非原子，并发下可扣成负数
+
+**问题**: 两个并发扣积分请求可能同时通过余额校验，把 `member_user.point` 扣成负数，且积分流水里的 `totalPoint` 与库中实际值对不上。
+
+**原因**: 余额校验在 Java 层"先读后算"（`getUser` 取 `point` 再加变动值），而 `MemberUserMapper#updatePointDecr` 的 SQL 是 `point = point + 负数`，没有 `point + ? >= 0` 的条件保护；`updatePointIncr`/`updatePointDecr` 均用 `setSql(" point = point + " + incrCount)` 字符串拼接，入参必须保证是 `Integer`。
+
+**解决**: 给扣减语句加余额条件并以更新行数判断成败，例如：
+
 ```java
-// 错误：直接更新用户积分，没有记录
-memberUserMapper.updateById(new MemberUserDO().setId(userId).setPoint(100));
+LambdaUpdateWrapper<MemberUserDO> wrapper = new LambdaUpdateWrapper<MemberUserDO>()
+        .setSql(" point = point + " + incrCount)
+        .eq(MemberUserDO::getId, id)
+        .apply("point + {0} >= 0", incrCount);
 ```
 
-**正确示范：**
-```java
-// 正确：通过 Service 层变更，自动维护记录
-memberPointRecordService.createPointRecord(userId, 10,
-    MemberPointBizTypeEnum.ADMIN, bizId);
-```
+## 4. 签到相关
 
-### 1.2 积分扣减校验
+### 4.1 未配置签到规则时，签到接口直接 NPE（HTTP 500）
 
-**问题：** 积分扣减时未校验余额，导致积分变成负数。
+**问题**: 只要"签到规则"中没有启用状态的配置，App 端调用签到（`MemberSignInRecordServiceImpl#createSignRecord`）就抛空指针，返回 500 而非友好提示。
 
-**正确做法：** Service 层会在事务内校验 `totalPoint >= 0`，不满足则抛出 `USER_POINT_NOT_ENOUGH` 异常。
+**原因**: `MemberSignInRecordConvert#convert` 中 `CollUtil.getLast(configs)` 在配置列表为空时返回 `null`，随后 `day > lastConfig.getDay()` 直接 NPE；`createSignRecord` 里 `getSignInConfigList(CommonStatusEnum.ENABLE.getStatus())` 查不到启用配置时列表为空。
 
-### 1.3 积分业务类型扩展
+**解决**: 开启签到功能前必须先配置启用状态的签到规则（连续签到奖励按 `day` 匹配）；或对 `lastConfig` 判空，返回"签到规则未配置"的业务异常。
 
-**问题：** 新增积分来源时忘记在枚举中定义，导致记录不规范。
+### 4.2 重复签到校验无并发保护，可重复领积分经验
 
-**正确做法：**
-1. 先在 `MemberPointBizTypeEnum` 中添加新的枚举值
-2. 确保 type 值唯一
-3. 设置正确的 add 标志（增加/减少）
+**问题**: 并发/双击签到可能插入两条签到记录，积分与经验双发。
 
-### 1.4 积分抵扣计算
+**原因**: `createSignRecord` 靠"查最后一条记录（`selectLastRecordByUserId`）+ `DateUtils.isToday` 校验"防重，`member_signin_record` 无 `(user_id, 签到日期)` 唯一约束，查与插之间无原子性。连续天数同样依赖这条记录：上一条记录是昨天签的才 `day + 1`，否则重置为 1；超过最大配置天数（`CollUtil.getLast(configs)`）后从第 1 天开启新一轮。
 
-**问题：** 积分抵扣金额计算时单位混淆（元 vs 分）。
+**解决**: 对幂等要求高时加表级唯一约束兜底，或用分布式锁保证一人一天一条。
 
-**注意：**
-- `point_trade_deduct_unit_price` 的单位是 **分**（1 积分 = N 分钱）
-- `point_trade_deduct_max_price` 的单位也是 **分**
-- 订单金额通常也是 **分**
-- 计算公式：`可抵扣金额(分) = min(用户积分 * unit_price, 订单金额, max_price)`
+## 5. 等级与经验相关
 
-## 2. 等级相关陷阱
+### 5.1 member_user.level_id 用 0 表示"无等级"
 
-### 2.1 等级配置校验
+**问题**: 按等级筛选、回显或自定义导出时，把"无等级"当成 `NULL` 处理会查不到数据或显示异常。
 
-**问题：** 等级配置的 level 值或 experience 值不递增，导致等级计算异常。
+**原因**: `MemberUserServiceImpl#updateUserLevel` 中 `levelId = ObjectUtil.defaultIfNull(levelId, 0L)`，注释明确"0 代表无等级：防止 UpdateById 时，会被过滤掉的问题"。库中 `level_id = 0` 而非 `NULL`；`MemberLevelServiceImpl#getLevel` 对 `id <= 0` 返回 `null`，`MemberUserController#getUser` 因此能正常跳过等级名回显，但自己的查询代码需要同样处理。
 
-**正确做法：**
-- level 值必须严格递增（如 1, 2, 3, 4）
-- experience 值必须严格递增（如 0, 1000, 5000, 20000）
-- 系统应自动校验配置合理性
+**解决**: 查询"无等级"用户用 `level_id = 0`；关联等级时对 `0/null` 统一判空。
 
-### 2.2 经验变更与等级计算
+### 5.2 经验变更链路存在多处"静默"行为，等级变更无通知
 
-**问题：** 手动修改用户经验后忘记触发等级重新计算。
+**问题**:
+- `MemberLevelServiceImpl#addExperience` 不校验用户存在，`getUser(userId)` 为 `null` 时 `user.getExperience()` 直接 NPE（对比 `updateUserLevel` 有 `USER_NOT_EXISTS` 校验）；
+- `calculateNewLevel` 在等级配置为空/全部禁用、或经验低于所有启用等级阈值时，仅 `log.warn("计算会员等级失败...")` 返回 `null`——扣经验并不保证降级，等级保持原值；
+- `notifyMemberLevelChange` 是空方法（`//todo: 给会员发消息`），等级升降没有任何通知或扩展钩子。
 
-**正确做法：** 经验变更应通过 `MemberLevelApi.addExperience` / `reduceExperience`，该方法会自动触发等级重新计算。
+**原因**: 经验变动统一入口 `addExperience`（管理员调整入口 `updateUserLevel`）在同一事务内写经验记录（`MemberExperienceRecordService#createExperienceRecord`）、等级记录（`MemberLevelRecordService#createLevelRecord`）并更新 `member_user`，等级匹配基于 `getEnableLevelList()`（仅启用状态等级）。
 
-### 2.3 等级记录冗余字段
+**解决**: 变更经验必须走 `MemberLevelService#addExperience` / `updateUserLevel`，不要直接 update `member_user.experience`（否则记录缺失、等级不联动）；需要等级变更通知时在 `notifyMemberLevelChange` 中补实现。
 
-**问题：** member_level_record 中的 level、discount_percent、experience 是冗余字段，如果等级配置被修改，历史记录中的值不会变。
+## 6. 权限与接口相关
 
-**说明：** 这是设计意图，等级记录保存的是变更时刻的快照，不是当前配置值。
+### 6.1 权限标识与接口元数据三处不一致
 
-## 3. 签到相关陷阱
+**问题**: 配菜单权限、看 Swagger 文档时容易对不上号：
+- 权限前缀不统一：用户/等级/标签/分组/配置用 `member:*`（如 `member:user:query`、`member:level-record:query`），而积分与签到相关用 `point:*`（`point:record:query`、`point:sign-in-config:create`、`point:sign-in-record:query`）；`AddressController` 查地址复用的还是 `member:user:query`；
+- `MemberPointRecordController` 的 `@Tag(name = "管理后台 - 签到记录")` 实为积分记录，且与 `MemberSignInRecordController` 的 `@Tag` 完全同名，文档中两组接口混在一起；
+- `MemberLevelController`、`MemberGroupController`、`MemberTagController` 的 `/list-all-simple` 精简下拉接口没有 `@PreAuthorize`，仅登录即可访问全部等级/分组/标签数据。
 
-### 3.1 重复签到
+**原因**: point/sign-in 相关 Controller 沿用了早期 `point:` 前缀未迁移；`@Tag` 复制粘贴未改；下拉接口按"登录即可"约定省略了权限注解。
 
-**问题：** 用户同一天多次签到导致重复发放奖励。
+**解决**: 配置菜单权限字符必须按代码中实际字符串（`point:sign-in-config:*` 等），不能全按 `member:` 前缀猜；下拉数据如敏感需自行补权限注解；新接口避免照抄 `@Tag`。
 
-**正确做法：**
-- 使用日期 + 用户 ID 唯一约束防止重复
-- Service 层校验今日是否已签到，抛出 `1_004_010_000` 异常
+## 7. 错误码与数据模型相关
 
-### 3.2 连续签到中断计算
+### 7.1 错误码段 1_004_XXX_XXX：AUTH 段跳号，validateUser 抛错语义错位
 
-**问题：** 连续签到天数计算逻辑有误，中断后未正确重置。
+**问题**: 新增错误码按"连续编号"假设分配可能与保留号冲突；跨模块校验用户时报错文案误导排查。
 
-**正确做法：**
-- 检查昨天是否有签到记录
-- 如果昨天签到了，连续天数 +1
-- 如果昨天未签到，连续天数重置为 1
+**原因**: `ErrorCodeConstants` 使用 1_004 段，AUTH 段已跳号（1_004_003_002~004、1_004_003_006 缺失）；`MemberUserApiImpl#validateUser` 按 **id** 校验用户存在性，失败时抛的却是 `USER_MOBILE_NOT_EXISTS`（"手机号未注册用户"），mall-* 模块调用方看到的错误与实际校验方式不符。
 
-### 3.3 签到配置天数超出
+**解决**: 新增错误码前先核对现有段占用，避开跳号；知晓 `MemberUserApi#validateUser` 的报错语义即"用户不存在"类，必要时调用方自行包装错误信息。
 
-**问题：** 连续签到天数超过配置的最大天数时程序异常。
+### 7.2 tagIds 逗号分隔存储，FIND_IN_SET 查询无法走索引
 
-**正确做法：** 超过最大配置天数时，使用最后一条配置的奖励值。
+**问题**: 用户量大时，管理后台按标签筛选用户（`MemberUserMapper#selectPage` 的 `tagIds` 条件）、统计标签下用户数（`selectCountByTagId`，标签删除校验 `TAG_HAS_USER` 也走它）都是全表扫描。
 
-## 4. 地址相关陷阱
+**原因**: `MemberUserDO#tagIds` 用 `LongListTypeHandler` 以逗号分隔字符串存 `List<Long>`，查询用 `FIND_IN_SET`（`MyBatisUtils#findInSet`/`findInSetWithParamIndex`），无法命中索引；DO 依赖 `@TableName(value = "member_user", autoResultMap = true)` 才能在查询时正确反序列化为 `List<Long>`。
 
-### 4.1 默认地址逻辑
+**解决**: 数据规模大时改为关联表方案；自定义 XML 查询 `tag_ids` 字段时记得指定 `typeHandler`，否则查出的是逗号分隔字符串。
 
-**问题：** 设置新默认地址时忘记取消旧默认地址，导致多个默认地址。
+### 7.3 member_config 单行配置表无并发保护
 
-**正确做法：**
-- 设置默认地址时，先将该用户所有地址的 `default_status` 设为 false
-- 再将目标地址的 `default_status` 设为 true
-- 以上操作在同一事务中完成
+**问题**: 表为空时并发调用"保存会员设置"（`MemberConfigController` → `MemberConfigServiceImpl#saveConfig`）可能插入多条配置记录。
 
-### 4.2 删除默认地址
+**原因**: `saveConfig` 是"先 `getConfig()` 查、无则 insert"的模式，`getConfig()` 取 `selectList()` 第一条（`CollectionUtils.getFirst`），无唯一约束兜底；一旦产生多条，之后永远只有第一条生效。
 
-**问题：** 删除默认地址后没有新的默认地址，下单时找不到默认地址。
-
-**正确做法：** 删除默认地址时，自动将最近创建的其他地址设为默认。
-
-### 4.3 地址删除与订单关联
-
-**问题：** 已有订单关联的地址被删除，导致订单详情无法显示地址。
-
-**注意：** 地址删除应考虑是否有未完成订单引用，或者订单表应冗余地址快照。
-
-## 5. 标签与分组陷阱
-
-### 5.1 标签 JSON 存储
-
-**问题：** 用户标签以 JSON 数组存储在 `member_user.tag_ids` 中，无法直接通过 SQL 关联查询。
-
-**正确做法：**
-- 查询某标签下所有用户时，需要使用 JSON 函数或应用层过滤
-- 标签 ID 列表的读写需要使用框架的 JSON 类型处理
-
-### 5.2 标签/分组删除
-
-**问题：** 删除标签/分组后，用户表中仍引用已删除的 ID。
-
-**正确做法：**
-- 删除前检查是否有用户引用
-- 或者删除时同步清理用户表中的关联数据
-
-## 6. 跨模块调用陷阱
-
-### 6.1 API 层与 Service 层区分
-
-**问题：** 在模块内部直接调用其他模块的 API 实现类，而不是接口。
-
-**正确做法：**
-- 模块间调用通过 `api` 包下的接口
-- 模块内调用通过 `service` 包下的接口
-- API 实现类（`*ApiImpl`）是 Facade，不应在业务代码中直接使用
-
-### 6.2 MQ 消息可靠性
-
-**问题：** 用户创建后发送 MQ 消息失败，导致其他模块未收到通知。
-
-**正确做法：**
-- 使用事务消息或本地消息表保证消息可靠性
-- 消费方需要做好幂等处理
-
-### 6.3 循环依赖
-
-**问题：** Member 模块依赖 system 模块的 SmsCodeApi，如果 system 模块反过来依赖 member 模块，会形成循环依赖。
-
-**注意：** 模块间的依赖关系应保持单向，避免循环依赖。
-
-## 7. 数据库相关陷阱
-
-### 7.1 多租户隔离
-
-**问题：** MemberUserDO 继承 TenantBaseDO，查询时需要携带 tenant_id 条件，否则会查到其他租户的数据。
-
-**正确做法：** 框架会自动注入 tenant_id 条件，但自定义 SQL 时需要注意手动添加。
-
-### 7.2 批量操作性能
-
-**问题：** 批量查询用户积分记录时未分页，数据量大导致 OOM。
-
-**正确做法：** 使用分页查询，避免一次性加载过多数据。
-
-### 7.3 索引使用
-
-**问题：** 按手机号查询用户是最常见的操作，需要确保 `uk_mobile` 索引存在。
-
-**注意：** member_user 表的 mobile 字段有唯一索引，确保查询性能。
-
-## 8. 安全相关陷阱
-
-### 8.1 密码安全
-
-**问题：** 密码使用弱加密算法或明文存储。
-
-**正确做法：** 使用 `BCryptPasswordEncoder` 加密，不可逆。
-
-### 8.2 接口权限
-
-**问题：** 管理后台接口忘记添加 `@PreAuthorize` 注解，导致未授权访问。
-
-**正确做法：** 所有管理后台接口必须添加权限控制注解，C 端接口需要验证登录态。
-
-### 8.3 短信验证码
-
-**问题：** 登录/注册接口的短信验证码校验被绕过。
-
-**正确做法：** 验证码校验应在 Service 层完成，不能仅在 Controller 层校验。
-
-## 9. 最佳实践总结
-
-| 场景 | 推荐做法 |
-|------|----------|
-| 积分变更 | 使用 `MemberPointApi`，保证记录完整性 |
-| 经验变更 | 使用 `MemberLevelApi`，自动触发等级计算 |
-| 用户创建 | 发送 MQ 消息，便于其他模块处理 |
-| 等级配置 | 确保 level 和 experience 递增，系统自动校验 |
-| 积分抵扣 | 通过 `MemberConfigApi` 获取配置，支持动态调整 |
-| 签到规则 | 支持连续签到奖励递增，注意防重复签到 |
-| 地址管理 | 支持多地址，处理默认地址切换逻辑 |
-| 标签管理 | JSON 存储，注意查询方式限制 |
-| 错误处理 | 使用统一错误码前缀 `1_004_XXX_XXX` |
+**解决**: 给 `member_config` 加单行约束（固定主键 + `INSERT ... ON DUPLICATE KEY UPDATE`），或保存时加分布式锁。

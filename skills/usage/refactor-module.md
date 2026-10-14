@@ -12,18 +12,18 @@ references:
   module_guide:
     prompt: "请指定要改造的模块，AI 将加载对应模块的 skill 文档"
     mapping:
-      system: skills/modules/system/skill-system.yaml
-      infra: skills/modules/infra/skill-infra.yaml
-      pay: skills/modules/pay/skill-pay.yaml
-      member: skills/modules/member/skill-member.yaml
-      mall: skills/modules/mall/skill-mall.yaml
-      crm: skills/modules/crm/skill-crm.yaml
-      erp: skills/modules/erp/skill-erp.yaml
-      bpm: skills/modules/bpm/skill-bpm.yaml
-      ai: skills/modules/ai/skill-ai.yaml
-      iot: skills/modules/iot/skill-iot.yaml
-      mp: skills/modules/mp/skill-mp.yaml
-      report: skills/modules/report/skill-report.yaml
+      system: docs/system/code-patterns.md
+      infra: docs/infra/code-patterns.md
+      pay: docs/pay/code-patterns.md
+      member: docs/member/code-patterns.md
+      mall: docs/mall/code-patterns.md
+      crm: docs/crm/code-patterns.md
+      erp: docs/erp/code-patterns.md
+      bpm: docs/bpm/code-patterns.md
+      ai: docs/ai/code-patterns.md
+      iot: docs/iot/code-patterns.md
+      mp: docs/mp/code-patterns.md
+      report: docs/report/code-patterns.md
   patterns:
     - path: skills/design/patterns/strategy-pattern.yaml
       reason: "策略模式 - 重构时可引入策略模式解耦"
@@ -144,7 +144,7 @@ references:
 
 ## 目标模块
 模块名称：{模块名}
-Skill 文档位置：skills/modules/{模块}/skill-{模块}.yaml
+Skill 文档位置：docs/{模块}/code-patterns.md
 
 ## 改造需求
 {详细描述改造需求，包括：}
@@ -528,7 +528,7 @@ change_list:
 
 ## 目标模块
 模块名称：pay
-Skill 文档位置：skills/modules/pay/skill-pay.yaml
+Skill 文档位置：docs/pay/code-patterns.md
 
 ## 改造需求
 当前支付模块作为单体应用的一部分运行，需要拆分为独立的微服务，以实现：
@@ -694,7 +694,7 @@ analysis:
 
 ## 目标模块
 模块名称：system
-Skill 文档位置：skills/modules/system/skill-system.yaml
+Skill 文档位置：docs/system/code-patterns.md
 
 ## 改造需求
 当前用户列表查询接口响应慢（平均 2s+），需要优化：
@@ -869,7 +869,7 @@ performance_optimization:
 
 ## 目标模块
 模块名称：pay
-Skill 文档位置：skills/modules/pay/skill-pay.yaml
+Skill 文档位置：docs/pay/code-patterns.md
 
 ## 改造需求
 当前支付模块不支持多租户，需要改造以支持：
@@ -1275,16 +1275,16 @@ SELECT COUNT(*) AS total_count FROM xxx_table;
 
 ### 相关文档
 
-- [模块 Skill 文档位置](../modules/)
+- [模块代码模式文档](../../docs/)
 - [设计模式文档](../design/patterns/)
-- [Skill 模板](../templates/)
+- [Skill 模板](../../docs/templates/)
 - [Skill 索引](../index.yaml)
 
 ### 参考命令
 
 ```bash
 # 查看 Skill 文档
-cat skills/modules/{module}/skill-{module}.yaml
+cat docs/{module}/code-patterns.md
 
 # 查看设计模式文档
 cat skills/design/patterns/{pattern}-pattern.yaml

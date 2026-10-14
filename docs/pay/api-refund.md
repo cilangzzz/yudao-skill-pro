@@ -1,150 +1,164 @@
-# 退款 API 详解
+# 退款订单接口 (PayRefundController)
 
-> 业务域：退款发起、退款回调、退款状态同步。
+> 提供管理后台对支付退款单的查询、分页与 Excel 导出能力；退款单的创建（发起退款）由业务侧通过 `PayRefundApi` 触发，退款结果由渠道回调异步更新。
 
-## 核心领域模型
+## 接口路径前缀
 
-**聚合根**：`PayRefund`
+/pay/refund  (Controller: PayRefundController)
 
-- 管理退款单完整生命周期
-- 一个支付订单（`PayOrder`）可以有多个退款单
+## 1. 退款订单查询与导出
 
-**状态机**：
+### 1.1 获得退款订单
 
-```
-WAITING (待退款) --退款成功--> SUCCESS (退款成功)
-WAITING (待退款) --退款失败--> FAILURE (退款失败)
-```
+- **路径**: GET /pay/refund/get
+- **权限**: pay:refund:query
+- **说明**: 按编号获得退款单详情，并拼接应用名称、支付订单商品标题等信息。
 
-**业务不变量**：
-- 退款金额累计不能超过原支付金额
-- 退款单关联的支付订单必须处于 SUCCESS 状态
+**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|---|---|---|---|---|
+| id | Long | 是 | @RequestParam(required = true) | 退款单编号 |
 
-## 模块间 API
-
-### PayRefundApi
-
-供其他模块（订单模块）调用的内部接口。
-
-| 方法 | 参数 | 返回值 | 说明 |
-|------|------|--------|------|
-| `createRefund` | `PayRefundCreateReqDTO` | `Long` (退款ID) | 创建退款单 |
-| `getRefund` | `Long id` | `PayRefundDO` | 查询退款单 |
-
-**PayRefundCreateReqDTO 字段**：
+**响应**: CommonResult&lt;PayRefundDetailsRespVO&gt;
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| `appKey` | `String` | 应用标识 |
-| `merchantRefundId` | `String` | 商户退款号（业务侧唯一） |
-| `payOrderId` | `Long` | 关联的支付订单 ID |
-| `refundPrice` | `Integer` | 退款金额（分） |
-| `reason` | `String` | 退款原因 |
+|---|---|---|
+| id | Long | 支付退款编号 |
+| no | String | 外部退款号（退款单号） |
+| appId | Long | 应用编号 |
+| appName | String | 应用名称 |
+| channelId | Long | 渠道编号 |
+| channelCode | String | 渠道编码 |
+| orderId | Long | 支付订单编号 |
+| merchantOrderId | String | 商户订单编号 |
+| merchantRefundId | String | 商户退款订单号 |
+| notifyUrl | String | 异步通知地址 |
+| status | Integer | 退款状态（0-未退款/等待 1-成功 2-失败，见 PayRefundStatusEnum） |
+| payPrice | Long | 支付金额（单位分） |
+| refundPrice | Long | 退款金额（单位分） |
+| reason | String | 退款原因 |
+| userIp | String | 用户 IP |
+| channelOrderNo | String | 渠道订单号 |
+| channelRefundNo | String | 渠道退款单号 |
+| successTime | LocalDateTime | 退款成功时间 |
+| channelErrorCode | String | 调用渠道的错误码 |
+| channelErrorMsg | String | 调用渠道的错误提示 |
+| channelNotifyData | String | 支付渠道的额外参数 |
+| order.subject | String | 支付订单商品标题（嵌套 Order 对象） |
+| createTime | LocalDateTime | 创建时间 |
+| updateTime | LocalDateTime | 更新时间 |
 
-### Service 层
+**业务逻辑**: 1. 按 id 查询退款单 PayRefundDO，不存在则返回空对象 PayRefundDetailsRespVO；2. 根据退款单的 appId 查询支付应用 PayAppDO；3. 通过 PayRefundConvert 将退款单与应用信息拼接为 PayRefundDetailsRespVO（含应用名称、订单商品标题）返回。
 
-#### PayRefundService
+### 1.2 获得退款订单分页
 
-| 方法 | 说明 |
-|------|------|
-| `createRefund(PayRefundCreateReqDTO)` | 创建退款单，校验退款金额 |
-| `notifyRefund(PayRefundNotifyReqDTO)` | 处理退款异步回调 |
+- **路径**: GET /pay/refund/page
+- **权限**: pay:refund:query
+- **说明**: 分页查询退款单列表，并批量拼接应用名称。
 
-**createRefund 流程**：
+**请求参数 (PayRefundPageReqVO)**: | 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|---|---|---|---|---|
+| appId | Long | 否 | 无 | 应用编号 |
+| channelCode | String | 否 | 无 | 渠道编码 |
+| merchantOrderId | String | 否 | 无 | 商户支付单号 |
+| merchantRefundId | String | 否 | 无 | 商户退款单号 |
+| channelOrderNo | String | 否 | 无 | 渠道支付单号 |
+| channelRefundNo | String | 否 | 无 | 渠道退款单号 |
+| status | Integer | 否 | 无 | 退款状态 |
+| createTime | LocalDateTime[] | 否 | @DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 创建时间范围（起止区间） |
+| pageNo | Integer | 是 | @NotNull + @Min(1)（继承 PageParam） | 页码，从 1 开始，默认 1 |
+| pageSize | Integer | 是 | @NotNull + @Min(1) + @Max(200)（继承 PageParam） | 每页条数，默认 10 |
 
-```
-1. 校验 PayApp 存在且有效
-2. 查询 PayOrder，校验状态为 SUCCESS
-3. 校验退款金额：累计退款金额 <= 支付金额
-   错误码：1_007_006_000（退款金额超过订单可退款金额）
-4. 创建 PayRefundDO，状态设为 WAITING
-5. 获取 PayClient，调用 unifiedRefund() 发起退款
-6. 更新 PayOrder 的 refund_price 累计值
-7. 返回 refundId
-```
-
-**notifyRefund 流程**：
-
-```
-1. 验签（使用渠道提供的验签方法）
-2. 解析回调数据，确定退款成功或失败
-3. 更新 PayRefundDO 状态
-4. 如果退款成功，更新 PayOrder 的 refund_price
-5. 创建 PayNotifyTask 通知业务模块
-```
-
-## HTTP 接口
-
-### PayRefundController
-
-路径前缀：`/pay/refund`
-
-| 接口 | 方法 | 路径 | 权限 | 说明 |
-|------|------|------|------|------|
-| 发起退款 | POST | `/create` | 需要权限 | 创建退款单 |
-| 查询退款 | GET | `/get` | 需要权限 | 查询退款详情 |
-| 分页查询 | GET | `/page` | 需要权限 | 分页查询退款列表 |
-
-## 数据表
-
-### pay_refund
+**响应**: CommonResult&lt;PageResult&lt;PayRefundPageItemRespVO&gt;&gt;，列表项字段如下：
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | `Long` | 退款编号（主键） |
-| `no` | `String` | 外部退款号 |
-| `app_id` | `Long` | 应用编号 |
-| `channel_id` | `Long` | 渠道编号 |
-| `order_id` | `Long` | 支付订单编号（关联 pay_order） |
-| `order_no` | `String` | 支付订单号 |
-| `merchant_order_id` | `String` | 商户订单号 |
-| `merchant_refund_id` | `String` | 商户退款号 |
-| `pay_price` | `Integer` | 原支付金额（分） |
-| `refund_price` | `Integer` | 退款金额（分） |
-| `status` | `Integer` | 退款状态：0待退款 / 1成功 / 2失败 |
-| `reason` | `String` | 退款原因 |
-| `channel_refund_no` | `String` | 渠道退款单号 |
-| `success_time` | `LocalDateTime` | 退款成功时间 |
+|---|---|---|
+| id | Long | 支付退款编号 |
+| no | String | 外部退款号（退款单号） |
+| appId | Long | 应用编号 |
+| appName | String | 应用名称 |
+| channelId | Long | 渠道编号 |
+| channelCode | String | 渠道编码 |
+| orderId | Long | 支付订单编号 |
+| merchantOrderId | String | 商户订单编号 |
+| merchantRefundId | String | 商户退款订单号 |
+| notifyUrl | String | 异步通知地址 |
+| status | Integer | 退款状态 |
+| payPrice | Long | 支付金额（单位分） |
+| refundPrice | Long | 退款金额（单位分） |
+| reason | String | 退款原因 |
+| userIp | String | 用户 IP |
+| channelOrderNo | String | 渠道订单号 |
+| channelRefundNo | String | 渠道退款单号 |
+| successTime | LocalDateTime | 退款成功时间 |
+| channelErrorCode | String | 调用渠道的错误码 |
+| channelErrorMsg | String | 调用渠道的错误提示 |
+| channelNotifyData | String | 支付渠道的额外参数 |
+| createTime | LocalDateTime | 创建时间 |
 
-**与 pay_order 的关系**：`order_id` 外键关联，1:N（一个支付订单可多次部分退款）。
+（字段继承自 PayRefundBaseVO）
 
-## 代码示例
+**业务逻辑**: 1. 按 PayRefundPageReqVO 条件分页查询退款单；2. 结果为空时直接返回仅含 total 的空分页；3. 收集分页结果中的 appId 集合，批量查询应用得到 appMap；4. 通过 PayRefundConvert.convertPage 将退款单与应用信息拼接为 PayRefundPageItemRespVO 分页返回。
 
-### 业务模块调用退款 API
+### 1.3 导出退款订单 Excel
 
-```java
-// 在订单模块中调用
-Long refundId = payRefundApi.createRefund(new PayRefundCreateReqDTO()
-        .setAppKey("trade")
-        .setMerchantRefundId("REF_" + order.getOrderNo())
-        .setPayOrderId(order.getPayOrderId())
-        .setRefundPrice(refundAmount)
-        .setReason("用户申请退款"));
-```
+- **路径**: GET /pay/refund/export-excel
+- **权限**: pay:refund:export（操作日志类型为 EXPORT）
+- **说明**: 按与分页相同的筛选条件查询全部退款单，导出为 Excel 文件。
 
-### Service 层发起退款
+**请求参数 (PayRefundExportReqVO)**: | 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|---|---|---|---|---|
+| appId | Long | 否 | 无 | 应用编号 |
+| channelCode | String | 否 | 无 | 渠道编码 |
+| merchantOrderId | String | 否 | 无 | 商户支付单号 |
+| merchantRefundId | String | 否 | 无 | 商户退款单号 |
+| channelOrderNo | String | 否 | 无 | 渠道支付单号 |
+| channelRefundNo | String | 否 | 无 | 渠道退款单号 |
+| status | Integer | 否 | 无 | 退款状态 |
+| createTime | LocalDateTime[] | 否 | @DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 创建时间范围（起止区间） |
 
-```java
-// 1. 获取支付客户端
-PayClient client = channelService.getPayClient(channelId);
+（参数与 PayRefundPageReqVO 一致，但不含分页参数）
 
-// 2. 构建退款请求
-PayRefundUnifiedReqDTO reqDTO = new PayRefundUnifiedReqDTO()
-        .setOutTradeNo(order.getNo())
-        .setOutRefundNo(refund.getNo())
-        .setRefundPrice(refund.getRefundPrice())
-        .setReason(refund.getReason());
+**响应**: 无 CommonResult 包装，直接向 HttpServletResponse 写出 Excel 文件（文件名「退款订单.xls」，sheet「数据」）。列结构（PayRefundExcelVO）：
 
-// 3. 调用退款接口
-PayRefundRespDTO respDTO = client.unifiedRefund(reqDTO);
-```
+| 列名 | 类型 | 说明 |
+|---|---|---|
+| 支付退款编号 | Long | id |
+| 创建时间 | LocalDateTime | createTime |
+| 支付金额 | Integer | payPrice，经 MoneyConvert 分转元 |
+| 退款金额 | Integer | refundPrice，经 MoneyConvert 分转元 |
+| 商户退款单号 | String | merchantRefundId |
+| 退款单号 | String | no |
+| 渠道退款单号 | String | channelRefundNo |
+| 商户支付单号 | String | merchantOrderId |
+| 渠道支付单号 | String | channelOrderNo |
+| 退款状态 | Integer | status，经 DictConvert 按字典 pay_refund_status 转换 |
+| 退款渠道 | String | channelCode，经 DictConvert 按字典 pay_channel_code 转换 |
+| 成功时间 | LocalDateTime | successTime |
+| 支付应用 | String | appName |
+| 退款原因 | String | reason |
 
-## 关键设计要点
+**业务逻辑**: 1. 按 PayRefundExportReqVO 条件查询全部满足条件的退款单列表；2. 收集列表中的 appId 集合，批量查询应用得到 appMap；3. 通过 PayRefundConvert.convertList 将退款单与应用信息拼接为 PayRefundExcelVO 列表（金额分转元、状态/渠道转字典标签）；4. 通过 ExcelUtils.write 将列表写出为「退款订单.xls」文件流返回。
 
-1. **退款金额校验**：在 Service 层做累计校验，防止并发退款导致超额退款。校验逻辑：`已退款金额 + 本次退款金额 <= 支付金额`。
+## 2. 补充：退款单核心业务流程（非 admin 端点，来自 PayRefundServiceImpl）
 
-2. **乐观锁更新**：PayOrder 的 `refund_price` 更新使用 `updateByIdAndStatus` 保证并发安全。
+退款单的管理端点均为只读查询；退款单的产生与状态流转在 Service 内部完成，流程如下：
 
-3. **退款回调验签**：必须使用渠道提供的验签方法验证回调来源合法性。
+1. **发起退款 createRefund**（由业务方通过 PayRefundApi 调用）：校验 App（validPayApp）→ 校验支付订单可退款（订单必须存在、状态为已支付或已退款、累计退款金额不超订单金额、无进行中的退款单）→ 校验支付渠道有效并获取 PayClient → 校验同一 merchantRefundId 的退款单不存在 → 生成退款单号（Redis 前缀序号）插入状态为「等待」的退款单 → 调用渠道 unifiedRefund 发起退款（渠道调用异常仅记录日志不抛出，结果由回调或轮询补偿获得）→ 处理渠道返回结果 notifyRefund。
+2. **退款结果通知 notifyRefund**：校验渠道有效性后按渠道租户上下文更新退款单；成功则更新退款单为「成功」（记录成功时间、渠道退款单号、渠道通知原文），并更新支付订单已退款金额、插入退款通知任务（PayNotifyTypeEnum.REFUND）；失败则更新退款单为「失败」（记录渠道错误码/错误信息），同样插入退款通知任务。更新采用乐观锁（updateByIdAndStatus，仅允许从「等待」状态变更，重复通知幂等返回）。
+3. **退款状态轮询补偿 syncRefund**：定时任务查询指定创建时间内仍处于「等待」状态的退款单，逐个通过渠道 PayClient.getRefund 查询渠道侧结果，并复用 notifyRefund 更新状态，返回同步成功的条数。
 
-4. **通知业务模块**：退款成功后通过 `PayNotifyTask` 异步通知业务模块，支持重试。
+**错误码**: 该域相关错误码（pay 模块 1-007-000-000 段，主要在退款创建与回调流程中抛出）：
+
+| 错误码 | 说明 |
+|---|---|
+| 1_007_000_000 | App 不存在 |
+| 1_007_000_002 | App 已经被禁用 |
+| 1_007_001_000 | 支付渠道的配置不存在 |
+| 1_007_001_001 | 支付渠道已经禁用 |
+| 1_007_002_000 | 支付订单不存在 |
+| 1_007_002_005 | 支付订单退款失败，原因：状态不是已支付或已退款 |
+| 1_007_006_000 | 退款金额超过订单可退款金额 |
+| 1_007_006_002 | 已经有退款在处理中 |
+| 1_007_006_003 | 已经存在退款单 |
+| 1_007_006_004 | 支付退款单不存在 |
+| 1_007_006_005 | 支付退款单不处于待退款 |

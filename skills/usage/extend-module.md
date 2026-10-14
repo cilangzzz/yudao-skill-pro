@@ -10,18 +10,18 @@ references:
   module_guide:
     prompt: "请指定要扩展的模块，AI 将加载对应模块的 skill 文档"
     mapping:
-      system: skills/modules/system/skill-system.yaml
-      infra: skills/modules/infra/skill-infra.yaml
-      pay: skills/modules/pay/skill-pay.yaml
-      member: skills/modules/member/skill-member.yaml
-      mall: skills/modules/mall/skill-mall.yaml
-      crm: skills/modules/crm/skill-crm.yaml
-      erp: skills/modules/erp/skill-erp.yaml
-      bpm: skills/modules/bpm/skill-bpm.yaml
-      ai: skills/modules/ai/skill-ai.yaml
-      iot: skills/modules/iot/skill-iot.yaml
-      mp: skills/modules/mp/skill-mp.yaml
-      report: skills/modules/report/skill-report.yaml
+      system: docs/system/code-patterns.md
+      infra: docs/infra/code-patterns.md
+      pay: docs/pay/code-patterns.md
+      member: docs/member/code-patterns.md
+      mall: docs/mall/code-patterns.md
+      crm: docs/crm/code-patterns.md
+      erp: docs/erp/code-patterns.md
+      bpm: docs/bpm/code-patterns.md
+      ai: docs/ai/code-patterns.md
+      iot: docs/iot/code-patterns.md
+      mp: docs/mp/code-patterns.md
+      report: docs/report/code-patterns.md
   patterns:
     - path: skills/design/patterns/factory-pattern.yaml
       reason: "工厂模式 - 渠道/平台扩展时注册到工厂"
@@ -54,7 +54,7 @@ references:
 在使用本文档前，请确认：
 
 1. **模块已存在** - 目标模块在 `yudao-module-*` 中已定义
-2. **有对应 Skill 文档** - 在 `skills/modules/{module}/skill-{module}.yaml` 中有知识文档
+2. **有对应 Skill 文档** - 在 `docs/{module}/code-patterns.md` 中有知识文档
 3. **扩展类型明确** - 明确是渠道扩展、策略扩展还是业务实体扩展
 4. **遵循现有模式** - 参考现有实现，保持架构一致性
 
@@ -84,7 +84,7 @@ references:
 ### 目标模块
 - 模块名称：{模块名称，如 pay/ai/infra/bpm}
 - 模块路径：yudao-module-{模块}
-- Skill 文档：skills/modules/{模块}/skill-{模块}.yaml
+- Skill 文档：docs/{模块}/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：{渠道扩展 | 策略扩展 | 业务实体扩展}
@@ -209,7 +209,7 @@ package {完整包名};
 ### 目标模块
 - 模块名称：pay
 - 模块路径：yudao-module-pay
-- Skill 文档：skills/modules/pay/skill-pay.yaml
+- Skill 文档：docs/pay/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：渠道扩展
@@ -439,7 +439,7 @@ clientClass.put(UNION_PAY_APP, UnionPayAppPayClient.class);
 ### 目标模块
 - 模块名称：ai
 - 模块路径：yudao-module-ai
-- Skill 文档：skills/modules/ai/skill-ai.yaml
+- Skill 文档：docs/ai/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：平台扩展
@@ -619,7 +619,7 @@ public void chat() {
 ### 目标模块
 - 模块名称：infra
 - 模块路径：yudao-module-infra
-- Skill 文档：skills/modules/infra/skill-infra.yaml
+- Skill 文档：docs/infra/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：渠道扩展
@@ -859,18 +859,18 @@ public enum FileStorageEnum {
 
 | 模块 | 路径 | Skill 文档 |
 |-----|------|-----------|
-| pay | yudao-module-pay | skills/modules/pay/skill-pay.yaml |
-| ai | yudao-module-ai | skills/modules/ai/skill-ai.yaml |
-| infra | yudao-module-infra | skills/modules/infra/skill-infra.yaml |
-| bpm | yudao-module-bpm | skills/modules/bpm/skill-bpm.yaml |
-| system | yudao-module-system | skills/modules/system/skill-system.yaml |
-| member | yudao-module-member | skills/modules/member/skill-member.yaml |
-| mall | yudao-module-product | skills/modules/mall/skill-mall.yaml |
-| crm | yudao-module-crm | skills/modules/crm/skill-crm.yaml |
-| erp | yudao-module-erp | skills/modules/erp/skill-erp.yaml |
-| mp | yudao-module-mp | skills/modules/mp/skill-mp.yaml |
-| iot | yudao-module-iot | skills/modules/iot/skill-iot.yaml |
-| report | yudao-module-report | skills/modules/report/skill-report.yaml |
+| pay | yudao-module-pay | docs/pay/code-patterns.md |
+| ai | yudao-module-ai | docs/ai/code-patterns.md |
+| infra | yudao-module-infra | docs/infra/code-patterns.md |
+| bpm | yudao-module-bpm | docs/bpm/code-patterns.md |
+| system | yudao-module-system | docs/system/code-patterns.md |
+| member | yudao-module-member | docs/member/code-patterns.md |
+| mall | yudao-module-product | docs/mall/code-patterns.md |
+| crm | yudao-module-crm | docs/crm/code-patterns.md |
+| erp | yudao-module-erp | docs/erp/code-patterns.md |
+| mp | yudao-module-mp | docs/mp/code-patterns.md |
+| iot | yudao-module-iot | docs/iot/code-patterns.md |
+| report | yudao-module-report | docs/report/code-patterns.md |
 
 ### 命名规范参数
 
@@ -1079,5 +1079,5 @@ public enum FileStorageEnum {
 
 **相关文档：**
 - [Skill 文档索引](../index.yaml)
-- [模块 Skill 文档](../modules/)
+- [模块代码模式文档](../../docs/)
 - [代码模式文档](../design/patterns/)

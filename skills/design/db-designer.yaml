@@ -4,11 +4,11 @@
 skill:
   id: "db-designer"
   name: "数据库设计 Skill"
-  version: "1.0.0"
+  version: "1.1.0"
   category: "design"
   description: "根据业务需求自动生成符合项目规范的数据库设计，包括表结构、索引、ER图等"
   created_at: "2026-03-31"
-  updated_at: "2026-03-31"
+  updated_at: "2026-10-14"
 
 # ============================================
 # 触发条件
@@ -40,13 +40,13 @@ input:
       type: "string"
       required: true
       description: "模块编码（如 mes、erp、crm、bpm 等）"
-      examples: ["mes", "erp", "crm", "bpm", "pay", "fz"]
+      examples: ["mes", "erp", "crm", "bpm", "pay", "za"]
 
     - name: "table_name"
       type: "string"
       required: true
       description: "表名（不含前缀）"
-      examples: ["work_order", "product", "customer", "letter"]
+      examples: ["work_order", "product", "customer", "penalty"]
 
     - name: "business_fields"
       type: "array"
@@ -82,90 +82,64 @@ philosophy:
 # 目录结构规范
 # ============================================
 directory_structure:
-  base_path: "sql/master/mysql"
+  base_path: "sql"
+  spec: "sql/README.md（SQL 文件管理规范，目录与文件命名以此为准）"
   layout: |
-    sql/master/mysql/
-    ├── table/              # 表结构定义
-    │   ├── create/         # 建表脚本
-    │   └── update/         # 表结构更新脚本
-    ├── seq/                # 序列定义（Oracle/PostgreSQL）
-    ├── index/              # 索引定义
-    ├── view/               # 视图定义
-    ├── data/               # 初始数据
-    └── init/               # 模块初始化脚本
+    sql/
+    ├── {发版日期}/          # 已指定发版日期，如 2026_10_20/，发版后只读归档
+    ├── {模块名}/            # 未定发版日期且归属单一模块，如 mes/、crm/
+    ├── {当前日期}/          # 未定发版日期且跨模块/通用，如 2026_10_14/
+    ├── master/              # 既有全量基线（多数据库版本），保持不变
+    └── mysql/ 等数据库目录   # 源项目各数据库全量脚本，保持不变
 
-  directories:
-    - name: "table/create"
-      purpose: "存放建表 SQL 脚本"
-      note: "每个表一个文件，按日期命名"
-    - name: "table/update"
-      purpose: "存放表结构更新 SQL 脚本"
-      note: "ALTER TABLE、ADD COLUMN 等增量变更"
-    - name: "seq"
-      purpose: "存放序列创建脚本"
-      note: "Oracle/PostgreSQL 序列，MySQL 可省略"
-    - name: "index"
-      purpose: "存放索引创建脚本"
-      note: "可按表名组织子目录"
-    - name: "view"
-      purpose: "存放视图创建脚本"
-      note: "复杂查询可封装为视图"
-    - name: "data"
-      purpose: "存放初始数据 SQL 脚本"
-      note: "INSERT 语句，初始化字典、菜单等"
-    - name: "init"
-      purpose: "存放模块初始化脚本"
-      note: "按模块组织，如 bpm.sql, quartz.sql"
+  rules:
+    - "新增 SQL 一律放入发版日期 / 模块名 / 当前日期三类目录，不再写入 master/ 或各数据库目录"
+    - "分类由文件名中的操作段决定（见 file_naming），不再使用 table/create 等子目录分类"
 
 # ============================================
 # 文件命名规范
 # ============================================
 file_naming:
-  # 建表文件命名
+  # 统一格式：连字符分段，段内下划线，详见 sql/README.md
+  format: "{YYYY_MM_DD}-{表名}-{操作}[-{两位序号}][-{数据库标识}].sql"
+
+  # 建表文件
   create_table:
-    format: "YYYY_MM_DD_{表名}_create.sql"
     examples:
-      - "2025_08_09_fz_letter_create.sql"
-      - "2026_03_25_mes_work_order_create.sql"
+      - "2026_10_14-mes_work_order-create_table.sql"
+      - "2026_10_14-crm_customer-create_table-postgresql.sql"
     rules:
-      - "日期前缀使用实际创建日期"
+      - "日期使用实际编写日期（YYYY_MM_DD）"
       - "表名使用小写字母和下划线"
-      - "统一使用 _create.sql 后缀"
+      - "方言变体仅在语句不兼容时创建，数据库标识取值与 sql/ 既有方言目录一致（postgresql、oracle、dm 等）"
 
-  # 更新文件命名
+  # 表结构更新（新增/修改/删除字段、索引等）
   update_table:
-    format: "YYYY_MM_DD_{表名}_update.sql"
     examples:
-      - "2025_08_15_fz_metaletter_update.sql"
-      - "2026_01_07_fz_attachment_rel_update.sql"
+      - "2026_10_15-mes_work_order-add_priority_column.sql"
+      - "2026_10_15-crm_customer-modify_name_column.sql"
+      - "2026_10_15-mes_work_order-add_index-01.sql"
     rules:
-      - "日期前缀使用实际更新日期"
-      - "同一表多次更新使用不同日期"
-      - "统一使用 _update.sql 后缀"
-    special_cases:
-      - pattern: "YYYY_MM_DD_{表名}_index_update.sql"
-        purpose: "专门用于索引更新"
+      - "操作段使用具体操作描述（add_column、modify_column、drop_index 等）"
+      - "同一表同一天多次变更无法用补充说明区分时，同批文件统一追加两位序号（-01、-02）"
+      - "已发版目录只读，变更一律新增文件"
 
-  # 序列文件命名
+  # 序列文件命名（Oracle/PostgreSQL）
   sequence:
-    format: "YYYY_MM_DD_{表名}_seq_create.sql"
     examples:
-      - "2025_07_24_fz_metaletter_seq_create.sql"
+      - "2026_10_14-mes_work_order-create_seq.sql"
     rules:
-      - "与建表日期保持一致"
+      - "与建表使用相同日期"
       - "序列名通常为 表名_seq"
 
   # 初始数据文件命名
   initial_data:
-    format: "模块名.sql"
     examples:
-      - "fazhi.sql"
-      - "bpm.sql"
-      - "quartz.sql"
-      - "ruoyi-vue-pro.sql"
+      - "2026_10_14-system_dict_data-insert_data.sql"
+      - "2026_10_14-system_menu-insert_menu_data.sql"
     rules:
-      - "按模块或功能命名"
-      - "包含该模块的初始数据"
+      - "单表初始数据按统一格式命名"
+      - "模块级全量初始化脚本（bpm.sql、quartz.sql 等）属于 master/ 基线，不按此命名"
 
 # ============================================
 # 表命名规范
@@ -197,9 +171,21 @@ table_naming:
     - prefix: "infra_"
       usage: "基础设施表"
       examples: ["infra_file", "infra_config"]
-    - prefix: "fz_"
-      usage: "法制业务表"
-      examples: ["fz_letter", "fz_replay", "fz_handle_unit"]
+    - prefix: "za_"
+      usage: "治安业务表"
+      examples: ["za_case", "za_penalty", "za_mediation"]
+    - prefix: "xz_"
+      usage: "行政业务表"
+      examples: ["xz_license", "xz_penalty", "xz_review"]
+    - prefix: "jz_"
+      usage: "建筑业务表"
+      examples: ["jz_project", "jz_company", "jz_permit"]
+    - prefix: "ye_"
+      usage: "育儿业务表"
+      examples: ["ye_org", "ye_child", "ye_check"]
+    - prefix: "wb_"
+      usage: "网吧业务表"
+      examples: ["wb_place", "wb_inspection", "wb_violation"]
 
   # 表名规则
   rules:
@@ -207,7 +193,7 @@ table_naming:
     - "使用名词，表示实体或关系"
     - "避免使用 MySQL 保留字"
     - "长度不超过 64 个字符"
-    - "关联表命名：主表_关联表_rel，如 fz_letter_label_rel"
+    - "关联表命名：主表_关联表_rel，如 mes_work_order_label_rel"
 
   # 字段命名规则
   column_rules:
@@ -314,9 +300,10 @@ create_table_template:
   structure: |
     -- ============================================
     -- 文件名：{filename}
-    -- 描述：{table_comment}
+    -- 说明：{table_comment}
     -- 作者：{author}
     -- 日期：{date}
+    -- 关联需求：{需求号，如有}
     -- ============================================
 
     CREATE TABLE `{table_name}` (
@@ -354,8 +341,8 @@ create_table_template:
 # 更新脚本规范
 # ============================================
 update_standards:
-  # 更新文件命名
-  naming: "YYYY_MM_DD_{表名}_update.sql"
+  # 更新文件命名（详见 sql/README.md）
+  naming: "{YYYY_MM_DD}-{表名}-{操作}.sql"
 
   # 字段操作模板
   operations:
@@ -363,13 +350,13 @@ update_standards:
       -- 新增字段
       ALTER TABLE `{table}` ADD COLUMN `{column}` {type} COMMENT '{comment}';
       -- 示例
-      ALTER TABLE `fz_letter` ADD COLUMN `priority` TINYINT DEFAULT 0 COMMENT '优先级';
+      ALTER TABLE `mes_work_order` ADD COLUMN `priority` TINYINT DEFAULT 0 COMMENT '优先级';
 
     modify_column: |
       -- 修改字段类型
       ALTER TABLE `{table}` MODIFY COLUMN `{column}` {new_type} COMMENT '{comment}';
       -- 示例
-      ALTER TABLE `fz_letter` MODIFY COLUMN `content` TEXT COMMENT '信件内容';
+      ALTER TABLE `crm_customer` MODIFY COLUMN `remark` VARCHAR(500) COMMENT '客户备注';
 
     drop_column: |
       -- 删除字段（确保无业务依赖）
@@ -384,9 +371,11 @@ update_standards:
   # 文件头部模板
   header: |
     -- ============================================
-    -- 更新说明：{更新目的}
-    -- 更新日期：{YYYY-MM-DD}
-    -- 更新人：{姓名}
+    -- 文件名：{文件名}
+    -- 说明：{变更目的}
+    -- 作者：{姓名}
+    -- 日期：{YYYY-MM-DD}
+    -- 关联需求：{需求号，如有}
     -- ============================================
 
   # 注释规范
@@ -404,21 +393,23 @@ data_standards:
     -- 插入菜单数据
     INSERT INTO `sys_menu` (`id`, `name`, `permission`, `type`, `sort`, `parent_id`, `path`, `icon`, `component`, `status`)
     VALUES
-    (1001, '信件管理', '', 2, 1, 0, 'letter', 'ep:document', 'fazhi/letter/index', 0),
-    (1002, '信件查询', 'fz:letter:query', 3, 1, 1001, '', '', '', 0);
+    (1001, '工序管理', '', 2, 1, 0, 'process', 'ep:document', 'mes/process/index', 0),
+    (1002, '工序查询', 'mes:process:query', 3, 1, 1001, '', '', '', 0);
 
   # 字典数据
   dict_data: |
     -- 字典类型
     INSERT INTO `sys_dict_type` (`name`, `type`, `status`, `remark`)
-    VALUES ('信件状态', 'fz_letter_status', 0, '信件流转状态');
+    VALUES ('工单状态', 'mes_work_order_status', 0, '生产工单流转状态');
 
     -- 字典数据
     INSERT INTO `sys_dict_data` (`sort`, `label`, `value`, `dict_type`, `status`)
     VALUES
-    (1, '待处理', '0', 'fz_letter_status', 0),
-    (2, '处理中', '1', 'fz_letter_status', 0),
-    (3, '已完成', '2', 'fz_letter_status', 0);
+    (1, '待下发', '0', 'mes_work_order_status', 0),
+    (2, '已下发', '1', 'mes_work_order_status', 0),
+    (3, '生产中', '2', 'mes_work_order_status', 0),
+    (4, '已完成', '3', 'mes_work_order_status', 0),
+    (5, '已关闭', '4', 'mes_work_order_status', 0);
 
 # ============================================
 # 编写规范
@@ -436,9 +427,10 @@ coding_standards:
     file_header: |
       -- ============================================
       -- 文件名：{文件名}
-      -- 描述：{功能描述}
+      -- 说明：{功能描述}
       -- 作者：{作者}
       -- 日期：{YYYY-MM-DD}
+      -- 关联需求：{需求号，如有}
       -- ============================================
     table_comment: "CREATE TABLE 语句必须包含 COMMENT"
     column_comment: "每个字段必须包含 COMMENT"
@@ -455,10 +447,11 @@ coding_standards:
 # ============================================
 version_control:
   principles:
-    - "建表后表结构变更使用 update 脚本，不修改原文件"
+    - "建表后表结构变更新增脚本文件，不修改原文件"
     - "每个变更独立文件，便于追踪和回滚"
     - "日期前缀确保文件顺序和变更时间线"
     - "版本升级时按日期顺序执行所有脚本"
+    - "文件目录与命名遵循 sql/README.md：已发版目录只读，变更一律新增文件"
 
   change_log:
     format: |
@@ -552,12 +545,21 @@ quick_reference:
     pay_: "支付表"
     member_: "会员表"
     infra_: "基础设施表"
-    fz_: "法制业务表"
+    za_: "治安业务表"
+    xz_: "行政业务表"
+    jz_: "建筑业务表"
+    ye_: "育儿业务表"
+    wb_: "网吧业务表"
 
-  file_suffixes:
-    _create.sql: "建表脚本"
-    _update.sql: "更新脚本"
-    _seq_create.sql: "序列脚本"
+  file_operations:
+    create_table: "建表脚本"
+    add_column: "新增字段"
+    modify_column: "修改字段"
+    drop_column: "删除字段"
+    add_index: "新增索引"
+    insert_data: "初始数据"
+    create_seq: "序列脚本"
+    "-postgresql 后缀": "PostgreSQL / Kingbase 数据库版本"
 
   common_columns:
     id: "主键ID（BIGINT）"
@@ -594,14 +596,15 @@ examples:
           default: "0"
           comment: "状态:0-待下发,1-已下发,2-生产中,3-已完成,4-已关闭"
 
-    output_file: "2026_03_25_mes_work_order_create.sql"
+    output_file: "2026_03_25-mes_work_order-create_table.sql"
 
     output_sql: |
       -- ============================================
-      -- 文件名：2026_03_25_mes_work_order_create.sql
-      -- 描述：生产工单表
+      -- 文件名：2026_03_25-mes_work_order-create_table.sql
+      -- 说明：生产工单表
       -- 作者：AI Assistant
       -- 日期：2026-03-25
+      -- 关联需求：无
       -- ============================================
 
       CREATE TABLE `mes_work_order` (
@@ -658,7 +661,7 @@ error_handling:
 
     - code: "DB004"
       message: "文件命名不符合规范"
-      solution: "使用 YYYY_MM_DD_{表名}_create.sql 格式"
+      solution: "使用 {YYYY_MM_DD}-{表名}-{操作}.sql 格式，详见 sql/README.md"
 
     - code: "DB005"
       message: "唯一索引缺少 deleted"

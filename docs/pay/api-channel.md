@@ -1,191 +1,200 @@
-# 渠道与应用管理 API 详解
+# 支付渠道接口 (PayChannelController)
 
-> 业务域：支付应用管理、支付渠道配置、支付客户端工厂。
+> 管理支付应用（PayApp）下的具体支付渠道（微信、支付宝等）的配置，包括渠道的创建、更新、删除与查询，渠道配置最终用于构建对应的支付客户端 PayClient。
 
-## 核心领域模型
+## 接口路径前缀
 
-**实体**：`PayApp`
+/pay/channel  (Controller: PayChannelController)
 
-- 支付应用是业务系统接入支付能力的入口
-- 每个应用配置独立的回调地址（订单回调、退款回调）
-- 支持多租户（继承 `TenantBaseDO`）
+## 1. 支付渠道管理（PayChannelController）
 
-**实体**：`PayChannel`
+### 1.1 创建支付渠道
 
-- 支付渠道配置，关联到具体的支付客户端
-- 每个渠道有独立的配置（`PayClientConfig` JSON）
-- 支持多租户（继承 `TenantBaseDO`）
-- 通过 `app_id` 关联到 `PayApp`，一个应用可有多个渠道
+- **路径**: POST /pay/channel/create
+- **权限**: pay:channel:create
+- **说明**: 为指定支付应用新增一个支付渠道，同一应用下渠道编码不可重复。
 
-**值对象**：`PayClientConfig`
+**请求参数 (PayChannelCreateReqVO)**:
 
-- 不同渠道有不同的配置实现：
-  - `AlipayPayClientConfig`：支付宝配置（appId、privateKey、alipayPublicKey 等）
-  - `WxPayClientConfig`：微信配置（appId、mchId、apiKey、certPath 等）
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 开启状态（CommonStatusEnum：0 开启、1 禁用） |
+| remark | String | 否 | - | 备注 |
+| feeRate | Double | 是 | @NotNull | 渠道费率，单位：百分比 |
+| appId | Long | 是 | @NotNull | 应用编号 |
+| code | String | 是 | @NotNull | 渠道编码，如 alipay_pc、wx_pub 等（枚举 PayChannelEnum） |
+| config | String | 是 | @NotBlank | 渠道配置的 JSON 字符串（按渠道编码对应 AlipayPayClientConfig / WxPayClientConfig 等结构） |
 
-## HTTP 接口
-
-### PayAppController
-
-路径前缀：`/pay/app`
-
-| 接口 | 方法 | 路径 | 说明 |
-|------|------|------|------|
-| 创建应用 | POST | `/create` | 创建支付应用 |
-| 更新应用 | PUT | `/update` | 更新应用配置 |
-| 删除应用 | DELETE | `/delete` | 删除支付应用 |
-| 查询应用 | GET | `/get` | 查询应用详情 |
-| 分页查询 | GET | `/page` | 分页查询应用列表 |
-
-### PayChannelController
-
-路径前缀：`/pay/channel`
-
-| 接口 | 方法 | 路径 | 说明 |
-|------|------|------|------|
-| 创建渠道 | POST | `/create` | 创建支付渠道 |
-| 更新渠道 | PUT | `/update` | 更新渠道配置 |
-| 删除渠道 | DELETE | `/delete` | 删除支付渠道 |
-| 查询渠道 | GET | `/get` | 查询渠道详情 |
-| 分页查询 | GET | `/page` | 分页查询渠道列表 |
-
-## 数据表
-
-### pay_app
+**响应**: CommonResult&lt;Long&gt;
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | `Long` | 应用编号（主键） |
-| `name` | `String` | 应用名称 |
-| `status` | `Integer` | 开启状态 |
-| `order_notify_url` | `String` | 订单回调地址 |
-| `refund_notify_url` | `String` | 退款回调地址 |
+|-----|------|------|
+| data | Long | 新创建的支付渠道编号 |
 
-### pay_channel
+**业务逻辑**:
+1. 根据 appId + code 查询数据库，若已存在相同渠道，抛出 CHANNEL_EXIST_SAME_CHANNEL_ERROR（已存在相同的渠道）。
+2. 根据渠道编码 code 判定配置类型：支付宝渠道对应 AlipayPayClientConfig，微信渠道对应 WxPayClientConfig，其他渠道对应 NonePayClientConfig。
+3. 将 config JSON 字符串反序列化为对应的 PayClientConfig 对象，并通过 Validator 校验配置参数的合法性（config.validate）。
+4. 转换为 PayChannelDO 并插入 pay_channel 表，返回渠道编号。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_007_001_000 | 支付渠道的配置不存在 |
+| 1_007_001_004 | 已存在相同的渠道 |
+
+### 1.2 更新支付渠道
+
+- **路径**: PUT /pay/channel/update
+- **权限**: pay:channel:update
+- **说明**: 更新指定支付渠道的状态、费率、备注及配置。
+
+**请求参数 (PayChannelUpdateReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| id | Long | 是 | @NotNull | 渠道编号 |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 开启状态 |
+| remark | String | 否 | - | 备注 |
+| feeRate | Double | 是 | @NotNull | 渠道费率，单位：百分比 |
+| appId | Long | 是 | @NotNull | 应用编号 |
+| config | String | 是 | @NotBlank | 渠道配置的 JSON 字符串 |
+
+**响应**: CommonResult&lt;Boolean&gt;
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | `Long` | 渠道编号（主键） |
-| `code` | `String` | 渠道编码（如 `wx_pub`, `alipay_wap`） |
-| `status` | `Integer` | 开启状态 |
-| `fee_rate` | `Double` | 渠道费率 |
-| `app_id` | `Long` | 应用编号（关联 pay_app） |
-| `config` | `PayClientConfig` | 支付配置（JSON 存储） |
+|-----|------|------|
+| data | Boolean | 更新成功返回 true |
 
-**关系**：`pay_app` 1:N `pay_channel`，通过 `app_id` 关联。
+**业务逻辑**:
+1. 校验渠道是否存在，不存在则抛出 CHANNEL_NOT_FOUND。
+2. 以数据库中已有渠道的编码 code 判定配置类型，将新的 config JSON 字符串反序列化并通过 Validator 校验。
+3. 转换为 PayChannelDO 后按编号更新记录（更新时不修改渠道编码本身）。
 
-## 支付客户端工厂
+**错误码**:
 
-### PayClientFactory
+| 错误码 | 说明 |
+|-------|------|
+| 1_007_001_000 | 支付渠道的配置不存在 |
 
-```java
-public interface PayClientFactory {
-    PayClient getPayClient(Long channelId);
-    void refresh(Long channelId);  // 刷新指定渠道的客户端配置
-}
-```
+### 1.3 删除支付渠道
 
-### PayClientFactoryImpl 实现
+- **路径**: DELETE /pay/channel/delete
+- **权限**: pay:channel:delete
+- **说明**: 按编号删除指定支付渠道。
 
-**核心机制**：
+**请求参数**:
 
-1. **注册映射**：在构造函数中注册渠道编码与客户端类的映射关系
-   ```java
-   clientClass.put(WX_PUB, WxPubPayClient.class);
-   clientClass.put(ALIPAY_WAP, AlipayWapPayClient.class);
-   // ...
-   ```
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| id | Long | 是 | -（@RequestParam） | 渠道编号 |
 
-2. **创建客户端**：根据 `channelId` 查询 `PayChannelDO`，获取配置，反射创建客户端实例
-   ```java
-   ReflectUtil.newInstance(payClientClass, channelId, config);
-   ```
+**响应**: CommonResult&lt;Boolean&gt;
 
-3. **缓存机制**：已创建的客户端实例缓存，避免重复创建
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| data | Boolean | 删除成功返回 true |
 
-4. **配置热刷新**：调用 `refresh(channelId)` 清除缓存，下次获取时重新创建
+**业务逻辑**:
+1. 校验渠道是否存在，不存在则抛出 CHANNEL_NOT_FOUND。
+2. 按编号删除 pay_channel 记录。
 
-### PayClient 接口
+**错误码**:
 
-```java
-public interface PayClient {
-    // 统一下单
-    PayOrderRespDTO unifiedOrder(PayOrderUnifiedReqDTO reqDTO);
-    // 统一退款
-    PayRefundRespDTO unifiedRefund(PayRefundUnifiedReqDTO reqDTO);
-    // 统一转账
-    PayTransferRespDTO unifiedTransfer(PayTransferUnifiedReqDTO reqDTO);
-    // 解析支付回调
-    PayOrderNotifyRespDTO parseOrderNotify(PayNotifyDataDTO notifyData);
-    // 解析退款回调
-    PayRefundNotifyRespDTO parseRefundNotify(PayNotifyDataDTO notifyData);
-    // 查询订单
-    PayOrderRespDTO getOrder(String outTradeNo);
-    // 关闭订单
-    void closeOrder(String outTradeNo);
-}
-```
+| 错误码 | 说明 |
+|-------|------|
+| 1_007_001_000 | 支付渠道的配置不存在 |
 
-### AbstractPayClient 模板方法
+### 1.4 获得支付渠道
 
-```java
-public abstract class AbstractPayClient<T extends PayClientConfig> implements PayClient {
-    protected Long channelId;
-    protected String channelCode;
-    protected T config;
+- **路径**: GET /pay/channel/get
+- **权限**: pay:channel:query
+- **说明**: 支持两种查询方式：按渠道编号 id 查询，或按应用编号 appId + 渠道编码 code 组合查询。
 
-    // 模板方法：统一下单
-    public final PayOrderRespDTO unifiedOrder(PayOrderUnifiedReqDTO reqDTO) {
-        ValidationUtils.validate(reqDTO);   // 1. 参数校验
-        try {
-            return doUnifiedOrder(reqDTO);   // 2. 子类实现
-        } catch (Throwable ex) {
-            throw buildPayException(ex);     // 3. 统一异常处理
-        }
-    }
+**请求参数**:
 
-    // 子类必须实现的抽象方法
-    protected abstract PayOrderRespDTO doUnifiedOrder(PayOrderUnifiedReqDTO reqDTO);
-    protected abstract PayRefundRespDTO doUnifiedRefund(PayRefundUnifiedReqDTO reqDTO);
-    protected abstract PayOrderRespDTO doGetOrder(String outTradeNo);
-    protected abstract void doCloseOrder(String outTradeNo);
-    protected abstract void doInit();
-    // ...
-}
-```
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| id | Long | 否 | -（@RequestParam） | 渠道编号，与 appId+code 二选一 |
+| appId | Long | 否 | -（@RequestParam） | 应用编号，需与 code 同时传入 |
+| code | String | 否 | -（@RequestParam） | 渠道编码，需与 appId 同时传入 |
 
-## 渠道枚举
+**响应**: CommonResult&lt;PayChannelRespVO&gt;（渠道不存在时 data 为 null）
 
-### PayChannelEnum
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| id | Long | 渠道编号 |
+| code | String | 渠道编码 |
+| config | String | 渠道配置 |
+| status | Integer | 开启状态 |
+| remark | String | 备注 |
+| feeRate | Double | 渠道费率，单位：百分比 |
+| appId | Long | 应用编号 |
+| createTime | LocalDateTime | 创建时间 |
 
-| 编码 | 名称 | 说明 |
-|------|------|------|
-| `wx_pub` | 微信公众号支付 | JSAPI 支付 |
-| `wx_app` | 微信 App 支付 | App 内支付 |
-| `wx_lite` | 微信小程序支付 | 小程序内支付 |
-| `wx_native` | 微信 Native 支付 | 扫码支付 |
-| `wx_h5` | 微信 H5 支付 | H5 页面支付 |
-| `wx_mpay` | 微信付款码 | 商户扫用户付款码 |
-| `alipay_pc` | 支付宝 PC 支付 | 电脑网站支付 |
-| `alipay_wap` | 支付宝 WAP 支付 | 手机网站支付 |
-| `alipay_app` | 支付宝 App 支付 | App 内支付 |
-| `alipay_qr` | 支付宝扫码支付 | 用户扫商户二维码 |
-| `alipay_bar` | 支付宝条码支付 | 商户扫用户条码 |
-| `wallet` | 钱包支付 | 用户余额消费 |
-| `mock` | 模拟支付 | 开发测试用 |
+**业务逻辑**:
+1. 若传入 id，则按编号查询渠道。
+2. 否则若同时传入 appId 和 code，则按应用 + 渠道编码查询。
+3. 将结果通过 PayChannelConvert 转换为 RespVO 返回。
 
-## 新增支付渠道步骤
+### 1.5 获得指定应用的支付渠道列表
 
-1. 在 `PayChannelEnum` 添加渠道编码
-2. 创建配置类实现 `PayClientConfig`
-3. 创建客户端类继承 `AbstractPayClient<T>`
-4. 在 `PayClientFactoryImpl` 注册映射
-5. 编写单元测试
+- **路径**: GET /pay/channel/list
+- **权限**: pay:channel:query
+- **说明**: 查询指定支付应用下的全部支付渠道（不分页），常用于渠道配置管理界面。
 
-## 关键设计要点
+**请求参数**:
 
-1. **多租户**：`PayApp` 和 `PayChannel` 继承 `TenantBaseDO`，不同租户的应用和渠道隔离。
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| appId | Long | 是 | -（@RequestParam） | 应用编号 |
 
-2. **配置热刷新**：修改渠道配置后，调用 `PayClientFactory.refresh(channelId)` 即可生效，无需重启。
+**响应**: CommonResult&lt;List&lt;PayChannelRespVO&gt;&gt;
 
-3. **错误码**：`1_007_000_000`（App 不存在）、`1_007_001_000`（支付渠道配置不存在）。
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| id | Long | 渠道编号 |
+| code | String | 渠道编码 |
+| config | String | 渠道配置 |
+| status | Integer | 开启状态 |
+| remark | String | 备注 |
+| feeRate | Double | 渠道费率，单位：百分比 |
+| appId | Long | 应用编号 |
+| createTime | LocalDateTime | 创建时间 |
+
+**业务逻辑**:
+1. 按应用编号 appId 查询该应用下的全部渠道记录。
+2. 通过 PayChannelConvert 转换为 RespVO 列表返回。
+
+### 1.6 获得指定应用的开启的支付渠道编码列表
+
+- **路径**: GET /pay/channel/get-enable-code-list
+- **权限**: 已认证（仅登录，未声明 @PreAuthorize 权限校验）
+- **说明**: 查询指定应用下处于开启状态的渠道编码集合，常用于发起支付前判断可用的支付方式。
+
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| appId | Long | 是 | -（@RequestParam） | 应用编号 |
+
+**响应**: CommonResult&lt;Set&lt;String&gt;&gt;
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| data | Set&lt;String&gt; | 开启状态的渠道编码集合，如 ["alipay_pc", "wx_pub"] |
+
+**业务逻辑**:
+1. 按应用编号 appId 查询状态为开启（CommonStatusEnum.ENABLE）的渠道列表。
+2. 提取渠道编码 code 并转为 Set 集合返回。
+
+## 2. 域内错误码汇总（CHANNEL 模块，1-007-001-000 段）
+
+以下错误码属于支付渠道域，除上述端点外，还被 Service 内部方法 validPayChannel / getPayClient 使用（支付发起、退款、转账等流程校验渠道时触发）：
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_007_001_000 | 支付渠道的配置不存在 |
+| 1_007_001_001 | 支付渠道已经禁用 |
+| 1_007_001_004 | 已存在相同的渠道 |

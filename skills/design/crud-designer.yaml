@@ -386,10 +386,10 @@ references:
       description: "数据库表结构设计规范"
 
   secondary:
-    - path: "skills/modules/{module}/skill-{module}.yaml"
+    - path: "docs/{module}/code-patterns.md"
       relationship: "模块参考"
       description: "具体模块的技术规范和扩展指南"
-      example: "skills/modules/system/skill-system.yaml"
+      example: "docs/system/code-patterns.md"
 
 # ============================================
 # 第七部分：质量检查清单
@@ -401,7 +401,7 @@ checklist:
     - item: "确认表名符合命名规范"
       check: "表名格式为 {module}_{feature}"
     - item: "阅读对应模块的skill文档"
-      reference: "skills/modules/{module}/skill-{module}.yaml"
+      reference: "docs/{module}/code-patterns.md"
     - item: "确认字段类型映射正确"
       check: "数据库类型与Java类型对应"
 

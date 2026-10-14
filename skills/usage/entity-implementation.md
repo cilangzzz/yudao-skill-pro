@@ -14,18 +14,18 @@ references:
   module_guide:
     prompt: "请指定目标模块，AI 将加载对应模块的 skill 文档"
     mapping:
-      system: skills/modules/system/skill-system.yaml
-      infra: skills/modules/infra/skill-infra.yaml
-      pay: skills/modules/pay/skill-pay.yaml
-      member: skills/modules/member/skill-member.yaml
-      mall: skills/modules/mall/skill-mall.yaml
-      crm: skills/modules/crm/skill-crm.yaml
-      erp: skills/modules/erp/skill-erp.yaml
-      bpm: skills/modules/bpm/skill-bpm.yaml
-      ai: skills/modules/ai/skill-ai.yaml
-      iot: skills/modules/iot/skill-iot.yaml
-      mp: skills/modules/mp/skill-mp.yaml
-      report: skills/modules/report/skill-report.yaml
+      system: docs/system/code-patterns.md
+      infra: docs/infra/code-patterns.md
+      pay: docs/pay/code-patterns.md
+      member: docs/member/code-patterns.md
+      mall: docs/mall/code-patterns.md
+      crm: docs/crm/code-patterns.md
+      erp: docs/erp/code-patterns.md
+      bpm: docs/bpm/code-patterns.md
+      ai: docs/ai/code-patterns.md
+      iot: docs/iot/code-patterns.md
+      mp: docs/mp/code-patterns.md
+      report: docs/report/code-patterns.md
   usage_hint: "使用时请在提示词中指定模块名，如：'目标模块：mes'"
 ---
 
@@ -914,7 +914,7 @@ INSERT INTO system_menu (name, permission, type, sort, parent_id, status) VALUES
 ### 目标模块
 - 模块名称：{模块名，如 system/infra/pay}
 - 模块路径：yudao-module-{模块}
-- Skill 文档：skills/modules/{模块}/skill-{模块}.yaml
+- Skill 文档：docs/{模块}/code-patterns.md
 
 ### 实体需求
 - 实体名称：{实体中文名}

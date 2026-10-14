@@ -66,11 +66,11 @@ references:
     - skills/design/crud-designer.yaml     # CRUD 代码生成规范
   module_guide:
     mapping:
-      system: skills/modules/system/skill-system.yaml
-      infra: skills/modules/infra/skill-infra.yaml
-      im: skills/modules/im/skill-im.yaml
-      mes: skills/modules/mes/skill-mes.yaml
-      wms: skills/modules/wms/skill-wms.yaml
+      system: docs/system/code-patterns.md
+      infra: docs/infra/code-patterns.md
+      im: docs/im/code-patterns.md
+      mes: docs/mes/code-patterns.md
+      wms: docs/wms/code-patterns.md
       # ... 更多模块见下方索引
 ```
 
@@ -78,25 +78,25 @@ references:
 
 ---
 
-## 模块 Skill 文档索引
+## 模块代码模式文档索引
 
 | 模块 | 文档路径 | 核心功能 |
 |-----|---------|---------|
-| system | [skills/modules/system/skill-system.yaml](skills/modules/system/skill-system.yaml) | 用户、角色、权限、菜单、租户、字典 |
-| infra | [skills/modules/infra/skill-infra.yaml](skills/modules/infra/skill-infra.yaml) | 文件、配置、任务、日志、代码生成 |
-| pay | [skills/modules/pay/skill-pay.yaml](skills/modules/pay/skill-pay.yaml) | 支付、退款、钱包、转账 |
-| member | [skills/modules/member/skill-member.yaml](skills/modules/member/skill-member.yaml) | 会员、积分、等级、签到 |
-| mall | [skills/modules/mall/skill-mall.yaml](skills/modules/mall/skill-mall.yaml) | 商品、订单、促销、统计 |
-| crm | [skills/modules/crm/skill-crm.yaml](skills/modules/crm/skill-crm.yaml) | 线索、客户、商机、合同、回款 |
-| erp | [skills/modules/erp/skill-erp.yaml](skills/modules/erp/skill-erp.yaml) | 采购、销售、库存、财务 |
-| bpm | [skills/modules/bpm/skill-bpm.yaml](skills/modules/bpm/skill-bpm.yaml) | 流程定义、流程实例、任务 |
-| ai | [skills/modules/ai/skill-ai.yaml](skills/modules/ai/skill-ai.yaml) | AI 模型、对话、绘图 |
-| iot | [skills/modules/iot/skill-iot.yaml](skills/modules/iot/skill-iot.yaml) | 设备、产品、物模型 |
-| mp | [skills/modules/mp/skill-mp.yaml](skills/modules/mp/skill-mp.yaml) | 公众号、菜单、消息 |
-| report | [skills/modules/report/skill-report.yaml](skills/modules/report/skill-report.yaml) | 报表、数据源、图表 |
-| im | [skills/modules/im/skill-im.yaml](skills/modules/im/skill-im.yaml) | 单聊、群聊、消息、RTC、表情、频道 |
-| mes | [skills/modules/mes/skill-mes.yaml](skills/modules/mes/skill-mes.yaml) | 主数据、生产、质检、设备、仓库、排班 |
-| wms | [skills/modules/wms/skill-wms.yaml](skills/modules/wms/skill-wms.yaml) | 仓库、物料、库存、入库、出库、调拨、盘点 |
+| system | [docs/system/code-patterns.md](docs/system/code-patterns.md) | 用户、角色、权限、菜单、租户、字典 |
+| infra | [docs/infra/code-patterns.md](docs/infra/code-patterns.md) | 文件、配置、任务、日志、代码生成 |
+| pay | [docs/pay/code-patterns.md](docs/pay/code-patterns.md) | 支付、退款、钱包、转账 |
+| member | [docs/member/code-patterns.md](docs/member/code-patterns.md) | 会员、积分、等级、签到 |
+| mall | [docs/mall/code-patterns.md](docs/mall/code-patterns.md) | 商品、订单、促销、统计 |
+| crm | [docs/crm/code-patterns.md](docs/crm/code-patterns.md) | 线索、客户、商机、合同、回款 |
+| erp | [docs/erp/code-patterns.md](docs/erp/code-patterns.md) | 采购、销售、库存、财务 |
+| bpm | [docs/bpm/code-patterns.md](docs/bpm/code-patterns.md) | 流程定义、流程实例、任务 |
+| ai | [docs/ai/code-patterns.md](docs/ai/code-patterns.md) | AI 模型、对话、绘图 |
+| iot | [docs/iot/code-patterns.md](docs/iot/code-patterns.md) | 设备、产品、物模型 |
+| mp | [docs/mp/code-patterns.md](docs/mp/code-patterns.md) | 公众号、菜单、消息 |
+| report | [docs/report/code-patterns.md](docs/report/code-patterns.md) | 报表、数据源、图表 |
+| im | [docs/im/code-patterns.md](docs/im/code-patterns.md) | 单聊、群聊、消息、RTC、表情、频道 |
+| mes | [docs/mes/code-patterns.md](docs/mes/code-patterns.md) | 主数据、生产、质检、设备、仓库、排班 |
+| wms | [docs/wms/code-patterns.md](docs/wms/code-patterns.md) | 仓库、物料、库存、入库、出库、调拨、盘点 |
 
 ---
 
@@ -108,6 +108,7 @@ references:
 | 实体类设计 | [skills/design/entity-designer.yaml](skills/design/entity-designer.yaml) | 继承体系、注解规范、命名转换 |
 | API 接口设计 | [skills/api/api-design/api-designer.yaml](skills/api/api-design/api-designer.yaml) | Controller 注解、请求响应格式 |
 | CRUD 代码生成 | [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml) | 各层代码模板、命名规范 |
+| SQL 文件管理 | [sql/README.md](sql/README.md) | SQL 目录组织（发版日期 / 模块 / 日期）与文件命名规范 |
 
 ---
 

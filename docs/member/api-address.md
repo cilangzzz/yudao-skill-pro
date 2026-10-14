@@ -1,104 +1,45 @@
-# 收货地址 API
+# 用户收件地址接口 (AddressController)
 
-> 会员收货地址管理相关接口，支持多地址管理和默认地址切换。
+> 管理后台查询会员（用户）收件地址的接口。地址的新增、修改、删除由 App 端 `AppAddressController`（`/member/address/*`，已认证用户操作本人地址）提供，管理后台仅提供按用户查看地址列表的能力。
 
-## 1. 概述
+## 接口路径前缀
+/member/address  (Controller: AddressController)
 
-| 项目 | 说明 |
-|------|------|
-| C端 Controller | `app/address/AppAddressController` |
-| Service | `AddressService` |
-| 路径前缀 | `/member/app/address` |
+## 1. 地址查询
 
-## 2. C端接口
+### 1.1 获得用户收件地址列表
 
-### 2.1 查询收货地址列表
+- **路径**: GET /member/address/list
+- **权限**: member:user:query
+- **说明**: 按用户编号查询该会员的全部收件地址（含默认与非默认地址），供管理后台查看会员地址信息。
 
-| 项目 | 说明 |
-|------|------|
-| 说明 | 获取当前登录用户的所有收货地址 |
+**请求参数 (Query)**:
 
-### 2.2 查询收货地址详情
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| userId | Long | 是 | @RequestParam(required = true) | 用户编号 |
 
-| 项目 | 说明 |
-|------|------|
-| 说明 | 根据地址 ID 获取地址详情 |
-
-### 2.3 创建收货地址
-
-| 项目 | 说明 |
-|------|------|
-| 说明 | 新增收货地址 |
-
-**字段说明：**
-
-| 字段 | 说明 |
-|------|------|
-| name | 收件人名称 |
-| mobile | 手机号 |
-| area_id | 地区 ID（省市区） |
-| detail_address | 详细地址 |
-| default_status | 是否默认地址 |
-
-**业务逻辑：**
-
-- 如果设置为默认地址，自动取消其他地址的默认状态
-- 首个地址自动设为默认地址
-
-### 2.4 修改收货地址
-
-| 项目 | 说明 |
-|------|------|
-| 说明 | 修改已有地址信息 |
-
-### 2.5 删除收货地址
-
-| 项目 | 说明 |
-|------|------|
-| 说明 | 删除指定地址 |
-
-**业务逻辑：**
-
-- 如果删除的是默认地址，自动将最近使用的地址设为默认
-
-### 2.6 设置默认地址
-
-| 项目 | 说明 |
-|------|------|
-| 说明 | 将指定地址设为默认地址 |
-
-**业务逻辑：**
-
-- 取消当前默认地址的默认状态
-- 设置新地址为默认
-
-## 3. 跨模块 API
-
-`MemberAddressApi` 为其他模块提供的接口：
-
-| 方法 | 说明 | 消费方 |
-|------|------|--------|
-| getAddress(Long addressId) | 根据 ID 查询地址详情 | mall-trade |
-| getDefaultAddress(Long userId) | 查询用户默认地址 | mall-trade |
-
-## 4. 数据模型
-
-### member_address 表
+**响应**: `CommonResult<List<AddressRespVO>>`
 
 | 字段 | 类型 | 说明 |
-|------|------|------|
-| id | Long | 地址 ID |
-| user_id | Long | 用户 ID |
+|-----|------|------|
+| id | Long | 收件地址编号 |
 | name | String | 收件人名称 |
 | mobile | String | 手机号 |
-| area_id | Long | 地区 ID（关联地区表） |
-| detail_address | String | 详细地址 |
-| default_status | Boolean | 是否默认地址 |
+| areaId | Long | 地区编码 |
+| areaName | String | 地区名称（如“上海上海市普陀区”，由 areaId 格式化得到） |
+| detailAddress | String | 收件详细地址 |
+| defaultStatus | Boolean | 是否默认 |
+| createTime | LocalDateTime | 创建时间 |
 
-## 5. 注意事项
+**业务逻辑**:
+1. 接收查询参数 `userId`，调用 `AddressService#getAddressList(userId)`。
+2. Service 调用 `MemberAddressMapper#selectListByUserIdAndDefaulted(userId, null)` 查询该用户全部收件地址（`defaulted` 传 `null` 表示不过滤是否默认）。
+3. 通过 `AddressConvert.INSTANCE.convertList2` 将 `MemberAddressDO` 列表转换为 `AddressRespVO` 列表，转换时基于 `areaId` 调用 `AreaUtils.format` 生成完整地区名称 `areaName`。
+4. 包装为 `CommonResult` 成功结果返回。
 
-- 一个用户可以拥有多个收货地址
-- 同一用户同一时间只能有一个默认地址
-- 删除默认地址时需要自动选择新的默认地址
-- 地址的 area_id 关联系统的地区表，用于省市区联动选择
-- mall-trade 模块下单时通过 `MemberAddressApi.getDefaultAddress` 获取默认地址
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_004_004_000 | 用户收件地址不存在（AddressService 更新/删除地址时校验抛出） |

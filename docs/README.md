@@ -1,6 +1,6 @@
 # 芋道源码模块文档索引
 
-> 基于 `author-build-project-docs` 工作流的 phase-5-business 规范生成，每个模块由独立子 agent 分析 `skills/modules/*/skill-*.yaml` 提取。
+> 基于 `author-build-project-docs` 工作流的 phase-5-business 规范生成，每个模块由独立子 agent 分析对应模块知识提取；模块知识已整合进 docs/ 各模块文档（含 code-patterns.md 代码模式文档）。
 
 ## 文档结构
 
@@ -102,6 +102,6 @@ system (系统管理) ← 几乎所有模块都依赖
 ## 生成方式
 
 每个模块由独立子 agent 并行分析，遵循 `F:\work\flow\software-dev-ai-workflow\0.0-通用skill\author-build-project-docs` 的 phase-5-business 规范：
-1. 读取 `skills/modules/{module}/skill-{module}.yaml` Skill 文档
+1. 读取 `docs/{module}/` 下的模块文档（含 `code-patterns.md` 代码模式文档）
 2. 提取模块概述、功能点、API、数据模型、设计模式
 3. 生成 README.md（索引）+ api-{domain}.md（详情）+ data-model.md + pitfalls.md
