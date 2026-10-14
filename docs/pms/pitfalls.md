@@ -56,13 +56,16 @@ public String execute(String param) { ... }
 
 ## 3. 并发相关
 
-### 3.1 工作项序列号与看板 sort 采用 max+1 读取，无唯一索引兜底
+### 3.1 序列号/看板 sort 的 max+1 读取与状态初始化，都依赖建表脚本中并不存在的唯一索引
 
-**问题**: 并发创建工作项时 `serialNumber` 重复、并发拖拽看板时 `sort` 重复，列表排序不稳定。
+**问题**: 并发创建工作项时 `serialNumber` 重复、并发拖拽看板时 `sort` 重复；并发创建项目时出现重复的"未开始/进行中/已完成"状态行。
 
-**原因**: `PmsWorkItemMapper#selectMaxSerialNumberByProjectId` / `#selectMaxSortByStatusId` 都是 `selectLastOne` 后在 Service 里 +1 的"查-算-写"模式，中间无锁；`create_tables.sql` 中 `pms_work_item` 表除主键外没有任何唯一索引（全脚本仅 `pms_knowledge_document_share.token` 一处 UNIQUE），`(project_id, serial_number)` 无唯一约束兜底。`PmsWorkItemStatusServiceImpl#updateWorkItemStatusSort` 注释里的"按状态编号稳定加锁"实际只是 `Collections.sort(statusIds)` 后 `updateBatch`，用于降低死锁概率，并非真正加锁。
+**原因**: 三处并发防御都隐式依赖数据库唯一索引，而 `yudao-module-pms/src/test/resources/sql/create_tables.sql` 里除主键外只有 `pms_knowledge_document_share.token` 一处 UNIQUE：
+1. `PmsWorkItemMapper#selectMaxSerialNumberByProjectId` / `#selectMaxSortByStatusId` 是"查 max 后在 Java 里 +1"的模式，`pms_work_item` 无 `(project_id, serial_number)` 唯一约束，并发下产生重复编号；
+2. `PmsWorkItemStatusServiceImpl#initMissingSystemWorkItemStatuses`（创建项目时调用）按 `systemCode` 补插默认状态并 `catch (DuplicateKeyException ignored)` 容忍并发重复初始化，但 `pms_work_item_status` 只有主键——唯一索引缺失时该 catch 是死代码，并发下会插入重复系统状态；
+3. `PmsWorkItemStatusServiceImpl#updateWorkItemStatusSort` 注释里的"按状态编号稳定加锁"实际只是 `Collections.sort(statusIds)` 后 `updateBatch`，用于降低死锁概率，并非真正加锁。
 
-**解决**: 生产库为 `pms_work_item (project_id, serial_number)` 补唯一索引（或写入失败重试）；对严格连续的编号需求改为事务内 `SELECT ... FOR UPDATE` 项目行再取 max。普通排序重复影响有限，可通过"列表排序 always 加 id 次序"兜底（现有查询已带 `orderByAsc(id)`）。
+**解决**: 生产库为 `pms_work_item (project_id, serial_number)` 与 `pms_work_item_status (project_id, work_item_type, name)` 补唯一索引，让 `DuplicateKeyException` 兜底真正生效；对严格连续的编号需求改为事务内 `SELECT ... FOR UPDATE` 项目行再取 max。普通排序重复影响有限，现有查询已带 `orderByAsc(id)` 稳定次序兜底。
 
 ### 3.2 项目/知识库成员列表采用"删除-重建"，并发编辑互相覆盖
 
@@ -98,7 +101,7 @@ public String execute(String param) { ... }
 
 **原因**: 工作项生命周期 `ACTIVE → ARCHIVED / RECYCLED`：`PmsWorkItemServiceImpl` 中除查询外所有写方法都先 `validateActiveWorkItem` + `validateActiveProject`；`archiveWorkItem` 写 `archiveTime`、清 `recycleTime`，`recycleWorkItem` 保留 `archiveTime`、写 `recycleTime`，`restoreWorkItem` 两者清空，`deleteWorkItem` 仅允许 RECYCLED（`WORK_ITEM_DELETE_STATUS_INVALID`）且先解除子项与关联需求引用（`updateParentIdToNullByParentId` / `updateRelatedRequirementIdToNullByRelatedRequirementId`）再删关联数据。项目侧 `archiveProject/recycleProject` 用带 `WHERE status = ACTIVE` 条件的 `updateStatusAndArchiveTimeById/updateStatusAndRecycleTimeById` 做 CAS，`updateCount == 0` 即抛 `PROJECT_STATUS_INVALID`，并发下不会双重归档；`deleteProject` 仅回收站状态且要求 Owner 权限。迭代状态机为 `PLANNED → ACTIVE → COMPLETED`（`PmsIterationServiceImpl#startIteration/completeIteration` 单向，不可重启）。
 
-**解决**: 新增工作项/项目写操作时复用 `getWritableWorkItem` 或成对调用 `validateActiveWorkItem` + `validateActiveProject`；状态迁移用条件 UPDATE + 受影响行数判断，不要先查后改。
+**解决**: 新增工作项/项目写操作时复用 `getWritableWorkItem` 或成对调用 `validateActiveWorkItem` + `validateActiveProject`；状态迁移用条件 UPDATE + 受影响行数判断，不要先查后改。看板状态删除同样有状态机约束：默认状态受 `WORK_ITEM_STATUS_DEFAULT_CANNOT_DELETE` 保护，列内仍有工作项时必须提供同项目同类型的目标状态（否则 `WORK_ITEM_STATUS_TRANSFER_INVALID`），迁移由 `transferWorkItemStatus` 一条 UPDATE 完成。
 
 ### 5.2 回收站恢复：独立删除的子树受保护，父级已失效时重挂根目录
 
@@ -115,13 +118,3 @@ public String execute(String param) { ... }
 **原因**: `PmsIterationServiceImpl#buildStatusTrends` 与 `PmsProjectServiceImpl#getProjectOverview` 的完成趋势都用**当前** `status` + `updateTime.toLocalDate()` 反推每日数量，模块没有状态流转历史表，任何批量写操作都会集中改 `updateTime` 使趋势失真；燃尽图 `buildBurnDowns` 按工时记录的 `createTime` 聚合，未填工时的天数无法体现。另外 `PmsWorkItemServiceImpl#getWorkItemPage` 在 `planningOnly + unplannedOnly` 时走"全量查询 + `workItemUserSortService.sortWorkItemList` 内存排序 + `PageUtils.buildPageResult` 内存分页"（代码注释自认"难以在 SQL 中等价表达"）。
 
 **解决**: 把趋势/燃尽视为参考值而非审计数据；业务要求精确时需另建状态流转流水。待规划区超大项目（数千根工作项）需要关注该接口的内存与耗时，必要时拆分"个人排序"与"分页"为两步查询。
-
-## 6. 数据初始化相关
-
-### 6.1 并发初始化默认状态依赖 DuplicateKeyException，隐式要求唯一索引
-
-**问题**: 并发创建项目时出现重复的"未开始/进行中/已完成"状态行；或并发场景下初始化日志大量报重复键异常。
-
-**原因**: `PmsWorkItemStatusServiceImpl#initMissingSystemWorkItemStatuses`（由 `initProjectWorkItemStatuses` 在创建项目时调用）按 `systemCode` 判断缺失后逐条 insert，并 `catch (DuplicateKeyException ignored)` 容忍并发重复初始化。该兜底生效的前提是数据库存在 `(project_id, work_item_type, name 或 system_code)` 唯一索引；注意 `src/test/resources/sql/create_tables.sql` 中 `pms_work_item_status` 只有主键、没有唯一索引——若生产 DDL 与测试脚本一致，这个 catch 是死代码，并发下会产生重复系统状态。
-
-**解决**: 生产库建表时为 `pms_work_item_status (project_id, work_item_type, name)` 补唯一索引，使 `DuplicateKeyException` 兜底真正生效；删除默认状态受 `WORK_ITEM_STATUS_DEFAULT_CANNOT_DELETE` 保护，存在工作项时删除状态必须提供同项目同类型的目标状态（`WORK_ITEM_STATUS_TRANSFER_INVALID` 校验），迁移用 `transferWorkItemStatus` 一条 UPDATE 完成。
