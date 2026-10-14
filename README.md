@@ -47,6 +47,7 @@ skills/
     ├── entity-implementation.md
     ├── extend-module.md
     ├── new-module.md
+    ├── menu-permission.md
     ├── refactor-module.md
     ├── pattern-usage.md
     └── quick-start.md
@@ -79,20 +80,6 @@ skills/
 - 策略模式 - 多种算法或策略间切换
 - 模板方法模式 - 定义算法骨架，子类实现细节
 
-### 4. 自动引用机制
-
-使用样例文档通过 YAML front matter 声明依赖的规范文件，AI 自动加载相关规范：
-
-```yaml
-references:
-  design:
-    - skills/design/db-designer.md
-    - skills/design/entity-designer.md
-  module_guide:
-    mapping:
-      system: docs/modules/system/code-patterns.md
-```
-
 ## 📖 使用场景
 
 | 场景 | 说明 | 文档 |
@@ -103,32 +90,6 @@ references:
 | 改造模块 | 修改现有功能或重构 | [usage/refactor-module.md](skills/usage/refactor-module.md) |
 | 设计模式 | 工厂/策略/模板方法模式 | [usage/pattern-usage.md](skills/usage/pattern-usage.md) |
 | 快速上手 | Skill 文档快速使用 | [usage/quick-start.md](skills/usage/quick-start.md) |
-
-## 🛠️ 技术栈
-
-- **后端**: Spring Boot 2.7.18 / MyBatis Plus / MySQL / Redis
-- **前端**: Vue 3 + Element Plus / Vben(ant-design-vue)
-- **工作流**: Flowable
-- **AI**: Spring AI
-
-## 📝 命名规范
-
-| 类型 | 命名规则 | 示例 |
-|------|---------|------|
-| 数据库表 | 小写下划线 | `mes_process` |
-| DO 类 | `XxxDO` | `MesProcessDO` |
-| Mapper | `XxxMapper` | `MesProcessMapper` |
-| Service | `XxxService` | `MesProcessService` |
-| Controller | `XxxController` | `MesProcessController` |
-| VO | `XxxSaveReqVO` / `XxxRespVO` | `MesProcessSaveReqVO` |
-
-## 📊 项目状态
-
-- ✅ 19 个业务模块功能文档已建立（docs/）
-- ✅ 15 个模块代码模式文档已完成（docs/{模块}/code-patterns.md）
-- ✅ 4 个设计规范已定义
-- ✅ 3 个设计模式已文档化
-- ✅ 使用样例和自动引用机制已就绪
 
 ## 🔗 相关链接
 
