@@ -87,7 +87,7 @@ directory_structure:
   layout: |
     sql/
     ├── {发版日期}/          # 已指定发版日期，如 2026_10_20/，发版后只读归档
-    ├── {模块名}/            # 未定发版日期且归属单一模块，如 mes/、crm/
+    ├── {模块名}/            # 未定发版日期且归属单一模块或业务域，如 mes/、za/
     ├── {当前日期}/          # 未定发版日期且跨模块/通用，如 2026_10_14/
     ├── master/              # 既有全量基线（多数据库版本），保持不变
     └── mysql/ 等数据库目录   # 源项目各数据库全量脚本，保持不变
@@ -119,6 +119,7 @@ file_naming:
       - "2026_10_15-mes_work_order-add_priority_column.sql"
       - "2026_10_15-crm_customer-modify_name_column.sql"
       - "2026_10_15-mes_work_order-add_index-01.sql"
+      - "2026_10_15-mes_work_order-add_index-02.sql"
     rules:
       - "操作段使用具体操作描述（add_column、modify_column、drop_index 等）"
       - "同一表同一天多次变更无法用补充说明区分时，同批文件统一追加两位序号（-01、-02）"
@@ -304,6 +305,7 @@ create_table_template:
     -- 作者：{author}
     -- 日期：{date}
     -- 关联需求：{需求号，如有}
+    -- 回滚说明：{回滚语句或备份方式，破坏性操作必填}
     -- ============================================
 
     CREATE TABLE `{table_name}` (
@@ -342,7 +344,7 @@ create_table_template:
 # ============================================
 update_standards:
   # 更新文件命名（详见 sql/README.md）
-  naming: "{YYYY_MM_DD}-{表名}-{操作}.sql"
+  naming: "{YYYY_MM_DD}-{表名}-{操作}[-{两位序号}][-{数据库标识}].sql"
 
   # 字段操作模板
   operations:
@@ -376,6 +378,7 @@ update_standards:
     -- 作者：{姓名}
     -- 日期：{YYYY-MM-DD}
     -- 关联需求：{需求号，如有}
+    -- 回滚说明：{回滚语句或备份方式，破坏性操作必填}
     -- ============================================
 
   # 注释规范
@@ -431,6 +434,7 @@ coding_standards:
       -- 作者：{作者}
       -- 日期：{YYYY-MM-DD}
       -- 关联需求：{需求号，如有}
+      -- 回滚说明：{回滚语句或备份方式，破坏性操作必填}
       -- ============================================
     table_comment: "CREATE TABLE 语句必须包含 COMMENT"
     column_comment: "每个字段必须包含 COMMENT"
@@ -559,7 +563,7 @@ quick_reference:
     add_index: "新增索引"
     insert_data: "初始数据"
     create_seq: "序列脚本"
-    "-postgresql 后缀": "PostgreSQL / Kingbase 数据库版本"
+    "-postgresql 后缀": "PostgreSQL 数据库版本（Kingbase 等兼容库可直接执行，专用变体用 -kingbase）"
 
   common_columns:
     id: "主键ID（BIGINT）"
@@ -578,7 +582,7 @@ examples:
   work_order:
     input:
       module_code: "mes"
-      table_name: "mes_work_order"
+      table_name: "work_order"
       table_comment: "生产工单表"
       business_fields:
         - name: "order_no"
@@ -605,6 +609,7 @@ examples:
       -- 作者：AI Assistant
       -- 日期：2026-03-25
       -- 关联需求：无
+      -- 回滚说明：无
       -- ============================================
 
       CREATE TABLE `mes_work_order` (
@@ -661,7 +666,7 @@ error_handling:
 
     - code: "DB004"
       message: "文件命名不符合规范"
-      solution: "使用 {YYYY_MM_DD}-{表名}-{操作}.sql 格式，详见 sql/README.md"
+      solution: "使用 {YYYY_MM_DD}-{表名}-{操作}[-{两位序号}][-{数据库标识}].sql 格式，详见 sql/README.md"
 
     - code: "DB005"
       message: "唯一索引缺少 deleted"
