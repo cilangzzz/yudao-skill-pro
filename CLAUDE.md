@@ -31,25 +31,37 @@
 
 > 总索引: [docs/README.md](docs/README.md) — 含模块依赖关系、数据模型统计
 
-| 模块 | 文档路径 | 功能点 | API 域数 | 表数量 |
-|-----|---------|-------|---------|--------|
-| system | [docs/system/](docs/system/README.md) | 用户、角色、权限、部门、租户 | 5 | 18 |
-| infra | [docs/infra/](docs/infra/README.md) | 文件、配置、定时任务、日志、代码生成 | 5 | 11 |
-| pay | [docs/pay/](docs/pay/README.md) | 订单、退款、钱包、转账、渠道、通知 | 6 | 9 |
-| member | [docs/member/](docs/member/README.md) | 用户、等级、积分、签到、地址、标签 | 7 | 11 |
-| mall | [docs/mall/](docs/mall/README.md) | 商品(SPU/SKU)、订单、促销、统计 | 4 | 12 |
-| crm | [docs/crm/](docs/crm/README.md) | 客户、线索、商机、合同、回款、统计 | 10 | 20 |
-| erp | [docs/erp/](docs/erp/README.md) | 采购、销售、库存、财务、产品 | 5 | 25 |
-| bpm | [docs/bpm/](docs/bpm/README.md) | 模型、流程定义、实例、任务、表单 | 7 | 16 |
-| ai | [docs/ai/](docs/ai/README.md) | 对话、图像、模型、知识库、音乐、写作 | 8 | 14 |
-| iot | [docs/iot/](docs/iot/README.md) | 设备、产品、物模型、规则、OTA、告警 | 6 | 12 |
-| mp | [docs/mp/](docs/mp/README.md) | 账号、用户、消息、素材、菜单、自动回复 | 10 | 8 |
-| report | [docs/report/](docs/report/README.md) | GoView 项目、数据查询、积木报表 | 3 | 1 |
-| im | [docs/im/](docs/im/README.md) | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 16 |
-| mes | [docs/mes/](docs/mes/README.md) | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | ~100 |
-| wms | [docs/wms/](docs/wms/README.md) | 仓库、物料、库存、入库、出库、调拨、盘点 | 7 | 16 |
+### 通用结构
 
-每个模块目录下包含：README.md（索引）+ api-{domain}.md（API 详情）+ data-model.md（数据模型）+ pitfalls.md（踩坑点）
+每个模块目录下包含以下文档（api-{domain}.md 按业务域拆分，数量因模块而异）：
+
+| 文件 | 说明 |
+|-----|------|
+| README.md | 模块索引：概述、核心功能点、API 索引、数据模型概览、设计模式、依赖关系 |
+| api-{domain}.md | 按业务域拆分的 API 详情（接口路径、参数、返回值、业务逻辑） |
+| data-model.md | 完整数据模型（表结构、字段定义、ER 关系） |
+| code-patterns.md | 模块代码模式、技术规范与扩展指南 |
+| pitfalls.md | 已知踩坑点和注意事项 |
+
+### 模块列表
+
+| 模块 | 文档路径 | 核心功能 |
+|-----|---------|---------|
+| system | [docs/system/](docs/system/README.md) | 用户、角色、权限、部门、租户 |
+| infra | [docs/infra/](docs/infra/README.md) | 文件、配置、定时任务、日志、代码生成 |
+| pay | [docs/pay/](docs/pay/README.md) | 订单、退款、钱包、转账、渠道、通知 |
+| member | [docs/member/](docs/member/README.md) | 用户、等级、积分、签到、地址、标签 |
+| mall | [docs/mall/](docs/mall/README.md) | 商品(SPU/SKU)、订单、促销、统计 |
+| crm | [docs/crm/](docs/crm/README.md) | 客户、线索、商机、合同、回款、统计 |
+| erp | [docs/erp/](docs/erp/README.md) | 采购、销售、库存、财务、产品 |
+| bpm | [docs/bpm/](docs/bpm/README.md) | 模型、流程定义、实例、任务、表单 |
+| ai | [docs/ai/](docs/ai/README.md) | 对话、图像、模型、知识库、音乐、写作 |
+| iot | [docs/iot/](docs/iot/README.md) | 设备、产品、物模型、规则、OTA、告警 |
+| mp | [docs/mp/](docs/mp/README.md) | 账号、用户、消息、素材、菜单、自动回复 |
+| report | [docs/report/](docs/report/README.md) | GoView 项目、数据查询、积木报表 |
+| im | [docs/im/](docs/im/README.md) | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 |
+| mes | [docs/mes/](docs/mes/README.md) | 主数据、排班、设备、工装、生产、质检、仓库 |
+| wms | [docs/wms/](docs/wms/README.md) | 仓库、物料、库存、入库、出库、调拨、盘点 |
 
 ---
 
@@ -62,7 +74,7 @@ references:
   design:
     - skills/design/db-designer.yaml      # 数据库设计规范
     - skills/design/entity-designer.yaml   # 实体类设计规范
-    - skills/api/api-design/api-designer.yaml      # API 接口设计规范
+    - skills/design/api-designer.yaml      # API 接口设计规范
     - skills/design/crud-designer.yaml     # CRUD 代码生成规范
   module_guide:
     mapping:
@@ -71,32 +83,10 @@ references:
       im: docs/im/code-patterns.md
       mes: docs/mes/code-patterns.md
       wms: docs/wms/code-patterns.md
-      # ... 更多模块见下方索引
+      # ... 其余模块见上方「模块列表」，code-patterns 路径为 docs/{module}/code-patterns.md
 ```
 
 **使用方式**: 在提示词中指定模块名，AI 自动加载对应规范和模块 skill。
-
----
-
-## 模块代码模式文档索引
-
-| 模块 | 文档路径 | 核心功能 |
-|-----|---------|---------|
-| system | [docs/system/code-patterns.md](docs/system/code-patterns.md) | 用户、角色、权限、菜单、租户、字典 |
-| infra | [docs/infra/code-patterns.md](docs/infra/code-patterns.md) | 文件、配置、任务、日志、代码生成 |
-| pay | [docs/pay/code-patterns.md](docs/pay/code-patterns.md) | 支付、退款、钱包、转账 |
-| member | [docs/member/code-patterns.md](docs/member/code-patterns.md) | 会员、积分、等级、签到 |
-| mall | [docs/mall/code-patterns.md](docs/mall/code-patterns.md) | 商品、订单、促销、统计 |
-| crm | [docs/crm/code-patterns.md](docs/crm/code-patterns.md) | 线索、客户、商机、合同、回款 |
-| erp | [docs/erp/code-patterns.md](docs/erp/code-patterns.md) | 采购、销售、库存、财务 |
-| bpm | [docs/bpm/code-patterns.md](docs/bpm/code-patterns.md) | 流程定义、流程实例、任务 |
-| ai | [docs/ai/code-patterns.md](docs/ai/code-patterns.md) | AI 模型、对话、绘图 |
-| iot | [docs/iot/code-patterns.md](docs/iot/code-patterns.md) | 设备、产品、物模型 |
-| mp | [docs/mp/code-patterns.md](docs/mp/code-patterns.md) | 公众号、菜单、消息 |
-| report | [docs/report/code-patterns.md](docs/report/code-patterns.md) | 报表、数据源、图表 |
-| im | [docs/im/code-patterns.md](docs/im/code-patterns.md) | 单聊、群聊、消息、RTC、表情、频道 |
-| mes | [docs/mes/code-patterns.md](docs/mes/code-patterns.md) | 主数据、生产、质检、设备、仓库、排班 |
-| wms | [docs/wms/code-patterns.md](docs/wms/code-patterns.md) | 仓库、物料、库存、入库、出库、调拨、盘点 |
 
 ---
 
@@ -106,7 +96,7 @@ references:
 |-----|------|------|
 | 数据库设计 | [skills/design/db-designer.yaml](skills/design/db-designer.yaml) | 建表 SQL、字段命名、索引设计 |
 | 实体类设计 | [skills/design/entity-designer.yaml](skills/design/entity-designer.yaml) | 继承体系、注解规范、命名转换 |
-| API 接口设计 | [skills/api/api-design/api-designer.yaml](skills/api/api-design/api-designer.yaml) | Controller 注解、请求响应格式 |
+| API 接口设计 | [skills/design/api-designer.yaml](skills/design/api-designer.yaml) | Controller 注解、请求响应格式 |
 | CRUD 代码生成 | [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml) | 各层代码模板、命名规范 |
 | SQL 文件管理 | [sql/README.md](sql/README.md) | SQL 目录组织（发版日期 / 模块 / 日期）与文件命名规范 |
 
@@ -122,44 +112,12 @@ references:
 
 ---
 
-## 命名规范速查
+## 规范速查索引
 
-| 类型 | 命名规则 | 示例 |
-|------|---------|------|
-| 数据库表 | 小写下划线 | `mes_process` |
-| DO 类 | `XxxDO` | `MesProcessDO` |
-| Mapper | `XxxMapper` | `MesProcessMapper` |
-| Service 接口 | `XxxService` | `MesProcessService` |
-| Service 实现 | `XxxServiceImpl` | `MesProcessServiceImpl` |
-| Controller | `XxxController` | `MesProcessController` |
-| 保存 VO | `XxxSaveReqVO` | `MesProcessSaveReqVO` |
-| 分页 VO | `XxxPageReqVO` | `MesProcessPageReqVO` |
-| 响应 VO | `XxxRespVO` | `MesProcessRespVO` |
-| 权限标识 | `模块:功能:操作` | `mes:process:create` |
+命名规范、错误码前缀、分层包路径等速查表已在规范文档中维护，此处仅保留索引，避免双处更新不一致：
 
----
-
-## 错误码前缀速查
-
-| 模块 | 前缀 | 示例 |
-|------|------|------|
-| infra | `1_001_XXX_XXX` | 1_001_000_000 文件不存在 |
-| system | `1_002_XXX_XXX` | 1_002_000_000 登录失败 |
-| member | `1_004_XXX_XXX` | 1_004_001_000 用户不存在 |
-| pay | `1_007_XXX_XXX` | 1_007_002_000 支付订单不存在 |
-| product | `1_008_XXX_XXX` | 1_008_005_000 商品不存在 |
-| trade | `1_011_XXX_XXX` | 1_011_000_011 订单不存在 |
-| promotion | `1_013_XXX_XXX` | 1_013_004_000 优惠券模板不存在 |
-
----
-
-## 分层架构路径
-
-```
-cn.iocoder.yudao.module.{模块}
-├── controller/admin/{功能}/          # Controller + VO
-├── service/{功能}/                   # Service 接口 + 实现
-├── dal/dataobject/{功能}/            # DO 实体
-├── dal/mysql/{功能}/                 # Mapper
-└── enums/                            # 错误码 + 枚举
-```
+| 速查项 | 权威出处 | 内容说明 |
+|-------|---------|---------|
+| 命名规范速查 | [skills/usage/entity-implementation.md](skills/usage/entity-implementation.md) · [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml)（`naming_standards`） | 表/DO/Mapper/Service/Controller/VO 命名与权限标识格式 |
+| 错误码前缀速查 | [skills/usage/quick-start.md](skills/usage/quick-start.md) §4.2 · [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml)（`error_code.module_codes`） | 各模块错误码前缀与示例 |
+| 分层架构路径 | [skills/usage/entity-implementation.md](skills/usage/entity-implementation.md) 包路径规范 | `cn.iocoder.yudao.module.{模块}` 各层目录树 |

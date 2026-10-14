@@ -1,6 +1,6 @@
 # Skill 索引文件
 # 记录所有模块/规范/模式/使用样例的Skill文档位置和状态
-# 最后更新：2026-10-14（模块知识文档并入 docs/：原各模块 Skill YAML 统一迁移为 docs/{m}/code-patterns.md；docs/templates/ 模板已删除，全仓引用同步清理；新增 im/mes/wms 模块，补录 patterns/usage 两大区段；patterns 移入 design、api 独立为顶层区段）
+# 最后更新：2026-10-14（模块知识文档并入 docs/：原各模块 Skill YAML 统一迁移为 docs/{m}/code-patterns.md；docs/templates/ 模板已删除，全仓引用同步清理；新增 im/mes/wms 模块，补录 patterns/usage 两大区段；patterns、api-designer 移入 design 统一管理）
 
 # ============================================
 # 业务模块（按优先级排序）
@@ -166,6 +166,12 @@ design:
     status: "completed"
     description: "根据数据库表结构自动生成完整CRUD功能代码"
     lines: 517
+  api:
+    name: "API 接口设计"
+    path: "skills/design/api-designer.yaml"
+    status: "completed"
+    description: "REST API 设计规范、注解、请求响应格式、权限标识"
+    lines: 708
   # 设计模式（patterns 子目录，融入 design 统一管理）
   patterns:
     index:
@@ -192,17 +198,6 @@ design:
       status: "completed"
       description: "定义算法骨架，子类实现具体步骤（应用于 pay、infra）"
       lines: 118
-
-# ============================================
-# API 规范（独立顶层区段）
-# ============================================
-api:
-  api-design:
-    name: "API 设计规范"
-    path: "skills/api/api-design/api-designer.yaml"
-    status: "completed"
-    description: "REST API 设计规范、注解、请求响应格式、权限标识"
-    lines: 708
 
 # ============================================
 # 使用样例

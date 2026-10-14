@@ -23,7 +23,7 @@
 | **设计规范** | `skills/design/` | 数据库、实体类、CRUD 代码生成、设计模式 4 套规范 |
 | **模块代码模式文档** | `docs/{模块}/code-patterns.md` | 15 个业务模块的代码模式文档（架构、表结构、代码模式、扩展指南） |
 | **设计模式** | `skills/design/patterns/` | 工厂、策略、模板方法 3 种设计模式实现指南（融入 design 统一管理） |
-| **API 规范** | `skills/api/api-design/` | REST API 接口设计规范（独立顶层目录） |
+| **API 规范** | `skills/design/api-designer.yaml` | REST API 接口设计规范（融入 design 统一管理） |
 | **使用样例** | `skills/usage/` | 实体类实现、扩展模块、新增模块、改造模块等场景的提示词模板 |
 
 > 同步方式：定期从 upstream/master 拉取最新代码合并，自定义文件始终保留。
@@ -37,14 +37,12 @@ skills/
 │   ├── db-designer.yaml      # 数据库设计规范
 │   ├── entity-designer.yaml  # 实体类设计规范
 │   ├── crud-designer.yaml    # CRUD 代码生成规范
+│   ├── api-designer.yaml     # API 接口设计规范
 │   └── patterns/             # 设计模式（融入 design 统一管理）
 │       ├── index.yaml
 │       ├── factory-pattern.yaml
 │       ├── strategy-pattern.yaml
 │       └── template-method-pattern.yaml
-├── api/                       # API 规范（独立顶层目录）
-│   └── api-design/
-│       └── api-designer.yaml # API 接口设计规范
 └── usage/                     # 使用样例
     ├── index.md              # 使用指南总览
     ├── entity-implementation.md

@@ -3,7 +3,7 @@
 # AI 读取本文档时会自动加载以下规范文件，确保生成的代码符合项目规范
 references:
   design:
-    - path: skills/api/api-design/api-designer.yaml
+    - path: skills/design/api-designer.yaml
       reason: "API 接口设计规范 - 扩展接口需遵循现有规范"
     - path: skills/design/entity-designer.yaml
       reason: "实体类设计规范 - 新增实体需遵循 DO 规范"
