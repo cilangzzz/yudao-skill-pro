@@ -1,6 +1,6 @@
 # 芋道源码模块文档索引
 
-> 基于 `author-build-project-docs` 工作流的 phase-5-business 规范生成，每个模块由独立子 agent 分析对应模块知识提取；模块知识已整合进 docs/ 各模块文档（含 code-patterns.md 代码模式文档）。
+> 基于 `author-build-project-docs` 工作流的 phase-5-business 规范生成，每个模块由独立子 agent 分析对应模块知识提取；模块知识已整合进 `docs/modules/` 各模块文档（含 code-patterns.md 代码模式文档）。
 
 ## 文档结构
 
@@ -14,21 +14,21 @@
 
 | 模块 | 说明 | 核心功能 | API 域数 | 文件数 | 文档路径 |
 |-----|------|---------|---------|--------|---------|
-| **system** | 系统管理 | 用户、角色、权限、部门、租户、字典 | 5 | 8 | [docs/system/](system/README.md) |
-| **infra** | 基础设施 | 文件、配置、定时任务、日志、代码生成 | 5 | 8 | [docs/infra/](infra/README.md) |
-| **pay** | 支付 | 订单、退款、钱包、转账、渠道、通知 | 6 | 9 | [docs/pay/](pay/README.md) |
-| **member** | 会员 | 用户、等级、积分、签到、地址、标签 | 7 | 10 | [docs/member/](member/README.md) |
-| **mall** | 商城 | 商品(SPU/SKU)、订单、促销、统计 | 4 | 7 | [docs/mall/](mall/README.md) |
-| **crm** | CRM | 客户、线索、商机、合同、回款、统计 | 10 | 13 | [docs/crm/](crm/README.md) |
-| **erp** | ERP | 采购、销售、库存、财务、产品 | 5 | 8 | [docs/erp/](erp/README.md) |
-| **bpm** | 工作流 | 模型、流程定义、实例、任务、表单 | 7 | 8 | [docs/bpm/](bpm/README.md) |
-| **ai** | AI | 对话、图像、模型、知识库、音乐、写作 | 8 | 11 | [docs/ai/](ai/README.md) |
-| **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警 | 6 | 9 | [docs/iot/](iot/README.md) |
-| **mp** | 公众号 | 账号、用户、消息、素材、菜单、自动回复 | 10 | 13 | [docs/mp/](mp/README.md) |
-| **report** | 报表 | GoView 项目、数据查询、积木报表 | 3 | 6 | [docs/report/](report/README.md) |
-| **im** | 即时通讯 | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 10 | [docs/im/](im/README.md) |
-| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | 12 | [docs/mes/](mes/README.md) |
-| **wms** | 仓储管理 | 仓库、物料、库存、入库、出库、调拨、盘点 | 7 | 10 | [docs/wms/](wms/README.md) |
+| **system** | 系统管理 | 用户、角色、权限、部门、租户、字典 | 5 | 8 | [docs/modules/system/](system/README.md) |
+| **infra** | 基础设施 | 文件、配置、定时任务、日志、代码生成 | 5 | 8 | [docs/modules/infra/](infra/README.md) |
+| **pay** | 支付 | 订单、退款、钱包、转账、渠道、通知 | 6 | 9 | [docs/modules/pay/](pay/README.md) |
+| **member** | 会员 | 用户、等级、积分、签到、地址、标签 | 7 | 10 | [docs/modules/member/](member/README.md) |
+| **mall** | 商城 | 商品(SPU/SKU)、订单、促销、统计 | 4 | 7 | [docs/modules/mall/](mall/README.md) |
+| **crm** | CRM | 客户、线索、商机、合同、回款、统计 | 10 | 13 | [docs/modules/crm/](crm/README.md) |
+| **erp** | ERP | 采购、销售、库存、财务、产品 | 5 | 8 | [docs/modules/erp/](erp/README.md) |
+| **bpm** | 工作流 | 模型、流程定义、实例、任务、表单 | 7 | 8 | [docs/modules/bpm/](bpm/README.md) |
+| **ai** | AI | 对话、图像、模型、知识库、音乐、写作 | 8 | 11 | [docs/modules/ai/](ai/README.md) |
+| **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警 | 6 | 9 | [docs/modules/iot/](iot/README.md) |
+| **mp** | 公众号 | 账号、用户、消息、素材、菜单、自动回复 | 10 | 13 | [docs/modules/mp/](mp/README.md) |
+| **report** | 报表 | GoView 项目、数据查询、积木报表 | 3 | 6 | [docs/modules/report/](report/README.md) |
+| **im** | 即时通讯 | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 10 | [docs/modules/im/](im/README.md) |
+| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | 12 | [docs/modules/mes/](mes/README.md) |
+| **wms** | 仓储管理 | 仓库、物料、库存、入库、出库、调拨、盘点 | 7 | 10 | [docs/modules/wms/](wms/README.md) |
 
 **合计: 15 个模块 / 131 个文档文件**
 

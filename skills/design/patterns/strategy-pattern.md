@@ -51,7 +51,7 @@
 ### 信号 6：算法变体自身有依赖和状态
 
 - **解释**：需要依赖注入、生命周期管理和按 key 缓存实例时，策略必须是 Spring 管理 bean；同时要设计好配置变更的生效机制（否则就会出现「配置改了但内存里的旧实例还在跑」这类经典踩坑）
-- **项目案例**：`PayClientFactoryImpl` 用 `ConcurrentMap<Long, AbstractPayClient<?>>` 按 channelId 缓存客户端，配置变更时 `createOrUpdatePayClient` 走 `AbstractPayClient.refresh(config)` 的 equals 比对热更新（详见 `docs/pay/pitfalls.md` 的「配置热更新」踩坑点）
+- **项目案例**：`PayClientFactoryImpl` 用 `ConcurrentMap<Long, AbstractPayClient<?>>` 按 channelId 缓存客户端，配置变更时 `createOrUpdatePayClient` 走 `AbstractPayClient.refresh(config)` 的 equals 比对热更新（详见 `docs/modules/pay/pitfalls.md` 的「配置热更新」踩坑点）
 
 ### 信号 7：单元测试需要把某个外部调用替换成桩
 
@@ -100,7 +100,7 @@
 - [ ] 这些分支真的是「同一件事的不同做法」吗？能否写出让所有实现都自然满足统一方法签名？如果必须硬凑参数或空实现，先别抽策略
 - [ ] 有没有具体业务证据表明清单会增长（排期中已确认「下季度接云片短信 / 银联支付」），还是只是「将来可能」？前者抽策略，后者保留 if/else
 - [ ] 每个算法变体需要注入哪些依赖（SDK client、Redis、配置）、持有哪些状态？如果都不需要，Map+lambda 或枚举实现就够了，不必为此建类
-- [ ] 策略如何被选中：调用方显式传入、注册表按 key 查找、还是 Spring 按 bean 名称 / 类型注入？key 查不到时抛什么错误码、由谁兜底？—— 本项目 `docs/pay/pitfalls.md` 记录过 `PayClientFactoryImpl.getPayClient` 查不到仅打 error 日志返回 null 的踩坑，新代码务必显式抛错
+- [ ] 策略如何被选中：调用方显式传入、注册表按 key 查找、还是 Spring 按 bean 名称 / 类型注入？key 查不到时抛什么错误码、由谁兜底？—— 本项目 `docs/modules/pay/pitfalls.md` 记录过 `PayClientFactoryImpl.getPayClient` 查不到仅打 error 日志返回 null 的踩坑，新代码务必显式抛错
 - [ ] 策略实现应是无状态单例（`@Component` 即可），还是按配置实例化并缓存（如 `PayClientFactoryImpl` 按 channelId 缓存 + refresh 热更新）？策略里能放可变字段吗？缓存的 equals 键（如 `PayClientConfig`）需不需要 `@Data` equals 实现？
 - [ ] 选择逻辑收敛在哪一层？能否保证业务代码中除注册表构建处外，不再出现任何按渠道 / 类型的 if/else？若仍残留 switch，说明键设计维度错了（可能需要拆成两级注册表或换成键对象）
 
@@ -201,7 +201,7 @@ public class PayOrderService {
 
 - 策略接口只含两个职责：声明自己负责的 key（`supportChannel`）+ 执行算法（`createOrder`）；key 由实现类自声明，注册过程对实现类零侵入
 - 构造器注入 `List<PayChannelHandler>`，Spring 会自动收集容器内全部实现 bean —— 注册表由框架构建，新增渠道 = 新增一个类，主流程零 if/else、零改动
-- 上下文（`PayOrderService`）是唯一感知所有策略存在的地方；key 查不到时显式抛异常，不静默返回 null（`docs/pay/pitfalls.md` 明确记录过 `PayClientFactoryImpl.getPayClient` 查不到仅打 error 日志返回 null 导致的踩坑）
+- 上下文（`PayOrderService`）是唯一感知所有策略存在的地方；key 查不到时显式抛异常，不静默返回 null（`docs/modules/pay/pitfalls.md` 明确记录过 `PayClientFactoryImpl.getPayClient` 查不到仅打 error 日志返回 null 导致的踩坑）
 - 策略实现默认无状态单例（`@Component` singleton）；若渠道需要按配置初始化的 SDK client，参考 `PayClientFactoryImpl`：按 channelId 缓存实例 + 配置变更时 refresh 热更新
 - 若某渠道实现只有一两行，可降级为 `Map<PayChannelEnum, Function<PayOrderBO, String>>` + lambda / 方法引用，不必为此建类
 - 单元测试时向 `PayOrderService` 注入一个假 `PayChannelHandler` 即可覆盖主流程，无需 mock 整个第三方 SDK
@@ -228,7 +228,7 @@ public interface PayClient<Config> {
 }
 // 具体策略 14 个，由 PayClientFactoryImpl 按 PayChannelEnum 枚举维护 clientClass 注册表、
 // 按 channelId(Long) 缓存运行时实例，配置变更走 AbstractPayClient.refresh(config) 热更新
-// 注意：getPayClient 查不到仅打 error 日志返回 null 是项目内已知踩坑点（docs/pay/pitfalls.md）
+// 注意：getPayClient 查不到仅打 error 日志返回 null 是项目内已知踩坑点（docs/modules/pay/pitfalls.md）
 ```
 
 ### system · SmsClient 接口
@@ -357,12 +357,12 @@ public interface DataPermissionRule {
 
 ### 工厂缓存的重量级策略（策略 + 工厂 + 实例缓存）
 
-- **描述**：策略实例不进 Spring 容器，由工厂按 key 创建并缓存：`PayClientFactoryImpl` 用 `ConcurrentMap<Long, AbstractPayClient<?>>` 缓存，配置变更时经 `AbstractPayClient.refresh(config)` 热更新（详见 `docs/pay/pitfalls.md` 关于 refresh.equals 实现的踩坑点）
+- **描述**：策略实例不进 Spring 容器，由工厂按 key 创建并缓存：`PayClientFactoryImpl` 用 `ConcurrentMap<Long, AbstractPayClient<?>>` 缓存，配置变更时经 `AbstractPayClient.refresh(config)` 热更新（详见 `docs/modules/pay/pitfalls.md` 关于 refresh.equals 实现的踩坑点）
 - **适用**：策略实例创建成本高（SDK 握手、连接池）、需按数据库配置动态实例化与热更新、同一 key 的实例须跨请求复用
 
 ### 可热插拔策略（Context 持有 setter，运行时整体替换）
 
-- **描述**：经典 GoF 形态：Context 提供 `setStrategy()`，行为在运行期整体替换。JDK `ThreadPoolExecutor.setRejectedHandlerHandler()` 即此类变体；本项目 `docs/pay/pitfalls.md` 提到的「已删渠道的实例仍在进程内可解析回调」也是该形态的典型踩坑 —— 热更新不彻底导致旧实例残留
+- **描述**：经典 GoF 形态：Context 提供 `setStrategy()`，行为在运行期整体替换。JDK `ThreadPoolExecutor.setRejectedHandlerHandler()` 即此类变体；本项目 `docs/modules/pay/pitfalls.md` 提到的「已删渠道的实例仍在进程内可解析回调」也是该形态的典型踩坑 —— 热更新不彻底导致旧实例残留
 - **适用**：需按运维开关 / 全局配置切换整套行为（线程池拒绝策略、限流算法），切换点全局唯一、不随单次请求变化
 
 ### 分发型策略（Delegating：按数据自带标记路由）
@@ -440,4 +440,4 @@ public enum SmsChannelEnum { XXX(10, "XXX短信"); }
 - <https://docs.spring.io/spring-security/reference/features/authentication/password-storage.html>
 - <https://www.baeldung.com/java-rejectedexecutionhandler>
 - <https://www.baeldung.com/java-enums>
-- 本项目 `docs/pay/pitfalls.md`（`PayClientFactoryImpl.getPayClient` 返回 null 与 refresh 热更新踩坑点）
+- 本项目 `docs/modules/pay/pitfalls.md`（`PayClientFactoryImpl.getPayClient` 返回 null 与 refresh 热更新踩坑点）

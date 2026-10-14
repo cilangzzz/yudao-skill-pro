@@ -27,7 +27,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 **示例**：
 ```
 使用 Skill 文档，帮我在 system 模块添加一个"操作日志"功能。
-参考 docs/system/code-patterns.md
+参考 docs/modules/system/code-patterns.md
 ```
 
 ---
@@ -83,7 +83,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 **示例**：
 ```
-参考 docs/system/code-patterns.md，帮我找到用户登录相关的代码位置：
+参考 docs/modules/system/code-patterns.md，帮我找到用户登录相关的代码位置：
 - Controller 入口
 - Service 实现
 - 认证逻辑
@@ -104,7 +104,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 **示例**：
 ```
-参考 docs/mall/code-patterns.md，帮我理解订单支付的完整流程：
+参考 docs/modules/mall/code-patterns.md，帮我理解订单支付的完整流程：
 1. 支付入口在哪里？
 2. 核心支付逻辑在哪个 Service？
 3. 支付回调如何处理？
@@ -131,7 +131,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 **示例**：
 ```
-参考 docs/pay/code-patterns.md，帮我分析和修复以下问题：
+参考 docs/modules/pay/code-patterns.md，帮我分析和修复以下问题：
 
 问题描述：支付回调后订单状态未更新
 错误信息：无异常，但订单一直是待支付状态
@@ -162,7 +162,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 **示例**：
 ```
-参考 docs/member/code-patterns.md，帮我在会员用户中添加新字段：
+参考 docs/modules/member/code-patterns.md，帮我在会员用户中添加新字段：
 
 字段名：vipExpireTime
 字段类型：LocalDateTime
@@ -196,7 +196,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 **示例**：
 ```
-参考 docs/system/code-patterns.md，帮我添加一个新接口：
+参考 docs/modules/system/code-patterns.md，帮我添加一个新接口：
 
 接口名称：获取当前用户信息
 接口路径：GET /system/user/current
@@ -211,7 +211,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 ### 3.6 添加权限
 
 ```
-参考 Skill 文档 docs/system/code-patterns.md，帮我添加一个新的权限：
+参考 Skill 文档 docs/modules/system/code-patterns.md，帮我添加一个新的权限：
 
 权限名称：[权限名]
 权限标识：[权限码，格式：模块:功能:操作]
@@ -225,7 +225,7 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 **示例**：
 ```
-参考 docs/system/code-patterns.md，帮我添加一个新的权限：
+参考 docs/modules/system/code-patterns.md，帮我添加一个新的权限：
 
 权限名称：导出用户
 权限标识：system:user:export
@@ -245,18 +245,18 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 | 模块 | 文档路径 | 核心功能 | 关键实体 |
 |------|---------|---------|---------|
-| **system** | docs/system/code-patterns.md | 用户、角色、权限、菜单、租户、字典 | AdminUserDO, RoleDO, MenuDO |
-| **infra** | docs/infra/code-patterns.md | 文件、配置、任务、日志、代码生成 | FileDO, JobDO, ConfigDO |
-| **pay** | docs/pay/code-patterns.md | 支付、退款、钱包、转账 | PayOrderDO, PayRefundDO, PayWalletDO |
-| **member** | docs/member/code-patterns.md | 会员、积分、等级、签到、地址 | MemberUserDO, MemberLevelDO |
-| **mall** | docs/mall/code-patterns.md | 商品、订单、促销、统计 | ProductSpuDO, TradeOrderDO, CouponDO |
-| **crm** | docs/crm/code-patterns.md | 线索、客户、商机、合同、回款 | CrmCustomerDO, CrmContractDO |
-| **erp** | docs/erp/code-patterns.md | 采购、销售、库存、财务 | ErpPurchaseDO, ErpSaleDO |
-| **bpm** | docs/bpm/code-patterns.md | 流程定义、流程实例、任务 | BpmProcessDefinitionDO |
-| **ai** | docs/ai/code-patterns.md | AI 模型、对话、绘图 | AiChatMessageDO, AiImageDO |
-| **iot** | docs/iot/code-patterns.md | 设备、产品、物模型 | IotDeviceDO, IotProductDO |
-| **mp** | docs/mp/code-patterns.md | 公众号、菜单、消息 | MpAccountDO, MpMessageDO |
-| **report** | docs/report/code-patterns.md | 报表、数据源、图表 | ReportDataSourceDO |
+| **system** | docs/modules/system/code-patterns.md | 用户、角色、权限、菜单、租户、字典 | AdminUserDO, RoleDO, MenuDO |
+| **infra** | docs/modules/infra/code-patterns.md | 文件、配置、任务、日志、代码生成 | FileDO, JobDO, ConfigDO |
+| **pay** | docs/modules/pay/code-patterns.md | 支付、退款、钱包、转账 | PayOrderDO, PayRefundDO, PayWalletDO |
+| **member** | docs/modules/member/code-patterns.md | 会员、积分、等级、签到、地址 | MemberUserDO, MemberLevelDO |
+| **mall** | docs/modules/mall/code-patterns.md | 商品、订单、促销、统计 | ProductSpuDO, TradeOrderDO, CouponDO |
+| **crm** | docs/modules/crm/code-patterns.md | 线索、客户、商机、合同、回款 | CrmCustomerDO, CrmContractDO |
+| **erp** | docs/modules/erp/code-patterns.md | 采购、销售、库存、财务 | ErpPurchaseDO, ErpSaleDO |
+| **bpm** | docs/modules/bpm/code-patterns.md | 流程定义、流程实例、任务 | BpmProcessDefinitionDO |
+| **ai** | docs/modules/ai/code-patterns.md | AI 模型、对话、绘图 | AiChatMessageDO, AiImageDO |
+| **iot** | docs/modules/iot/code-patterns.md | 设备、产品、物模型 | IotDeviceDO, IotProductDO |
+| **mp** | docs/modules/mp/code-patterns.md | 公众号、菜单、消息 | MpAccountDO, MpMessageDO |
+| **report** | docs/modules/report/code-patterns.md | 报表、数据源、图表 | ReportDataSourceDO |
 
 ### 4.2 错误码前缀速查
 

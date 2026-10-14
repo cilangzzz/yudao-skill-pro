@@ -14,18 +14,18 @@ references:
   module_guide:
     prompt: "请指定目标模块，AI 将加载对应模块的 skill 文档"
     mapping:
-      system: docs/system/code-patterns.md
-      infra: docs/infra/code-patterns.md
-      pay: docs/pay/code-patterns.md
-      member: docs/member/code-patterns.md
-      mall: docs/mall/code-patterns.md
-      crm: docs/crm/code-patterns.md
-      erp: docs/erp/code-patterns.md
-      bpm: docs/bpm/code-patterns.md
-      ai: docs/ai/code-patterns.md
-      iot: docs/iot/code-patterns.md
-      mp: docs/mp/code-patterns.md
-      report: docs/report/code-patterns.md
+      system: docs/modules/system/code-patterns.md
+      infra: docs/modules/infra/code-patterns.md
+      pay: docs/modules/pay/code-patterns.md
+      member: docs/modules/member/code-patterns.md
+      mall: docs/modules/mall/code-patterns.md
+      crm: docs/modules/crm/code-patterns.md
+      erp: docs/modules/erp/code-patterns.md
+      bpm: docs/modules/bpm/code-patterns.md
+      ai: docs/modules/ai/code-patterns.md
+      iot: docs/modules/iot/code-patterns.md
+      mp: docs/modules/mp/code-patterns.md
+      report: docs/modules/report/code-patterns.md
   usage_hint: "使用时请在提示词中指定模块名，如：'目标模块：mes'"
 ---
 

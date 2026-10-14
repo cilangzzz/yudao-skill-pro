@@ -10,18 +10,18 @@ references:
   module_guide:
     prompt: "请指定要扩展的模块，AI 将加载对应模块的 skill 文档"
     mapping:
-      system: docs/system/code-patterns.md
-      infra: docs/infra/code-patterns.md
-      pay: docs/pay/code-patterns.md
-      member: docs/member/code-patterns.md
-      mall: docs/mall/code-patterns.md
-      crm: docs/crm/code-patterns.md
-      erp: docs/erp/code-patterns.md
-      bpm: docs/bpm/code-patterns.md
-      ai: docs/ai/code-patterns.md
-      iot: docs/iot/code-patterns.md
-      mp: docs/mp/code-patterns.md
-      report: docs/report/code-patterns.md
+      system: docs/modules/system/code-patterns.md
+      infra: docs/modules/infra/code-patterns.md
+      pay: docs/modules/pay/code-patterns.md
+      member: docs/modules/member/code-patterns.md
+      mall: docs/modules/mall/code-patterns.md
+      crm: docs/modules/crm/code-patterns.md
+      erp: docs/modules/erp/code-patterns.md
+      bpm: docs/modules/bpm/code-patterns.md
+      ai: docs/modules/ai/code-patterns.md
+      iot: docs/modules/iot/code-patterns.md
+      mp: docs/modules/mp/code-patterns.md
+      report: docs/modules/report/code-patterns.md
   patterns:
     - path: skills/design/patterns/factory-pattern.md
       reason: "工厂模式 - 渠道/平台扩展时注册到工厂"
@@ -209,7 +209,7 @@ package {完整包名};
 ### 目标模块
 - 模块名称：pay
 - 模块路径：yudao-module-pay
-- Skill 文档：docs/pay/code-patterns.md
+- Skill 文档：docs/modules/pay/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：渠道扩展
@@ -439,7 +439,7 @@ clientClass.put(UNION_PAY_APP, UnionPayAppPayClient.class);
 ### 目标模块
 - 模块名称：ai
 - 模块路径：yudao-module-ai
-- Skill 文档：docs/ai/code-patterns.md
+- Skill 文档：docs/modules/ai/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：平台扩展
@@ -619,7 +619,7 @@ public void chat() {
 ### 目标模块
 - 模块名称：infra
 - 模块路径：yudao-module-infra
-- Skill 文档：docs/infra/code-patterns.md
+- Skill 文档：docs/modules/infra/code-patterns.md
 
 ### 扩展需求
 - 扩展类型：渠道扩展
@@ -859,18 +859,18 @@ public enum FileStorageEnum {
 
 | 模块 | 路径 | Skill 文档 |
 |-----|------|-----------|
-| pay | yudao-module-pay | docs/pay/code-patterns.md |
-| ai | yudao-module-ai | docs/ai/code-patterns.md |
-| infra | yudao-module-infra | docs/infra/code-patterns.md |
-| bpm | yudao-module-bpm | docs/bpm/code-patterns.md |
-| system | yudao-module-system | docs/system/code-patterns.md |
-| member | yudao-module-member | docs/member/code-patterns.md |
-| mall | yudao-module-product | docs/mall/code-patterns.md |
-| crm | yudao-module-crm | docs/crm/code-patterns.md |
-| erp | yudao-module-erp | docs/erp/code-patterns.md |
-| mp | yudao-module-mp | docs/mp/code-patterns.md |
-| iot | yudao-module-iot | docs/iot/code-patterns.md |
-| report | yudao-module-report | docs/report/code-patterns.md |
+| pay | yudao-module-pay | docs/modules/pay/code-patterns.md |
+| ai | yudao-module-ai | docs/modules/ai/code-patterns.md |
+| infra | yudao-module-infra | docs/modules/infra/code-patterns.md |
+| bpm | yudao-module-bpm | docs/modules/bpm/code-patterns.md |
+| system | yudao-module-system | docs/modules/system/code-patterns.md |
+| member | yudao-module-member | docs/modules/member/code-patterns.md |
+| mall | yudao-module-product | docs/modules/mall/code-patterns.md |
+| crm | yudao-module-crm | docs/modules/crm/code-patterns.md |
+| erp | yudao-module-erp | docs/modules/erp/code-patterns.md |
+| mp | yudao-module-mp | docs/modules/mp/code-patterns.md |
+| iot | yudao-module-iot | docs/modules/iot/code-patterns.md |
+| report | yudao-module-report | docs/modules/report/code-patterns.md |
 
 ### 命名规范参数
 

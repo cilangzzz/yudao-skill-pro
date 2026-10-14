@@ -90,7 +90,7 @@ references:
     - skills/design/entity-designer.md
   module_guide:
     mapping:
-      system: docs/system/code-patterns.md
+      system: docs/modules/system/code-patterns.md
 ```
 
 ## 📖 使用场景

@@ -10,11 +10,11 @@ references:
     - path: skills/design/patterns/template-method-pattern.md
       reason: "模板方法模式 - 算法骨架的固定结构"
   reference_modules:
-    - path: docs/pay/code-patterns.md
+    - path: docs/modules/pay/code-patterns.md
       reason: "支付模块 - 工厂+策略+模板方法模式组合案例"
-    - path: docs/ai/code-patterns.md
+    - path: docs/modules/ai/code-patterns.md
       reason: "AI 模块 - 工厂+策略模式案例"
-    - path: docs/infra/code-patterns.md
+    - path: docs/modules/infra/code-patterns.md
       reason: "基础设施模块 - 文件存储策略模式案例"
   usage_hint: "设计模式通常组合使用，参考 pay 模块的完整案例"
 ---

@@ -85,13 +85,13 @@
 
 参考现有模块的 skill 文档结构：
 
-- 核心模块参考：`docs/system/code-patterns.md`、`docs/infra/code-patterns.md`
-- 业务模块参考：`docs/mall/code-patterns.md`、`docs/crm/code-patterns.md`
-- 技术模块参考：`docs/bpm/code-patterns.md`、`docs/ai/code-patterns.md`
+- 核心模块参考：`docs/modules/system/code-patterns.md`、`docs/modules/infra/code-patterns.md`
+- 业务模块参考：`docs/modules/mall/code-patterns.md`、`docs/modules/crm/code-patterns.md`
+- 技术模块参考：`docs/modules/bpm/code-patterns.md`、`docs/modules/ai/code-patterns.md`
 
 **新增模块步骤**：
 
-1. 参考现有模块的 `code-patterns.md`（如 `docs/system/code-patterns.md`）确定文档结构
+1. 参考现有模块的 `code-patterns.md`（如 `docs/modules/system/code-patterns.md`）确定文档结构
 2. 参考现有模块文档提取技术规范
 3. 按照模块规范编写代码
 4. 更新 CLAUDE.md 模块列表与 docs/README.md 总索引
@@ -184,10 +184,10 @@
 
 **A:** 根据你的开发任务类型选择：
 
-- 快速上手：从 `docs/system/code-patterns.md` 或 `docs/infra/code-patterns.md` 开始
+- 快速上手：从 `docs/modules/system/code-patterns.md` 或 `docs/modules/infra/code-patterns.md` 开始
 - 扩展功能：选择对应业务模块的 skill 文档
 - 改造功能：重点阅读对应模块的"核心流程"部分
-- 新增模块：参考 `docs/system/code-patterns.md` 等现有模块文档作为模板
+- 新增模块：参考 `docs/modules/system/code-patterns.md` 等现有模块文档作为模板
 
 ### Q2: skill 文档包含哪些内容?
 
@@ -208,7 +208,7 @@
 
 **A:** 创建新模块的 skill 文档步骤：
 
-1. 参考现有模块的 skill 文档（如 `docs/system/code-patterns.md`）作为模板与示例
+1. 参考现有模块的 skill 文档（如 `docs/modules/system/code-patterns.md`）作为模板与示例
 2. 按照现有文档结构填写模块信息
 3. 更新 CLAUDE.md 模块列表与 docs/README.md 总索引
 

@@ -297,7 +297,7 @@ CRUD 代码生成按以下 5 个阶段顺序执行：
 
 | 路径 | 关系 | 描述 | 示例 |
 |------|------|------|------|
-| `docs/{module}/code-patterns.md` | 模块参考 | 具体模块的技术规范和扩展指南 | `docs/system/code-patterns.md` |
+| `docs/{module}/code-patterns.md` | 模块参考 | 具体模块的技术规范和扩展指南 | `docs/modules/system/code-patterns.md` |
 
 ## 第七部分：质量检查清单
 

@@ -12,18 +12,18 @@ references:
   module_guide:
     prompt: "请指定要改造的模块，AI 将加载对应模块的 skill 文档"
     mapping:
-      system: docs/system/code-patterns.md
-      infra: docs/infra/code-patterns.md
-      pay: docs/pay/code-patterns.md
-      member: docs/member/code-patterns.md
-      mall: docs/mall/code-patterns.md
-      crm: docs/crm/code-patterns.md
-      erp: docs/erp/code-patterns.md
-      bpm: docs/bpm/code-patterns.md
-      ai: docs/ai/code-patterns.md
-      iot: docs/iot/code-patterns.md
-      mp: docs/mp/code-patterns.md
-      report: docs/report/code-patterns.md
+      system: docs/modules/system/code-patterns.md
+      infra: docs/modules/infra/code-patterns.md
+      pay: docs/modules/pay/code-patterns.md
+      member: docs/modules/member/code-patterns.md
+      mall: docs/modules/mall/code-patterns.md
+      crm: docs/modules/crm/code-patterns.md
+      erp: docs/modules/erp/code-patterns.md
+      bpm: docs/modules/bpm/code-patterns.md
+      ai: docs/modules/ai/code-patterns.md
+      iot: docs/modules/iot/code-patterns.md
+      mp: docs/modules/mp/code-patterns.md
+      report: docs/modules/report/code-patterns.md
   patterns:
     - path: skills/design/patterns/strategy-pattern.md
       reason: "策略模式 - 重构时可引入策略模式解耦"
@@ -528,7 +528,7 @@ change_list:
 
 ## 目标模块
 模块名称：pay
-Skill 文档位置：docs/pay/code-patterns.md
+Skill 文档位置：docs/modules/pay/code-patterns.md
 
 ## 改造需求
 当前支付模块作为单体应用的一部分运行，需要拆分为独立的微服务，以实现：
@@ -694,7 +694,7 @@ analysis:
 
 ## 目标模块
 模块名称：system
-Skill 文档位置：docs/system/code-patterns.md
+Skill 文档位置：docs/modules/system/code-patterns.md
 
 ## 改造需求
 当前用户列表查询接口响应慢（平均 2s+），需要优化：
@@ -869,7 +869,7 @@ performance_optimization:
 
 ## 目标模块
 模块名称：pay
-Skill 文档位置：docs/pay/code-patterns.md
+Skill 文档位置：docs/modules/pay/code-patterns.md
 
 ## 改造需求
 当前支付模块不支持多租户，需要改造以支持：

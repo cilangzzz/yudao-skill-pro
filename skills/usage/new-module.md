@@ -12,11 +12,11 @@ references:
     - path: skills/design/crud-designer.md
       reason: "CRUD 代码生成规范 - 各层代码模板、命名规范"
   reference_modules:
-    - path: docs/system/code-patterns.md
+    - path: docs/modules/system/code-patterns.md
       reason: "系统模块参考 - 基础模块结构、多租户、树形结构"
-    - path: docs/pay/code-patterns.md
+    - path: docs/modules/pay/code-patterns.md
       reason: "支付模块参考 - 设计模式应用（工厂+策略+模板方法）"
-    - path: docs/mall/code-patterns.md
+    - path: docs/modules/mall/code-patterns.md
       reason: "商城模块参考 - 复杂业务模块结构"
   usage_hint: "新增模块时可参考已有模块的 Skill 文档结构"
 ---
@@ -88,7 +88,7 @@ references:
 
 ## 分析要求
 
-请参考 docs/system/code-patterns.md 和 docs/mall/code-patterns.md 的格式，帮我完成以下分析：
+请参考 docs/modules/system/code-patterns.md 和 docs/modules/mall/code-patterns.md 的格式，帮我完成以下分析：
 
 ### 1. 业务定位分析
 - 模块解决什么业务问题？
@@ -125,9 +125,9 @@ references:
 基于前面的需求分析结果，请为 [模块名称] 模块设计架构。
 
 ## 参考文档
-- docs/system/code-patterns.md（基础模块结构参考）
-- docs/pay/code-patterns.md（设计模式应用参考）
-- docs/mall/code-patterns.md（复杂业务模块参考）
+- docs/modules/system/code-patterns.md（基础模块结构参考）
+- docs/modules/pay/code-patterns.md（设计模式应用参考）
+- docs/modules/mall/code-patterns.md（复杂业务模块参考）
 
 ## 设计要求
 
@@ -302,7 +302,7 @@ yudao-module-{module}/
 ## 生成要求
 
 ### 1. DO 实体类
-按照规范生成，参考 docs/system/code-patterns.md 的 data_model 部分：
+按照规范生成，参考 docs/modules/system/code-patterns.md 的 data_model 部分：
 
 ```java
 @TableName("{table_name}")
@@ -687,9 +687,9 @@ class {Entity}ControllerTest {
 
 ## 参考文档
 请参考以下 Skill 文档：
-- docs/system/code-patterns.md：基础模块结构、多租户、树形结构
-- docs/mall/code-patterns.md：SPU/SKU 模型参考（文章类似SPU）
-- docs/bpm/code-patterns.md：审核流程集成
+- docs/modules/system/code-patterns.md：基础模块结构、多租户、树形结构
+- docs/modules/mall/code-patterns.md：SPU/SKU 模型参考（文章类似SPU）
+- docs/modules/bpm/code-patterns.md：审核流程集成
 
 ## 任务要求
 
@@ -788,9 +788,9 @@ yudao-module-cms/
 
 ## 参考文档
 请参考以下 Skill 文档：
-- docs/system/code-patterns.md：短信/邮件/站内信现有实现
-- docs/pay/code-patterns.md：策略模式 + 工厂模式（渠道切换）
-- docs/infra/code-patterns.md：文件存储渠道参考
+- docs/modules/system/code-patterns.md：短信/邮件/站内信现有实现
+- docs/modules/pay/code-patterns.md：策略模式 + 工厂模式（渠道切换）
+- docs/modules/infra/code-patterns.md：文件存储渠道参考
 
 ## 特殊要求
 1. 消息发送采用策略模式，支持多渠道切换
@@ -887,9 +887,9 @@ public class MessageClientFactory {
 
 ## 参考文档
 请参考以下 Skill 文档：
-- docs/bpm/code-patterns.md：工作流集成
-- docs/mall/code-patterns.md：订单状态机参考
-- docs/system/code-patterns.md：用户/部门关联
+- docs/modules/bpm/code-patterns.md：工作流集成
+- docs/modules/mall/code-patterns.md：订单状态机参考
+- docs/modules/system/code-patterns.md：用户/部门关联
 
 ## 特殊要求
 1. 工单状态采用状态机模式
