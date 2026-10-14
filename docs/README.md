@@ -8,29 +8,34 @@
 - **README.md** — 模块概述、核心功能点、API 索引、数据模型概览、设计模式、依赖关系
 - **api-{domain}.md** — 按业务域拆分的 API 详情（接口路径、参数、返回值、业务逻辑）
 - **data-model.md** — 完整数据模型（表结构、字段定义、ER 关系）
+- **code-patterns.md** — 模块代码模式文档（仅 15 个核心模块）
 - **pitfalls.md** — 已知踩坑点和注意事项
 
 ## 模块索引
 
 | 模块 | 说明 | 核心功能 | API 域数 | 文件数 | 文档路径 |
 |-----|------|---------|---------|--------|---------|
-| **system** | 系统管理 | 用户、角色、权限、部门、租户、字典 | 5 | 8 | [docs/modules/system/](system/README.md) |
-| **infra** | 基础设施 | 文件、配置、定时任务、日志、代码生成 | 5 | 8 | [docs/modules/infra/](infra/README.md) |
-| **pay** | 支付 | 订单、退款、钱包、转账、渠道、通知 | 6 | 9 | [docs/modules/pay/](pay/README.md) |
-| **member** | 会员 | 用户、等级、积分、签到、地址、标签 | 7 | 10 | [docs/modules/member/](member/README.md) |
-| **mall** | 商城 | 商品(SPU/SKU)、订单、促销、统计 | 4 | 7 | [docs/modules/mall/](mall/README.md) |
-| **crm** | CRM | 客户、线索、商机、合同、回款、统计 | 10 | 13 | [docs/modules/crm/](crm/README.md) |
-| **erp** | ERP | 采购、销售、库存、财务、产品 | 5 | 8 | [docs/modules/erp/](erp/README.md) |
-| **bpm** | 工作流 | 模型、流程定义、实例、任务、表单 | 7 | 8 | [docs/modules/bpm/](bpm/README.md) |
-| **ai** | AI | 对话、图像、模型、知识库、音乐、写作 | 8 | 11 | [docs/modules/ai/](ai/README.md) |
-| **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警 | 6 | 9 | [docs/modules/iot/](iot/README.md) |
-| **mp** | 公众号 | 账号、用户、消息、素材、菜单、自动回复 | 10 | 13 | [docs/modules/mp/](mp/README.md) |
-| **report** | 报表 | GoView 项目、数据查询、积木报表 | 3 | 6 | [docs/modules/report/](report/README.md) |
-| **im** | 即时通讯 | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 10 | [docs/modules/im/](im/README.md) |
-| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | 12 | [docs/modules/mes/](mes/README.md) |
-| **wms** | 仓储管理 | 仓库、物料、库存、入库、出库、调拨、盘点 | 7 | 10 | [docs/modules/wms/](wms/README.md) |
+| **system** | 系统管理 | 用户、角色、权限、部门、租户、字典 | 14 | 17 | [docs/modules/system/](system/README.md) |
+| **infra** | 基础设施 | 文件、配置、定时任务、日志、代码生成 | 8 | 12 | [docs/modules/infra/](infra/README.md) |
+| **pay** | 支付 | 订单、退款、钱包、转账、渠道、通知 | 8 | 12 | [docs/modules/pay/](pay/README.md) |
+| **member** | 会员 | 用户、等级、积分、签到、地址、标签 | 8 | 12 | [docs/modules/member/](member/README.md) |
+| **mall** | 商城 | 商品(SPU/SKU)、订单、促销、统计 | 27 | 31 | [docs/modules/mall/](mall/README.md) |
+| **crm** | CRM | 客户、线索、商机、合同、回款、统计 | 12 | 16 | [docs/modules/crm/](crm/README.md) |
+| **erp** | ERP | 采购、销售、库存、财务、产品 | 6 | 10 | [docs/modules/erp/](erp/README.md) |
+| **bpm** | 工作流 | 模型、流程定义、实例、任务、表单 | 4 | 8 | [docs/modules/bpm/](bpm/README.md) |
+| **ai** | AI | 对话、图像、模型、知识库、音乐、写作 | 8 | 12 | [docs/modules/ai/](ai/README.md) |
+| **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警 | 7 | 11 | [docs/modules/iot/](iot/README.md) |
+| **mp** | 公众号 | 账号、用户、消息、素材、菜单、自动回复 | 9 | 13 | [docs/modules/mp/](mp/README.md) |
+| **report** | 报表 | GoView 项目、数据查询、积木报表 | 3 | 7 | [docs/modules/report/](report/README.md) |
+| **im** | 即时通讯 | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 11 | [docs/modules/im/](im/README.md) |
+| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 3 | 5 | [docs/modules/mes/](mes/README.md) |
+| **wms** | 仓储管理 | 仓库、物料、库存、入库、出库、调拨、盘点 | 4 | 8 | [docs/modules/wms/](wms/README.md) |
+| **fms** | 财务管理 | 账套、凭证、账簿、三大报表、期末结账 | 6 | 9 | [docs/modules/fms/](fms/README.md) |
+| **oa** | 办公自动化 | 日程、公告、考勤、公文、云盘、邮箱、审批流 | 22 | 25 | [docs/modules/oa/](oa/README.md) |
+| **hrm** | 人力资源 | 员工档案、招聘、考勤、薪资、社保、绩效 | 9 | 12 | [docs/modules/hrm/](hrm/README.md) |
+| **pms** | 项目管理 | 项目、迭代、工作项、看板、工时、知识库 | 8 | 11 | [docs/modules/pms/](pms/README.md) |
 
-**合计: 15 个模块 / 131 个文档文件**
+**合计: 19 个模块 / 242 个文档文件**
 
 ## 模块依赖关系
 
@@ -75,6 +80,18 @@ system (系统管理) ← 几乎所有模块都依赖
   ├── wms (仓储管理)
   │   └── 依赖: system (用户)
   │
+  ├── fms (财务管理)
+  │   └── 依赖: system (用户/部门), infra (文件)
+  │
+  ├── oa (办公自动化)
+  │   └── 依赖: system, infra, bpm (流程审批)
+  │
+  ├── hrm (人力资源)
+  │   └── 依赖: system (用户/部门), bpm (请假审批)
+  │
+  ├── pms (项目管理)
+  │   └── 依赖: system (用户/权限), infra (文件)
+  │
   └── report (报表)
       └── 依赖: system (用户), infra (数据源)
 ```
@@ -98,6 +115,10 @@ system (系统管理) ← 几乎所有模块都依赖
 | im | 16 | im_private_message, im_group, im_friend, im_channel, im_rtc_call |
 | mes | ~100 | mes_pro_work_order, mes_pro_task, mes_md_item, mes_qc_iqc, mes_wm_material_stock |
 | wms | 16 | wms_inventory, wms_receipt_order, wms_shipment_order, wms_item, wms_warehouse |
+| fms | 30 | fms_account_set, fms_voucher, fms_voucher_entry, fms_subject, fms_closing |
+| oa | 48 | oa_announcement, oa_leave_apply, oa_meeting_room_booking, oa_vehicle_apply, oa_mail_message |
+| hrm | 50 | hrm_employee, hrm_recruit_candidate, hrm_salary_month_record, hrm_insurance_month_record, hrm_performance_plan |
+| pms | 33 | pms_project, pms_iteration, pms_work_item, pms_knowledge_library |
 
 ## 生成方式
 
