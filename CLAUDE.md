@@ -24,6 +24,7 @@
 | **改造模块** | 修改现有功能或重构 | [skills/usage/refactor-module.md](skills/usage/refactor-module.md) | 分析框架 + 风险评估 + 回滚策略 |
 | **设计模式** | 工厂/策略/模板方法模式 | [skills/usage/pattern-usage.md](skills/usage/pattern-usage.md) | 多渠道系统设计模式组合指南 |
 | **快速上手** | Skill 文档快速使用 | [skills/usage/quick-start.md](skills/usage/quick-start.md) | 提示词模板 + 代码片段速查 |
+| **数据库操作** | 解析 yaml 凭证 + 委托 badseal/ssh-skill 执行 SQL + 自检 | [skills/db-ops/SKILL.md](skills/db-ops/SKILL.md) | 自动检测 ssh-skill / DB 类型，dry-run + 写操作事务，prod 需 YES-DESTRUCTIVE token |
 
 ---
 
