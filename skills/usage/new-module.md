@@ -1108,6 +1108,10 @@ CREATE TABLE `{table_name}` (
 
 ### 5.3 菜单权限 SQL 模板
 
+完整流程与可执行模板（父菜单逐级查找、序列插入、事务边界、踩坑点）见 [menu-permission.md](menu-permission.md)。本节仅给出单菜单插入的最小示例。
+
+最小示例（已知父菜单 ID 时）：
+
 ```sql
 -- 菜单 SQL
 INSERT INTO system_menu(name, permission, type, sort, parent_id, path, icon, component, component_name, status, visible, keep_alive, always_show, creator, create_time, updater, update_time, deleted)

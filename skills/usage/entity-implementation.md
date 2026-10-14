@@ -853,14 +853,16 @@ ErrorCode XXX_STATUS_ERROR = new ErrorCode(1_002_001_004, "{实体名称}状态�
 
 ### 3.8 第八步：权限配置
 
-#### 菜单权限 SQL
+完整流程与可执行 SQL 模板（父菜单逐级查找、序列插入、事务边界、踩坑点）见 [menu-permission.md](menu-permission.md)。
+
+最小示例（已知父菜单 ID = 100 时）：
 
 ```sql
--- 添加菜单（假设父菜单 ID 为 100）
+-- 添加菜单
 INSERT INTO system_menu (name, permission, type, sort, parent_id, path, icon, component, status)
-VALUES ('{功能名称}管理', '', 2, 0, {父菜单ID}, '{功能}', 'ep:document', '{模块}/{功能}/index', 0);
+VALUES ('{功能名称}管理', '', 2, 0, 100, '{功能}', 'ep:document', '{模块}/{功能}/index', 0);
 
--- 获取刚插入的菜单 ID（假设为 1001）
+-- 获取刚插入的菜单 ID
 SET @menuId = LAST_INSERT_ID();
 
 -- 添加按钮权限

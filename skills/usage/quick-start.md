@@ -210,31 +210,38 @@ Skill 文档是从 ruoyi-vue-pro 项目代码中提取的结构化知识库，�
 
 ### 3.6 添加权限
 
+完整流程与可执行 SQL 模板（父菜单逐级查找、序列插入、事务边界、踩坑点）见 [menu-permission.md](menu-permission.md)。
+
+快速提示词模板：
+
 ```
-参考 Skill 文档 docs/modules/system/code-patterns.md，帮我添加一个新的权限：
+参考 Skill 文档 docs/modules/system/code-patterns.md 和 skills/usage/menu-permission.md，帮我添加一个新的权限：
 
 权限名称：[权限名]
 权限标识：[权限码，格式：模块:功能:操作]
-父菜单ID：[父菜单 ID]
+父菜单链路：[用 → 分隔的菜单 name 链路，如 "系统管理 → 基础设施 → 文件管理"]
 权限类型：[菜单/按钮]
 
 请提供：
-1. 菜单/按钮的 SQL 插入语句
-2. Controller 中的 @PreAuthorize 注解示例
+1. 父菜单 ID 逐级查找 SQL
+2. 菜单/按钮的 SQL 插入语句（保证同一事务）
+3. Controller 中的 @PreAuthorize 注解示例
 ```
 
 **示例**：
+
 ```
-参考 docs/modules/system/code-patterns.md，帮我添加一个新的权限：
+参考 docs/modules/system/code-patterns.md 和 skills/usage/menu-permission.md，帮我添加一个新的权限：
 
 权限名称：导出用户
 权限标识：system:user:export
-父菜单ID：用户管理菜单 ID
+父菜单链路：系统管理 → 用户管理
 权限类型：按钮
 
 请提供：
-1. 按钮的 SQL 插入语句
-2. Controller 中的权限注解示例
+1. 父菜单 ID 逐级查找 SQL
+2. 按钮的 SQL 插入语句
+3. Controller 中的权限注解示例
 ```
 
 ---
