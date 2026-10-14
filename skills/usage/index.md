@@ -68,7 +68,7 @@ references:
 
 | 场景 | 适用情况 | 文档链接 | 一句话描述 |
 |-----|---------|---------|-----------|
-| 了解项目结构 | 刚接触项目，需要快速了解整体架构 | `skills/index.yaml` | 查看 15 个业务模块的技术规范索引 |
+| 了解项目结构 | 刚接触项目，需要快速了解整体架构 | [CLAUDE.md](../../CLAUDE.md) | 查看 15 个业务模块索引与规范入口 |
 | 系统模块入门 | 需要了解用户、角色、权限等基础功能 | [system/code-patterns.md](../../docs/system/code-patterns.md) | 系统管理模块完整开发指南 |
 | 基础设施入门 | 需要了解文件、配置、任务等基础服务 | [infra/code-patterns.md](../../docs/infra/code-patterns.md) | 基础设施模块完整开发指南 |
 | **实体类实现** | 需要从 SQL 到实体类创建完整 CRUD 功能 | [entity-implementation.md](entity-implementation.md) | 从建表到完整接口的端到端指南 |
@@ -76,7 +76,7 @@ references:
 **推荐使用流程**：
 
 ```
-阅读 index.yaml --> 选择目标模块 --> 阅读对应 code-patterns.md --> 开始开发
+阅读 CLAUDE.md 模块列表 --> 选择目标模块 --> 阅读对应 code-patterns.md --> 开始开发
 ```
 
 ---
@@ -145,7 +145,7 @@ references:
 1. 参考现有模块的 `code-patterns.md`（如 `docs/system/code-patterns.md`）确定文档结构
 2. 参考现有模块文档提取技术规范
 3. 按照模块规范编写代码
-4. 更新 `skills/index.yaml` 索引
+4. 更新 CLAUDE.md 模块列表与 docs/README.md 总索引
 
 ---
 
@@ -225,13 +225,13 @@ references:
 
 ### 模块优先级参考
 
-根据 `skills/index.yaml` 中定义的优先级：
+根据模块的核心程度与使用频率：
 
 | 优先级 | 模块 | 说明 |
 |-------|------|------|
 | P1 (核心) | system, infra, pay | 系统核心功能，建议优先熟悉 |
-| P2 (业务) | member, mall, crm, bpm | 主要业务功能，使用频率高 |
-| P3 (扩展) | erp, ai, iot, mp, report | 扩展业务功能，按需使用 |
+| P2 (业务) | member, mall, crm, bpm, erp, mes, wms | 主要业务功能，使用频率高 |
+| P3 (扩展) | ai, iot, mp, report, im | 扩展业务功能，按需使用 |
 
 ---
 
@@ -277,7 +277,7 @@ references:
 
 1. 参考现有模块的 skill 文档（如 `docs/system/code-patterns.md`）作为模板与示例
 2. 按照现有文档结构填写模块信息
-3. 更新 `skills/index.yaml` 添加新模块索引
+3. 更新 CLAUDE.md 模块列表与 docs/README.md 总索引
 
 ### Q5: 如何理解模块之间的依赖关系?
 

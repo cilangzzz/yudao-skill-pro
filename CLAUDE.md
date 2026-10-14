@@ -16,6 +16,7 @@
 
 | 场景 | 适用情况 | 文档路径 | 一句话描述 |
 |-----|---------|---------|-----------|
+| **使用指南总览** | 不确定选哪个场景 | [skills/usage/index.md](skills/usage/index.md) | 场景分类目录、使用流程图、FAQ |
 | **实体类实现** | 从 SQL 到完整 CRUD 功能 | [skills/usage/entity-implementation.md](skills/usage/entity-implementation.md) | 建表 → DO → Mapper → Service → Controller 全流程 |
 | **扩展模块** | 在现有模块添加新功能 | [skills/usage/extend-module.md](skills/usage/extend-module.md) | 渠道/策略/业务实体三种扩展模式 |
 | **新增模块** | 创建全新业务模块 | [skills/usage/new-module.md](skills/usage/new-module.md) | 需求分析 → 架构 → 数据库 → 代码 → 测试 |
@@ -27,13 +28,13 @@
 
 ## 模块功能文档（docs/）
 
-15 个模块的详细功能文档，由 `author-build-project-docs` 工作流生成。
+19 个模块的详细功能文档（核心 15 个 + 补充 4 个：fms/oa/hrm/pms），由 `author-build-project-docs` 工作流生成。
 
 > 总索引: [docs/README.md](docs/README.md) — 含模块依赖关系、数据模型统计
 
 ### 通用结构
 
-每个模块目录下包含以下文档（api-{domain}.md 按业务域拆分，数量因模块而异）：
+每个模块目录下包含以下文档（api-{domain}.md 按业务域拆分，数量因模块而异；code-patterns.md 仅 15 个核心模块有；pitfalls.md 暂缺 system/mes；data-model.md 暂缺 mes）：
 
 | 文件 | 说明 |
 |-----|------|
@@ -62,31 +63,25 @@
 | im | [docs/im/](docs/im/README.md) | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 |
 | mes | [docs/mes/](docs/mes/README.md) | 主数据、排班、设备、工装、生产、质检、仓库 |
 | wms | [docs/wms/](docs/wms/README.md) | 仓库、物料、库存、入库、出库、调拨、盘点 |
+| **fms**（补充） | [docs/fms/](docs/fms/README.md) | 账套、凭证、账簿、三大报表与期末结账 |
+| **oa**（补充） | [docs/oa/](docs/oa/README.md) | 个人/企业协同、行政管理与人事财务审批 |
+| **hrm**（补充） | [docs/hrm/](docs/hrm/README.md) | 员工档案、招聘、考勤、薪资、社保、绩效 |
+| **pms**（补充） | [docs/pms/](docs/pms/README.md) | 项目/迭代/工作项、看板、工时与团队知识库 |
 
 ---
 
 ## 自动引用机制
 
-使用样例文档头部包含 YAML front matter，声明需要引用的规范文件：
+使用样例（[使用样例总览](skills/usage/index.md)）文档头部以 YAML front matter 声明该场景需引用的规范，AI 读取时自动加载：
 
-```yaml
-references:
-  design:
-    - skills/design/db-designer.yaml      # 数据库设计规范
-    - skills/design/entity-designer.yaml   # 实体类设计规范
-    - skills/design/api-designer.yaml      # API 接口设计规范
-    - skills/design/crud-designer.yaml     # CRUD 代码生成规范
-  module_guide:
-    mapping:
-      system: docs/system/code-patterns.md
-      infra: docs/infra/code-patterns.md
-      im: docs/im/code-patterns.md
-      mes: docs/mes/code-patterns.md
-      wms: docs/wms/code-patterns.md
-      # ... 其余模块见上方「模块列表」，code-patterns 路径为 docs/{module}/code-patterns.md
-```
+| 字段 | 作用 |
+|-----|------|
+| `design` | 设计规范文件列表（`path` + 引用 `reason`） |
+| `module_guide` | `{prompt, mapping}` —— 模块名 → `docs/{module}/code-patterns.md` 映射 |
+| `patterns` | 设计模式文件列表（`path` + 引用 `reason`） |
+| `usage_hint` | 顶层提示语句，引导用户在提示词中指定模块名 |
 
-**使用方式**: 在提示词中指定模块名，AI 自动加载对应规范和模块 skill。
+**使用方式**: 在提示词中指定模块名（如「目标模块：pay」），AI 加载对应模块文档。完整示例见 [skills/usage/extend-module.md](skills/usage/extend-module.md) 头部。
 
 ---
 
@@ -106,6 +101,7 @@ references:
 
 | 模式 | 路径 | 适用场景 |
 |-----|------|---------|
+| 模式选择指南 | [skills/design/patterns/index.yaml](skills/design/patterns/index.yaml) | 不确定用哪种模式时的选择与组合方案 |
 | 工厂模式 | [skills/design/patterns/factory-pattern.yaml](skills/design/patterns/factory-pattern.yaml) | 根据条件创建不同类型的对象 |
 | 策略模式 | [skills/design/patterns/strategy-pattern.yaml](skills/design/patterns/strategy-pattern.yaml) | 多种算法或策略间切换 |
 | 模板方法模式 | [skills/design/patterns/template-method-pattern.yaml](skills/design/patterns/template-method-pattern.yaml) | 定义算法骨架，子类实现细节 |
@@ -114,10 +110,9 @@ references:
 
 ## 规范速查索引
 
-命名规范、错误码前缀、分层包路径等速查表已在规范文档中维护，此处仅保留索引，避免双处更新不一致：
+命名、错误码、权限标识、包路径等速查内容不在本文件维护，按粒度查两级出处，避免双处更新不一致：
 
-| 速查项 | 权威出处 | 内容说明 |
-|-------|---------|---------|
-| 命名规范速查 | [skills/usage/entity-implementation.md](skills/usage/entity-implementation.md) · [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml)（`naming_standards`） | 表/DO/Mapper/Service/Controller/VO 命名与权限标识格式 |
-| 错误码前缀速查 | [skills/usage/quick-start.md](skills/usage/quick-start.md) §4.2 · [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml)（`error_code.module_codes`） | 各模块错误码前缀与示例 |
-| 分层架构路径 | [skills/usage/entity-implementation.md](skills/usage/entity-implementation.md) 包路径规范 | `cn.iocoder.yudao.module.{模块}` 各层目录树 |
+| 粒度 | 出处 | 覆盖内容 |
+|-----|------|---------|
+| 通用规范 | [skills/design/crud-designer.yaml](skills/design/crud-designer.yaml)（`naming_standards`、`error_code`）· [skills/usage/entity-implementation.md](skills/usage/entity-implementation.md)「快速参考」 | 命名规范、权限标识格式、错误码格式与模块段号、各层目录树（前者机器可读，后者人类可读） |
+| 模块实例 | [docs/README.md](docs/README.md) 派发的各模块 `docs/{module}/code-patterns.md`「异常处理」等章节 | 模块专属错误码前缀与清单、各层组件实例（章节标题因模块而异） |

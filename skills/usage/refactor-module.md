@@ -1277,7 +1277,7 @@ SELECT COUNT(*) AS total_count FROM xxx_table;
 
 - [模块代码模式文档](../../docs/)
 - [设计模式文档](../design/patterns/)
-- [Skill 索引](../index.yaml)
+- [CLAUDE.md 规范总索引](../../CLAUDE.md)
 
 ### 参考命令
 

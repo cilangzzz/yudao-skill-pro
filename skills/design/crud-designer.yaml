@@ -342,14 +342,30 @@ naming_standards:
   # 错误码
   error_code:
     format: "1_{module_code}_{feature_code}_{seq}"
+    # 模块段号已按各模块源码 ErrorCodeConstants.java 核对（2026-10-14）
     module_codes:
       infra: "001"
       system: "002"
-      member: "003"
+      report: "003"
+      member: "004"
+      mp: "006"
       pay: "007"
       product: "008"
+      bpm: "009"
       trade: "011"
       promotion: "013"
+      crm: "020"
+      erp: "030"        # erp 段号；文件内另有 31 条 1_020_ 残留（来自 crm 子段），CRUD 生成时以 030 为准
+      ai: "040"        # 040 段现被 ai/mes/im 共用（源码现状），新模块勿再占用，待拆分
+      mes: "040"
+      im: "040"
+      iot: "050"       # 050 段现被 iot/hrm 共用（源码现状），新模块勿再占用，待拆分
+      hrm: "050"
+      iot-gateway: "051"
+      fms: "052"
+      pms: "053"
+      oa: "054"
+      wms: "060"
     example: "1_002_001_000"
 
   # 数据库表名

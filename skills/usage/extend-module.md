@@ -1078,6 +1078,6 @@ public enum FileStorageEnum {
 ---
 
 **相关文档：**
-- [Skill 文档索引](../index.yaml)
+- [CLAUDE.md 规范总索引](../../CLAUDE.md)
 - [模块代码模式文档](../../docs/)
 - [代码模式文档](../design/patterns/)
