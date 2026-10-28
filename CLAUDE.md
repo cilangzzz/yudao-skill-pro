@@ -30,7 +30,7 @@
 
 ## 模块功能文档（docs/）
 
-19 个模块的详细功能文档（核心 15 个 + 补充 4 个：fms/oa/hrm/pms），由 `author-build-project-docs` 工作流生成。
+20 个模块的详细功能文档（核心 15 个 + 补充 5 个：fms/oa/hrm/pms/ai1），由 `author-build-project-docs` 工作流生成。
 
 > 总索引: [docs/README.md](docs/README.md) — 含模块依赖关系、数据模型统计
 
@@ -69,6 +69,7 @@
 | **oa**（补充） | [docs/modules/oa/](docs/modules/oa/README.md) | 个人/企业协同、行政管理与人事财务审批 |
 | **hrm**（补充） | [docs/modules/hrm/](docs/modules/hrm/README.md) | 员工档案、招聘、考勤、薪资、社保、绩效 |
 | **pms**（补充） | [docs/modules/pms/](docs/modules/pms/README.md) | 项目/迭代/工作项、看板、工时与团队知识库 |
+| **ai1**（补充） | [docs/modules/ai1/](docs/modules/ai1/README.md) | Agent 编排、多供应商模型、流式会话、知识库 RAG、MCP、SKILL、长期记忆 |
 
 ---
 

@@ -34,8 +34,9 @@
 | **oa** | 办公自动化 | 日程、公告、考勤、公文、云盘、邮箱、审批流 | 22 | 25 | [docs/modules/oa/](oa/README.md) |
 | **hrm** | 人力资源 | 员工档案、招聘、考勤、薪资、社保、绩效 | 9 | 12 | [docs/modules/hrm/](hrm/README.md) |
 | **pms** | 项目管理 | 项目、迭代、工作项、看板、工时、知识库 | 8 | 11 | [docs/modules/pms/](pms/README.md) |
+| **ai1** | AI Agent (Spring AI) | Agent 编排、流式会话、知识库 RAG、MCP、SKILL、长期记忆、工作台统计 | 8 | 12 | [docs/modules/ai1/](ai1/README.md) |
 
-**合计: 19 个模块 / 242 个文档文件**
+**合计: 20 个模块 / 254 个文档文件**
 
 ## 模块依赖关系
 
@@ -92,6 +93,9 @@ system (系统管理) ← 几乎所有模块都依赖
   ├── pms (项目管理)
   │   └── 依赖: system (用户/权限), infra (文件)
   │
+  ├── ai1 (AI Agent-Spring AI)
+  │   └── 依赖: system (用户), infra (文件), Spring AI (OpenAI 兼容) + Milvus + MCP SDK
+  │
   └── report (报表)
       └── 依赖: system (用户), infra (数据源)
 ```
@@ -119,6 +123,7 @@ system (系统管理) ← 几乎所有模块都依赖
 | oa | 48 | oa_announcement, oa_leave_apply, oa_meeting_room_booking, oa_vehicle_apply, oa_mail_message |
 | hrm | 50 | hrm_employee, hrm_recruit_candidate, hrm_salary_month_record, hrm_insurance_month_record, hrm_performance_plan |
 | pms | 33 | pms_project, pms_iteration, pms_work_item, pms_knowledge_library |
+| ai1 | 11 | ai1_agent, ai1_session, ai1_session_message, ai1_provider, ai1_model, ai1_knowledge_base |
 
 ## 生成方式
 
