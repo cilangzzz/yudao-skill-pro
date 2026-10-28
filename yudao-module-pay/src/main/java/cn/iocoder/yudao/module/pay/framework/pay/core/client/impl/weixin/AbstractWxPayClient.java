@@ -29,6 +29,7 @@ import com.github.binarywang.wxpay.service.WxPayService;
 import com.github.binarywang.wxpay.service.impl.WxPayServiceImpl;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.Map;
@@ -216,6 +217,27 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
         }
     }
 
+    @Override
+    protected PayOrderRespDTO doCloseOrder(String outTradeNo) throws Throwable {
+        try {
+            switch (config.getApiVersion()) {
+                case API_VERSION_V2:
+                    client.closeOrder(WxPayOrderCloseRequest.newBuilder().outTradeNo(outTradeNo).build());
+                    break;
+                case API_VERSION_V3:
+                    client.closeOrderV3(new WxPayOrderCloseV3Request()
+                            .setMchid(config.getMchId()).setOutTradeNo(outTradeNo));
+                    break;
+                default:
+                    throw new IllegalArgumentException(String.format("未知的 API 版本(%s)", config.getApiVersion()));
+            }
+            return PayOrderRespDTO.closedOf(null, null, outTradeNo, null);
+        } catch (WxPayException e) {
+            // 关闭失败时查询真实支付状态，避免遗漏已支付事实
+            return doGetOrder(outTradeNo);
+        }
+    }
+
     private PayOrderRespDTO doGetOrderV2(String outTradeNo) throws WxPayException {
         // 构建 WxPayUnifiedOrderRequest 对象
         WxPayOrderQueryRequest request = WxPayOrderQueryRequest.newBuilder()
@@ -275,6 +297,14 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
                     throw new IllegalArgumentException(String.format("未知的 API 版本(%s)", config.getApiVersion()));
             }
         } catch (WxPayException e) {
+            // 网络异常、系统错误时，退款可能已受理，不能误判为退款失败：网络异常抛出，系统错误返回结果未知，后续查询确认、或者使用原退款单号重新发起
+            // 关联 https://github.com/YunaiV/ruoyi-vue-pro/issues/1290
+            if (hasCause(e, IOException.class)) {
+                throw e;
+            }
+            if (ObjectUtils.equalsAny(e.getErrCode(), "SYSTEMERROR", "SYSTEM_ERROR")) {
+                return PayRefundRespDTO.waitingOf(null, reqDTO.getOutRefundNo(), e.getXmlString());
+            }
             String errorCode = getErrorCode(e);
             String errorMessage = getErrorMessage(e);
             return PayRefundRespDTO.failureOf(errorCode, errorMessage,
@@ -373,11 +403,10 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
                     throw new IllegalArgumentException(String.format("未知的 API 版本(%s)", config.getApiVersion()));
             }
         } catch (WxPayException e) {
+            // 查询不到退款单：可能退款请求未受理、或者尚未生成退款单，返回结果未知，不能作为退款失败
+            // 关联 https://github.com/YunaiV/ruoyi-vue-pro/issues/1290
             if (ObjectUtils.equalsAny(e.getErrCode(), "REFUNDNOTEXIST", "RESOURCE_NOT_EXISTS")) {
-                String errorCode = getErrorCode(e);
-                String errorMessage = getErrorMessage(e);
-                return PayRefundRespDTO.failureOf(errorCode, errorMessage,
-                        outRefundNo, e.getXmlString());
+                return PayRefundRespDTO.waitingOf(null, outRefundNo, e.getXmlString());
             }
             throw e;
         }
@@ -398,8 +427,8 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
         }
         WxPayRefundQueryResult.RefundRecord refund = CollUtil.findOne(response.getRefundRecords(),
                 record -> record.getOutRefundNo().equals(outRefundNo));
-        if (refund == null) {
-            return PayRefundRespDTO.failureOf(outRefundNo, response);
+        if (refund == null) { // 查询不到退款单，返回结果未知
+            return PayRefundRespDTO.waitingOf(null, outRefundNo, response);
         }
         switch (refund.getRefundStatus()) {
             case "SUCCESS":
@@ -464,7 +493,7 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
 
             // 2.2 创建返回结果
             String state = response.getState();
-            if (ObjectUtils.equalsAny(state, "ACCEPTED", "PROCESSING", "WAIT_USER_CONFIRM", "TRANSFERING")) {
+            if (ObjectUtils.equalsAny(state, "ACCEPTED", "PROCESSING", "WAIT_USER_CONFIRM", "TRANSFERING", "CANCELING")) {
                 return PayTransferRespDTO.processingOf(response.getTransferBillNo(), response.getOutBillNo(), response)
                         .setChannelPackageInfo(response.getPackageInfo()); // 一般情况下，只有 WAIT_USER_CONFIRM 会有！
             }
@@ -473,9 +502,13 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
                         response.getOutBillNo(), response);
             }
             return PayTransferRespDTO.closedOf(state, response.getFailReason(),
-                    response.getOutBillNo(), response);
+                    response.getOutBillNo(), response).setChannelTransferNo(response.getTransferBillNo());
         } catch (WxPayException e) {
             log.error("[doUnifiedTransfer][转账({}) 发起微信支付异常", reqDTO, e);
+            // 参考 https://gitee.com/yudaocode/yudao-mall-uniapp/issues/ID0PFR，网络异常不能误判为转账关闭
+            if (hasCause(e, IOException.class)) {
+                throw e;
+            }
             String errorCode = getErrorCode(e);
             String errorMessage = getErrorMessage(e);
             return PayTransferRespDTO.closedOf(errorCode, errorMessage,
@@ -490,7 +523,7 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
 
         // 2. 创建返回结果
         String state = response.getState();
-        if (ObjectUtils.equalsAny(state, "ACCEPTED", "PROCESSING", "WAIT_USER_CONFIRM", "TRANSFERING")) {
+        if (ObjectUtils.equalsAny(state, "ACCEPTED", "PROCESSING", "WAIT_USER_CONFIRM", "TRANSFERING", "CANCELING")) {
             return PayTransferRespDTO.processingOf(response.getTransferBillNo(), response.getOutBillNo(), response);
         }
         if (Objects.equals("SUCCESS", state)) {
@@ -498,7 +531,7 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
                     response.getOutBillNo(), response);
         }
         return PayTransferRespDTO.closedOf(state, response.getFailReason(),
-                response.getOutBillNo(), response);
+                response.getOutBillNo(), response).setChannelTransferNo(response.getTransferBillNo());
     }
 
     @Override
@@ -521,7 +554,7 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
 
         // 2. 创建返回结果
         String state = result.getState();
-        if (ObjectUtils.equalsAny(state, "ACCEPTED", "PROCESSING", "WAIT_USER_CONFIRM", "TRANSFERING")) {
+        if (ObjectUtils.equalsAny(state, "ACCEPTED", "PROCESSING", "WAIT_USER_CONFIRM", "TRANSFERING", "CANCELING")) {
             return PayTransferRespDTO.processingOf(result.getTransferBillNo(), result.getOutBillNo(), response);
         }
         if (Objects.equals("SUCCESS", state)) {
@@ -529,10 +562,21 @@ public abstract class AbstractWxPayClient extends AbstractPayClient<WxPayClientC
                     result.getOutBillNo(), response);
         }
         return PayTransferRespDTO.closedOf(state, result.getFailReason(),
-                result.getOutBillNo(), response);
+                result.getOutBillNo(), response).setChannelTransferNo(result.getTransferBillNo());
     }
 
     // ========== 各种工具方法 ==========
+
+    private static boolean hasCause(Throwable throwable, Class<? extends Throwable> causeType) {
+        Throwable current = throwable;
+        while (current != null) {
+            if (causeType.isInstance(current)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
 
     /**
      * 组装请求头重的签名信息

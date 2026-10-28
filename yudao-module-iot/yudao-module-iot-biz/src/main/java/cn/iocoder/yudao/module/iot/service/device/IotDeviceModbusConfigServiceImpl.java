@@ -18,6 +18,9 @@ import cn.iocoder.yudao.module.iot.enums.ErrorCodeConstants;
 import javax.annotation.Resource;
 import java.util.List;
 
+import static cn.iocoder.yudao.framework.common.exception.util.ServiceExceptionUtil.exception;
+import static cn.iocoder.yudao.module.iot.enums.ErrorCodeConstants.*;
+
 /**
  * IoT 设备 Modbus 连接配置 Service 实现类
  *
@@ -77,24 +80,24 @@ public class IotDeviceModbusConfigServiceImpl implements IotDeviceModbusConfigSe
             return;
         }
         if (protocolTypeEnum == IotProtocolTypeEnum.MODBUS_TCP_CLIENT) {
-            if(!StrUtil.isNotEmpty(saveReqVO.getIp())){
-                throw ServiceExceptionUtil.exception(ErrorCodeConstants.DEVICE_MODBUS_CONFIG_IP_REQUIRED);
+            if (StrUtil.isEmpty(saveReqVO.getIp())) {
+                throw exception(DEVICE_MODBUS_CONFIG_IP_REQUIRED);
             }
-            if(saveReqVO.getPort()==null){
-                throw  ServiceExceptionUtil.exception(ErrorCodeConstants.DEVICE_MODBUS_CONFIG_PORT_REQUIRED);
+            if (saveReqVO.getPort() == null) {
+                throw exception(DEVICE_MODBUS_CONFIG_PORT_REQUIRED);
             }
-            if(saveReqVO.getTimeout()==null) {
-                throw ServiceExceptionUtil.exception(ErrorCodeConstants.DEVICE_MODBUS_CONFIG_TIMEOUT_REQUIRED);
+            if (saveReqVO.getTimeout() == null) {
+                throw exception(DEVICE_MODBUS_CONFIG_TIMEOUT_REQUIRED);
             }
-            if(saveReqVO.getRetryInterval()==null){
-                throw  ServiceExceptionUtil.exception(ErrorCodeConstants.DEVICE_MODBUS_CONFIG_RETRY_INTERVAL_REQUIRED);
+            if (saveReqVO.getRetryInterval() == null) {
+                throw exception(DEVICE_MODBUS_CONFIG_RETRY_INTERVAL_REQUIRED);
             }
         } else if (protocolTypeEnum == IotProtocolTypeEnum.MODBUS_TCP_SERVER) {
-            if(saveReqVO.getMode()==null){
-                throw  ServiceExceptionUtil.exception(ErrorCodeConstants.DEVICE_MODBUS_CONFIG_MODE_REQUIRED);
+            if (saveReqVO.getMode() == null) {
+                throw exception(DEVICE_MODBUS_CONFIG_MODE_REQUIRED);
             }
-            if(saveReqVO.getFrameFormat()==null){
-                throw  ServiceExceptionUtil.exception(ErrorCodeConstants.DEVICE_MODBUS_CONFIG_FRAME_FORMAT_REQUIRED);
+            if (saveReqVO.getFrameFormat() == null) {
+                throw exception(DEVICE_MODBUS_CONFIG_FRAME_FORMAT_REQUIRED);
             }
         }
     }

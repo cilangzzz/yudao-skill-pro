@@ -202,7 +202,7 @@ public class OAuth2ApproveServiceImplTest extends BaseDbUnitTest {
         String clientId = randomString();
         // mock 数据
         OAuth2ApproveDO approve = randomPojo(OAuth2ApproveDO.class).setUserId(userId)
-                .setUserType(userType).setClientId(clientId).setExpiresTime(LocalDateTimeUtil.offset(LocalDateTime.now(), 1L, ChronoUnit.DAYS));
+                .setUserType(userType).setClientId(clientId).setExpiresTime(LocalDateTimeUtil.offset(LocalDateTime.now(), 1L, ChronoUnit.DAYS).withNano(0));
         oauth2ApproveMapper.insert(approve); // 未过期
         oauth2ApproveMapper.insert(ObjectUtil.clone(approve).setId(null)
                 .setExpiresTime(LocalDateTimeUtil.offset(LocalDateTime.now(), -1L, ChronoUnit.DAYS))); // 已过期
@@ -211,8 +211,7 @@ public class OAuth2ApproveServiceImplTest extends BaseDbUnitTest {
         List<OAuth2ApproveDO> result = oauth2ApproveService.getApproveList(userId, userType, clientId);
         // 断言
         assertEquals(1, result.size());
-        // TODO @芋艿：expiresTime 被屏蔽，仅 win11 会复现，建议后续修复。
-        assertPojoEquals(approve, result.get(0), "expiresTime");
+        assertPojoEquals(approve, result.get(0));
     }
 
     @Test
@@ -223,7 +222,7 @@ public class OAuth2ApproveServiceImplTest extends BaseDbUnitTest {
         String clientId = randomString();
         String scope = randomString();
         Boolean approved = randomBoolean();
-        LocalDateTime expireTime = LocalDateTime.ofInstant(randomDay(1, 30).toInstant(), ZoneId.systemDefault());
+        LocalDateTime expireTime = LocalDateTime.ofInstant(randomDay(1, 30).toInstant(), ZoneId.systemDefault()).withNano(0);
         // mock 方法
 
         // 调用
@@ -251,7 +250,7 @@ public class OAuth2ApproveServiceImplTest extends BaseDbUnitTest {
         String clientId = approve.getClientId();
         String scope = approve.getScope();
         Boolean approved = randomBoolean();
-        LocalDateTime expireTime = LocalDateTime.ofInstant(randomDay(1, 30).toInstant(), ZoneId.systemDefault());
+        LocalDateTime expireTime = LocalDateTime.ofInstant(randomDay(1, 30).toInstant(), ZoneId.systemDefault()).withNano(0);
         // mock 方法
 
         // 调用

@@ -1,6 +1,8 @@
 package cn.iocoder.yudao.module.pay.service.wallet;
 
 import cn.hutool.core.lang.Assert;
+import cn.hutool.core.util.ObjectUtil;
+import cn.hutool.extra.spring.SpringUtil;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.common.util.date.DateUtils;
 import cn.iocoder.yudao.module.pay.controller.admin.wallet.vo.wallet.PayWalletPageReqVO;
@@ -18,6 +20,8 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
@@ -64,17 +68,34 @@ public class PayWalletServiceImpl implements PayWalletService {
         if (wallet == null) {
             // 使用双重检查锁，保证钱包创建并发问题
             // https://gitee.com/zhijiantianya/ruoyi-vue-pro/pulls/1475/files
-            wallet = lockRedisDAO.lock(userId, UPDATE_TIMEOUT_MILLIS, () -> {
-                PayWalletDO newWallet = walletMapper.selectByUserIdAndType(userId, userType);
-                if (newWallet == null) {
-                    newWallet = new PayWalletDO().setUserId(userId).setUserType(userType)
-                            .setBalance(0).setTotalExpense(0).setTotalRecharge(0);
-                    newWallet.setCreateTime(LocalDateTime.now());
-                    walletMapper.insert(newWallet);
-                }
-                return newWallet;
-            });
+            wallet = lockRedisDAO.lock(userId, UPDATE_TIMEOUT_MILLIS,
+                    () -> getSelf().createWalletIfAbsent(userId, userType));
         }
+        return wallet;
+    }
+
+    /**
+     * 创建钱包，如果不存在的话
+     *
+     * 注意：使用新事务，在释放锁之前提交，不加入调用方的事务。原因是：
+     * 1. 调用方的事务未提交时，其它请求查询不到钱包，会重复创建钱包
+     * 2. 后续不加入调用方事务的操作，也需要查询到钱包。例如说，佣金提现到钱包时，转账 createTransfer 不加入调用方的事务
+     * 另外，钱包是空钱包，即使调用方的事务回滚，保留也没有影响
+     *
+     * @param userId 用户编号
+     * @param userType 用户类型
+     * @return 钱包
+     */
+    @Transactional(rollbackFor = Exception.class, propagation = Propagation.REQUIRES_NEW)
+    public PayWalletDO createWalletIfAbsent(Long userId, Integer userType) {
+        PayWalletDO wallet = walletMapper.selectByUserIdAndType(userId, userType);
+        if (wallet != null) {
+            return wallet;
+        }
+        wallet = new PayWalletDO().setUserId(userId).setUserType(userType)
+                .setBalance(0).setTotalExpense(0).setTotalRecharge(0);
+        wallet.setCreateTime(LocalDateTime.now());
+        walletMapper.insert(wallet);
         return wallet;
     }
 
@@ -102,41 +123,49 @@ public class PayWalletServiceImpl implements PayWalletService {
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
+    // 注意：新建事务时，使用读已提交（READ_COMMITTED），避免下面当前读（FOR UPDATE）不存在的退款流水时，MySQL 可重复读下加间隙锁，
+    //      导致不同退款单并发退款到钱包时死锁；加入调用方的已有事务时，沿用调用方的隔离级别，仍由当前读、退款单行锁保证只退款一次
+    // 关联 https://github.com/YunaiV/ruoyi-vue-pro/issues/1290
+    @Transactional(rollbackFor = Exception.class, isolation = Isolation.READ_COMMITTED)
     public PayWalletTransactionDO orderRefund(String outRefundNo, Integer refundPrice, String reason) {
         // 1.1 判断退款单是否存在
         PayRefundDO payRefund = refundService.getRefundByNo(outRefundNo);
         if (payRefund == null) {
             throw exception(REFUND_NOT_FOUND);
         }
-        // 1.2 校验是否可以退款
-        Long walletId = validateWalletCanRefund(payRefund.getId(), payRefund.getChannelOrderNo());
+        // 1.2 锁定退款单（FOR UPDATE），锁持有到事务提交，保证同一退款单串行退款到钱包
+        // 原因是：同一退款单可能使用原退款单号重新发起（例如说，结果未知后重新发起），新旧调用可能重叠，需要保证只退款到钱包一次
+        // 关联 https://github.com/YunaiV/ruoyi-vue-pro/issues/1290
+        Long refundId = payRefund.getId();
+        payRefund = refundService.getRefundForUpdate(refundId);
+        if (payRefund == null) {
+            throw exception(REFUND_NOT_FOUND);
+        }
+        // 1.3 已存在退款流水，说明已退款到钱包，直接返回原流水，避免重复退款
+        // 注意：使用当前读（FOR UPDATE）查询退款流水，不能使用快照读。原因是：调用方可能存在事务，MySQL 可重复读下，
+        //      快照读可能读不到其它事务（例如说，等待退款单锁期间）已提交的退款流水，导致重复退款
+        PayWalletTransactionDO refundTransaction = walletTransactionService.getWalletTransactionForUpdate(
+                String.valueOf(refundId), PAYMENT_REFUND);
+        if (refundTransaction != null) {
+            if (ObjectUtil.notEqual(refundTransaction.getPrice(), refundPrice)) {
+                log.error("[orderRefund][退款单({}) 已存在退款流水({})，但退款金额({})不一致]",
+                        refundId, refundTransaction.getId(), refundPrice);
+                throw exception(WALLET_REFUND_EXIST);
+            }
+            return refundTransaction;
+        }
+        // 1.4 校验钱包支付交易存在
+        PayWalletTransactionDO walletTransaction = walletTransactionService.getWalletTransactionByNo(
+                payRefund.getChannelOrderNo());
+        if (walletTransaction == null) {
+            throw exception(WALLET_TRANSACTION_NOT_FOUND);
+        }
+        Long walletId = walletTransaction.getWalletId();
         PayWalletDO wallet = walletMapper.selectById(walletId);
         Assert.notNull(wallet, "钱包 {} 不存在", walletId);
 
         // 2. 增加余额
-        return addWalletBalance(walletId, String.valueOf(payRefund.getId()), PAYMENT_REFUND, refundPrice);
-    }
-
-    /**
-     * 校验是否能退款
-     *
-     * @param refundId 支付退款单 id
-     * @param walletPayNo 钱包支付 no
-     */
-    private Long validateWalletCanRefund(Long refundId, String walletPayNo) {
-        // 1. 校验钱包支付交易存在
-        PayWalletTransactionDO walletTransaction = walletTransactionService.getWalletTransactionByNo(walletPayNo);
-        if (walletTransaction == null) {
-            throw exception(WALLET_TRANSACTION_NOT_FOUND);
-        }
-        // 2. 校验退款是否存在
-        PayWalletTransactionDO refundTransaction = walletTransactionService.getWalletTransaction(
-                String.valueOf(refundId), PAYMENT_REFUND);
-        if (refundTransaction != null) {
-            throw exception(WALLET_REFUND_EXIST);
-        }
-        return walletTransaction.getWalletId();
+        return addWalletBalance(walletId, String.valueOf(refundId), PAYMENT_REFUND, refundPrice);
     }
 
     @Override
@@ -153,7 +182,7 @@ public class PayWalletServiceImpl implements PayWalletService {
 
         // 2. 加锁，更新钱包余额（目的：避免钱包流水的并发更新时，余额变化不连贯）
         return lockRedisDAO.lock(walletId, UPDATE_TIMEOUT_MILLIS, () -> {
-            // 2. 扣除余额
+            // 2.1 扣除余额
             int updateCounts;
             switch (bizType) {
                 case PAYMENT: {
@@ -173,14 +202,13 @@ public class PayWalletServiceImpl implements PayWalletService {
                 throw exception(WALLET_BALANCE_NOT_ENOUGH);
             }
 
+            // 2.2 更新后重新查询钱包，避免使用锁外读取的旧余额生成流水
+            PayWalletDO currentWallet = getWallet(walletId);
+
             // 3. 生成钱包流水
-            // 情况一：充值退款：balance 在冻结时已扣，updateWhenRechargeRefund 只扣 freeze_price，所以 afterBalance 不变。https://t.zsxq.com/OJk9m
-            // 情况二：消费支付：updateWhenConsumption 从 balance 扣，所以 afterBalance = balance - price
-            Integer afterBalance = bizType == PayWalletBizTypeEnum.RECHARGE_REFUND
-                    ? payWallet.getBalance()
-                    : payWallet.getBalance() - price;
+            // 充值退款时，余额已在冻结时扣除，本次只扣冻结金额。https://t.zsxq.com/OJk9m
             WalletTransactionCreateReqBO bo = new WalletTransactionCreateReqBO().setWalletId(payWallet.getId())
-                    .setPrice(-price).setBalance(afterBalance).setBizId(String.valueOf(bizId))
+                    .setPrice(-price).setBalance(currentWallet.getBalance()).setBizId(String.valueOf(bizId))
                     .setBizType(bizType.getType()).setTitle(bizType.getDescription());
             return walletTransactionService.createWalletTransaction(bo);
         });
@@ -200,7 +228,7 @@ public class PayWalletServiceImpl implements PayWalletService {
 
         // 2. 加锁，更新钱包余额（目的：避免钱包流水的并发更新时，余额变化不连贯）
         return lockRedisDAO.lock(walletId, UPDATE_TIMEOUT_MILLIS, () -> {
-            // 3. 更新钱包金额
+            // 2.1 更新钱包金额
             switch (bizType) {
                 case PAYMENT_REFUND: { // 退款更新
                     walletMapper.updateWhenConsumptionRefund(payWallet.getId(), price);
@@ -219,9 +247,12 @@ public class PayWalletServiceImpl implements PayWalletService {
                 }
             }
 
-            // 4. 生成钱包流水
+            // 2.2 更新后重新查询钱包，避免使用锁外读取的旧余额生成流水
+            PayWalletDO currentWallet = getWallet(walletId);
+
+            // 3. 生成钱包流水
             WalletTransactionCreateReqBO transactionCreateReqBO = new WalletTransactionCreateReqBO()
-                    .setWalletId(payWallet.getId()).setPrice(price).setBalance(payWallet.getBalance() + price)
+                    .setWalletId(payWallet.getId()).setPrice(price).setBalance(currentWallet.getBalance())
                     .setBizId(bizId).setBizType(bizType.getType()).setTitle(bizType.getDescription());
             return walletTransactionService.createWalletTransaction(transactionCreateReqBO);
         });
@@ -241,6 +272,15 @@ public class PayWalletServiceImpl implements PayWalletService {
         if (updateCounts == 0) {
             throw exception(WALLET_FREEZE_PRICE_NOT_ENOUGH);
         }
+    }
+
+    /**
+     * 获得自身的代理对象，解决 AOP 生效问题
+     *
+     * @return 自己
+     */
+    private PayWalletServiceImpl getSelf() {
+        return SpringUtil.getBean(getClass());
     }
 
 }
