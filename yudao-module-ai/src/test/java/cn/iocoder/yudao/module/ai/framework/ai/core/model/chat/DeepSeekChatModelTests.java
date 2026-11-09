@@ -17,7 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
-import static cn.iocoder.yudao.module.ai.util.AiUtils.validateApiKey;
+import static cn.iocoder.yudao.module.ai.framework.ai.core.model.AiModelTestUtils.validateApiKey;
 
 /**
  * {@link DeepSeekChatModel} 集成测试
@@ -29,7 +29,7 @@ public class DeepSeekChatModelTests {
     private static final String API_KEY = SystemUtil.get("DEEPSEEK_API_KEY",
             "sk-xxxx");
     private static final String MODEL = SystemUtil.get("DEEPSEEK_MODEL",
-            "deepseek-v4-flash");
+            "deepseek-flash");
 
     private final DeepSeekChatModel chatModel = DeepSeekChatModel.builder()
             .deepSeekApi(DeepSeekApi.builder()

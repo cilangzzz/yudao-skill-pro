@@ -3,9 +3,9 @@ package cn.iocoder.yudao.module.ai.dal.mysql.model;
 import cn.iocoder.yudao.framework.common.pojo.PageResult;
 import cn.iocoder.yudao.framework.mybatis.core.mapper.BaseMapperX;
 import cn.iocoder.yudao.framework.mybatis.core.query.LambdaQueryWrapperX;
-import cn.iocoder.yudao.framework.mybatis.core.query.QueryWrapperX;
 import cn.iocoder.yudao.module.ai.controller.admin.model.vo.model.AiModelPageReqVO;
 import cn.iocoder.yudao.module.ai.dal.dataobject.model.AiModelDO;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import org.apache.ibatis.annotations.Mapper;
 
 import javax.annotation.Nullable;
@@ -20,11 +20,10 @@ import java.util.List;
 public interface AiChatMapper extends BaseMapperX<AiModelDO> {
 
     default AiModelDO selectFirstByStatus(Integer type, Integer status) {
-        return selectOne(new QueryWrapperX<AiModelDO>()
-                .eq("type", type)
-                .eq("status", status)
-                .limitN(1)
-                .orderByAsc("sort"));
+        return selectFirstOne(new LambdaQueryWrapperX<AiModelDO>()
+                .eq(AiModelDO::getType, type)
+                .eq(AiModelDO::getStatus, status)
+                .orderByAsc(AiModelDO::getSort));
     }
 
     default PageResult<AiModelDO> selectPage(AiModelPageReqVO reqVO) {
@@ -42,6 +41,11 @@ public interface AiChatMapper extends BaseMapperX<AiModelDO> {
                 .eq(AiModelDO::getType, type)
                 .eqIfPresent(AiModelDO::getPlatform, platform)
                 .orderByAsc(AiModelDO::getSort));
+    }
+
+    default void updateForSave(AiModelDO model) {
+        update(model, new LambdaUpdateWrapper<AiModelDO>().eq(AiModelDO::getId, model.getId())
+                .set(model.getReasoningConfig() == null, AiModelDO::getReasoningConfig, null, JDBC_TYPE_VARCHAR));
     }
 
 }

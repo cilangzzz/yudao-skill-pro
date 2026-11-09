@@ -19,7 +19,11 @@ import cn.iocoder.yudao.module.iot.dal.dataobject.product.IotProductDO;
 import cn.iocoder.yudao.module.iot.service.device.IotDeviceModbusConfigService;
 import cn.iocoder.yudao.module.iot.service.device.IotDeviceModbusPointService;
 import cn.iocoder.yudao.module.iot.service.device.IotDeviceService;
+import cn.iocoder.yudao.module.iot.service.device.property.IotDevicePropertyService;
 import cn.iocoder.yudao.module.iot.service.product.IotProductService;
+import javax.annotation.Resource;
+import javax.annotation.security.PermitAll;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Primary;
 import org.springframework.validation.annotation.Validated;
@@ -27,9 +31,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import javax.annotation.Resource;
-import javax.annotation.security.PermitAll;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,6 +47,7 @@ import static cn.iocoder.yudao.framework.common.util.collection.CollectionUtils.
  */
 @RestController
 @Validated
+@Slf4j
 @Primary // 保证优先匹配，因为 yudao-iot-gateway 也有 IotDeviceCommonApi 的实现，并且也可能会被 biz 引入
 public class IoTDeviceApiImpl implements IotDeviceCommonApi {
 
@@ -51,6 +55,8 @@ public class IoTDeviceApiImpl implements IotDeviceCommonApi {
     private IotDeviceService deviceService;
     @Resource
     private IotProductService productService;
+    @Resource
+    private IotDevicePropertyService devicePropertyService;
     @Resource
     @Lazy // 延迟加载，解决循环依赖
     private IotDeviceModbusConfigService modbusConfigService;
@@ -74,7 +80,10 @@ public class IoTDeviceApiImpl implements IotDeviceCommonApi {
         return success(BeanUtils.toBean(device, IotDeviceRespDTO.class, deviceDTO -> {
             IotProductDO product = productService.getProductFromCache(deviceDTO.getProductId());
             if (product != null) {
-                deviceDTO.setProtocolType(product.getProtocolType()).setSerializeType(product.getSerializeType());
+                // 数据解析脚本随设备信息返回（网关按设备缓存），只在启用时返回内容
+                deviceDTO.setProtocolType(product.getProtocolType()).setSerializeType(product.getSerializeType())
+                        .setScriptEnabled(product.getScriptEnabled())
+                        .setScriptContent(Boolean.TRUE.equals(product.getScriptEnabled()) ? product.getScriptContent() : null);
             }
         }));
     }
@@ -114,10 +123,8 @@ public class IoTDeviceApiImpl implements IotDeviceCommonApi {
                 }
             }
             // 3.3 获取启用的点位列表
-            List<IotDeviceModbusPointDO> pointList = pointMap.get(config.getDeviceId());
-            if (CollUtil.isEmpty(pointList)) {
-                continue;
-            }
+            //     点位为空也返回：连接配置有效即可认证、收发透传（与脚本开关无关）；没有点位时，轮询调度器本身会跳过
+            List<IotDeviceModbusPointDO> pointList = pointMap.getOrDefault(config.getDeviceId(), Collections.emptyList());
 
             // 3.4 构建 IotModbusDeviceConfigRespDTO 对象
             IotModbusDeviceConfigRespDTO configDTO = BeanUtils.toBean(config, IotModbusDeviceConfigRespDTO.class, o ->
@@ -140,6 +147,25 @@ public class IoTDeviceApiImpl implements IotDeviceCommonApi {
     @PermitAll
     public CommonResult<List<IotSubDeviceRegisterRespDTO>> registerSubDevices(@RequestBody IotSubDeviceRegisterFullReqDTO reqDTO) {
         return success(deviceService.registerSubDevices(reqDTO));
+    }
+
+    @Override
+    @PostMapping(RpcConstants.RPC_API_PREFIX + "/iot/gateway-server/keep-alive")
+    @PermitAll // 无鉴权：前提是只有受信的网关能访问 RPC 接口
+    @TenantIgnore // 网关级的全局数据，不按租户隔离；如果以后在这里访问 DB，需要重新评估租户约束
+    public CommonResult<Boolean> keepAliveGatewayServers(@RequestBody IotGatewayServerAliveReqDTO reqDTO) {
+        // 参数校验失败时，不会执行到这里，所以非法的批次不会写入任何一项
+        int failCount = 0;
+        for (Map.Entry<String, Long> entry : reqDTO.getStartTimes().entrySet()) {
+            // 单项失败不影响其它项：失败明细只记录日志，整体结果返回 false
+            try {
+                devicePropertyService.updateGatewayServerStartTime(entry.getKey(), entry.getValue());
+            } catch (Exception e) {
+                failCount++;
+                log.error("[keepAliveGatewayServers][serverId({}) startTime({}) 续期存活标记失败]", entry.getKey(), entry.getValue(), e);
+            }
+        }
+        return success(failCount == 0);
     }
 
 }

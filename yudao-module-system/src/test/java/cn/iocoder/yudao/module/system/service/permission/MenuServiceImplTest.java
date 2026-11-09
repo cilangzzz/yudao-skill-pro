@@ -1,17 +1,28 @@
 package cn.iocoder.yudao.module.system.service.permission;
 
 import cn.iocoder.yudao.framework.common.enums.CommonStatusEnum;
+import cn.iocoder.yudao.framework.security.core.LoginUser;
+import cn.iocoder.yudao.framework.security.core.util.SecurityFrameworkUtils;
+import cn.iocoder.yudao.framework.tenant.core.context.TenantContextHolder;
+import cn.iocoder.yudao.framework.tenant.core.util.TenantUtils;
 import cn.iocoder.yudao.framework.test.core.ut.BaseDbUnitTest;
 import cn.iocoder.yudao.module.system.controller.admin.permission.vo.menu.MenuListReqVO;
 import cn.iocoder.yudao.module.system.controller.admin.permission.vo.menu.MenuSaveVO;
 import cn.iocoder.yudao.module.system.dal.dataobject.permission.MenuDO;
 import cn.iocoder.yudao.module.system.dal.mysql.permission.MenuMapper;
 import cn.iocoder.yudao.module.system.enums.permission.MenuTypeEnum;
+import cn.iocoder.yudao.module.system.enums.permission.RoleCodeEnum;
 import cn.iocoder.yudao.module.system.service.tenant.TenantService;
+import cn.iocoder.yudao.module.system.service.tenant.handler.TenantMenuHandler;
 import javax.annotation.Resource;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.context.annotation.Import;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.mock.mockito.SpyBean;
 
@@ -43,6 +54,11 @@ public class MenuServiceImplTest extends BaseDbUnitTest {
     private PermissionService permissionService;
     @MockBean
     private TenantService tenantService;
+
+    @AfterEach
+    public void clearSecurityContext() {
+        SecurityContextHolder.clearContext();
+    }
 
     @Test
     public void testCreateMenu_success() {
@@ -184,6 +200,78 @@ public class MenuServiceImplTest extends BaseDbUnitTest {
         // 断言
         assertEquals(1, result.size());
         assertPojoEquals(menu100, result.get(0));
+    }
+
+    @Test
+    public void testGetMenuListByTenant_tenantDisable() {
+        // mock 数据
+        MenuDO menu100 = randomPojo(MenuDO.class, o -> o.setId(100L).setStatus(CommonStatusEnum.ENABLE.getStatus()));
+        menuMapper.insert(menu100);
+        MenuDO menu101 = randomPojo(MenuDO.class, o -> o.setId(101L).setStatus(CommonStatusEnum.ENABLE.getStatus()));
+        menuMapper.insert(menu101);
+        // mock 禁用多租户：TenantService 不执行过滤处理器
+        doNothing().when(tenantService).handleTenantMenu(any());
+        // 准备参数
+        MenuListReqVO reqVO = new MenuListReqVO().setStatus(CommonStatusEnum.ENABLE.getStatus());
+
+        // 调用
+        List<MenuDO> result = menuService.getMenuListByTenant(reqVO);
+        // 断言：返回全部菜单
+        assertEquals(asSet(100L, 101L), convertSet(result, MenuDO::getId));
+    }
+
+    @Test
+    public void testGetMenuListByTenant_systemTenant() {
+        // mock 数据
+        MenuDO menu100 = randomPojo(MenuDO.class, o -> o.setId(100L).setStatus(CommonStatusEnum.ENABLE.getStatus()));
+        menuMapper.insert(menu100);
+        MenuDO menu101 = randomPojo(MenuDO.class, o -> o.setId(101L).setStatus(CommonStatusEnum.ENABLE.getStatus()));
+        menuMapper.insert(menu101);
+        // mock 系统租户：处理器得到全量菜单编号
+        doNothing().when(tenantService).handleTenantMenu(argThat(handler -> {
+            handler.handle(asSet(100L, 101L));
+            return true;
+        }));
+        // 准备参数
+        MenuListReqVO reqVO = new MenuListReqVO();
+
+        // 调用
+        List<MenuDO> result = menuService.getMenuListByTenant(reqVO);
+        // 断言：返回全部菜单
+        assertEquals(asSet(100L, 101L), convertSet(result, MenuDO::getId));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testGetMenuListByTenant_visitTenant(boolean superAdmin) {
+        // mock 数据：访问租户的套餐只开通菜单 100
+        int status = CommonStatusEnum.ENABLE.getStatus();
+        menuMapper.insert(randomPojo(MenuDO.class, o -> o.setId(100L).setStatus(status)));
+        menuMapper.insert(randomPojo(MenuDO.class, o -> o.setId(101L).setStatus(status)));
+        menuMapper.insert(randomPojo(MenuDO.class,
+                o -> o.setId(102L).setStatus(CommonStatusEnum.DISABLE.getStatus())));
+        doAnswer(invocation -> {
+            assertEquals(121L, TenantContextHolder.getTenantId());
+            invocation.<TenantMenuHandler>getArgument(0).handle(asSet(100L));
+            return null;
+        }).when(tenantService).handleTenantMenu(any());
+        // mock 方法：在登录租户查询用户角色
+        SecurityFrameworkUtils.setLoginUser(new LoginUser().setId(10L).setTenantId(1L).setVisitTenantId(121L),
+                new MockHttpServletRequest());
+        when(permissionService.hasAnyRoles(10L, RoleCodeEnum.SUPER_ADMIN.getCode())).thenAnswer(invocation -> {
+            assertEquals(1L, TenantContextHolder.getTenantId());
+            return superAdmin;
+        });
+        MenuListReqVO reqVO = new MenuListReqVO().setStatus(status);
+
+        // 调用
+        TenantUtils.execute(121L, () -> {
+            List<MenuDO> result = menuService.getMenuListByTenant(reqVO);
+            // 断言：超管跳过套餐过滤，两个场景都保留状态筛选和访问租户上下文
+            assertEquals(superAdmin ? asSet(100L, 101L) : asSet(100L), convertSet(result, MenuDO::getId));
+            assertEquals(121L, TenantContextHolder.getTenantId());
+        });
+        verify(permissionService).hasAnyRoles(10L, RoleCodeEnum.SUPER_ADMIN.getCode());
     }
 
     @Test

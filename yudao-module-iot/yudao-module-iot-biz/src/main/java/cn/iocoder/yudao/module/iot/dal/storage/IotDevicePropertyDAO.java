@@ -8,7 +8,6 @@ import cn.iocoder.yudao.module.iot.dal.dataobject.thingmodel.IotThingModelDO;
 import java.util.List;
 import java.util.Map;
 
-// TODO DONE @AI：storage 包下，是不是加个 package-info.java，说明这个包的作用？已新增 package-info.java
 /**
  * IoT 设备【属性】历史数据的存储 DAO 接口
  *
@@ -31,6 +30,15 @@ public interface IotDevicePropertyDAO {
      * @param propertyThingModels 产品的属性类物模型列表
      */
     void defineProductPropertyTable(Long productId, List<IotThingModelDO> propertyThingModels);
+
+    /**
+     * 删除产品的属性表（包括其中的历史数据）
+     *
+     * 幂等：属性表不存在时，直接成功，便于删除产品失败后重试
+     *
+     * @param productId 产品编号
+     */
+    void deleteProductPropertyTable(Long productId);
 
     /**
      * 写入设备属性。只记录本次上报的属性

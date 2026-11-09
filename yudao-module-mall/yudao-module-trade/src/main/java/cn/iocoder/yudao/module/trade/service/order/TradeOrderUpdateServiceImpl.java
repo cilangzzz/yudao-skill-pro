@@ -299,6 +299,12 @@ public class TradeOrderUpdateServiceImpl implements TradeOrderUpdateService {
                     id, payOrderId, JsonUtils.toJsonString(order));
             throw exception(ORDER_UPDATE_PAID_FAIL_PAY_ORDER_ID_ERROR);
         }
+        // 1.3 校验支付单号，与订单绑定的支付单号一致。避免其它支付应用中，相同商户订单编号、金额的支付单被用于串单
+        if (ObjectUtil.notEqual(order.getPayOrderId(), payOrderId)) {
+            log.error("[updateOrderPaid][order({}) 绑定的支付单({}) 与回调的支付单({}) 不匹配，请进行处理！]",
+                    id, order.getPayOrderId(), payOrderId);
+            throw exception(ORDER_UPDATE_PAID_FAIL_PAY_ORDER_ID_ERROR);
+        }
 
         // 2. 校验支付订单的合法性
         PayOrderRespDTO payOrder = validatePayOrderPaid(order, payOrderId);
@@ -394,7 +400,7 @@ public class TradeOrderUpdateServiceImpl implements TradeOrderUpdateService {
             // 2.2 无需发货
             updateOrderObj.setLogisticsId(0L).setLogisticsNo("");
         }
-        // 执行更新
+        // 执行更新：以读取时的状态作为乐观锁条件，避免并发收货、取消后被覆盖
         updateOrderObj.setStatus(TradeOrderStatusEnum.DELIVERED.getStatus()).setDeliveryTime(LocalDateTime.now());
         int updateCount = tradeOrderMapper.updateByIdAndStatus(order.getId(), order.getStatus(), updateOrderObj);
         if (updateCount == 0) {
@@ -436,14 +442,20 @@ public class TradeOrderUpdateServiceImpl implements TradeOrderUpdateService {
     /**
      * 校验交易订单满足被发货的条件
      * <p>
-     * 1. 交易订单未发货
+     * 1. 交易订单待发货，或已发货（修改物流信息）
+     * 2. 交易订单未退款
      *
      * @param id 交易订单编号
      * @return 交易订单
      */
     private TradeOrderDO validateOrderDeliverable(Long id) {
         TradeOrderDO order = validateOrderExists(id);
-        // 1. 校验订单是否未发货
+        // 1.1 校验订单状态：仅待发货、已发货（修改物流信息）可发货，见 https://github.com/YunaiV/ruoyi-vue-pro/issues/1310
+        if (!TradeOrderStatusEnum.isUndelivered(order.getStatus())
+                && !TradeOrderStatusEnum.isDelivered(order.getStatus())) {
+            throw exception(ORDER_DELIVERY_FAIL_STATUS_NOT_UNDELIVERED);
+        }
+        // 1.2 校验订单是否未退款
         if (ObjectUtil.notEqual(TradeOrderRefundStatusEnum.NONE.getStatus(), order.getRefundStatus())) {
             throw exception(ORDER_DELIVERY_FAIL_REFUND_STATUS_NOT_NONE);
         }

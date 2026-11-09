@@ -1,6 +1,7 @@
 DELETE FROM "iot_scene_rule";
 DELETE FROM "iot_product";
 DELETE FROM "iot_device";
+DELETE FROM "iot_device_shadow";
 DELETE FROM "iot_thing_model";
 DELETE FROM "iot_device_data";
 DELETE FROM "iot_alert_config";
@@ -9,3 +10,4 @@ DELETE FROM "iot_ota_firmware";
 DELETE FROM "iot_ota_task";
 DELETE FROM "iot_ota_record";
 DELETE FROM "iot_data_rule";
+DELETE FROM "iot_device_modbus_point";
