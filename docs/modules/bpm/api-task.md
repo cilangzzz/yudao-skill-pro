@@ -8,7 +8,7 @@
 - /bpm/task (Controller: BpmTaskController)
 - /bpm/process-instance/copy (Controller: BpmProcessInstanceCopyController)
 
-> 下文 Response VO 中的用户信息均为 `UserSimpleBaseVO`（用户精简信息）：| 字段 | 类型 | 说明 | 其中 id/nickname/deptId/deptName 必返，avatar 可空 |。下文分页请求 VO 均继承 `PageParam`：pageNo（Integer，必填，@NotNull @Min(1)，页码从 1 开始）、pageSize（Integer，必填，@NotNull @Min(1) @Max(200)，最大 200）。
+> 下文 Response VO 中的用户信息均为 `UserSimpleBaseVO`（用户精简信息），包含 id、nickname、avatar、deptId、deptName 字段。下文分页请求 VO 均继承 `PageParam`：pageNo（Integer，必填，@NotNull @Min(1)，页码从 1 开始）、pageSize（Integer，必填，@NotNull @Min(1) @Max(200)，最大 200）。
 
 ---
 
@@ -119,7 +119,11 @@
 - **权限**: bpm:process-instance:query
 - **说明**: 【流程详细】界面，查询单个流程实例。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 id 为 String、必填、无校验注解、流程实例的编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| id | String | 是 | 无 | 流程实例的编号（query 参数） |
 
 **响应**: CommonResult\<BpmProcessInstanceRespVO\>，字段见公共 VO。
 
@@ -259,7 +263,11 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 - **权限**: bpm:process-instance:query
 - **说明**: 【流程详细】界面，返回 BPMN 模型及各节点审批进度高亮信息。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 id 为 String、必填、无校验注解、流程实例的编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| id | String | 是 | 无 | 流程实例的编号（query 参数） |
 
 **响应**: CommonResult\<BpmProcessInstanceBpmnModelViewRespVO\>：
 
@@ -287,7 +295,11 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 - **权限**: bpm:process-instance:query
 - **说明**: 流程实例打印视图数据。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 processInstanceId 为 String、必填、无校验注解、流程实例的编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| processInstanceId | String | 是 | 无 | 流程实例的编号（query 参数） |
 
 **响应**: CommonResult\<BpmProcessPrintDataRespVO\>：
 
@@ -361,7 +373,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 **响应**: CommonResult\<PageResult\<BpmTaskRespVO\>\>，字段见公共 VO。
 
 **业务逻辑**:
-1. 以当前用户为审批人查询 Flowable 活动任务（active、含流程变量、租户过滤、创建时间倒序），叠加名称模糊/分类/流程定义 Key/创建时间条件分页查询。
+1. 以当前用户为审批人查询 Flowable 活动任务（active、含流程变量、租户过滤、创建时间倒序），叠加名称模糊/分类/流程定义 Key/创建时间条件分页查询（创建时间直接使用 Flowable `taskCreatedAfter`/`taskCreatedBefore`，受其 OR 拼接 bug 影响，见 pitfalls.md 3.2）。
 2. 批量查询任务所属流程实例及发起人用户信息。
 3. 批量查询流程定义扩展信息。
 4. 拼接待办任务分页返回。
@@ -406,7 +418,11 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 - **权限**: bpm:task:query
 - **说明**: 流程详情页审批记录，含已完成与未完成任务。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 processInstanceId 为 String、必填、无校验注解、流程实例的编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| processInstanceId | String | 是 | 无 | 流程实例的编号（query 参数） |
 
 **响应**: CommonResult\<List\<BpmTaskRespVO\>\>，字段见公共 VO。
 
@@ -453,6 +469,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 | 1_009_005_002 | 流程任务不存在 |
 | 1_009_005_015 | 签名不能为空！ |
 | 1_009_005_016 | 审批意见不能为空！ |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
 | 1_009_004_000 | 流程实例不存在 |
 | 1_009_004_003 | 任务({})的候选人未配置 |
 | 1_009_004_007 | 下一个任务({})的审批人未配置 |
@@ -486,6 +503,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 |--------|------|
 | 1_009_005_001 | 操作失败，原因：该任务的审批人不是你 |
 | 1_009_005_002 | 流程任务不存在 |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
 | 1_009_004_000 | 流程实例不存在 |
 
 ### 2.7 获取所有可退回的节点
@@ -494,7 +512,11 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 - **权限**: bpm:task:update
 - **说明**: 【流程详情】的【退回】按钮，列出可退回的目标节点。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 id 为 String、必填、无校验注解、当前任务编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| id | String | 是 | 无 | 当前任务编号（query 参数） |
 
 **响应**: CommonResult\<List\<BpmTaskRespVO\>\>（仅返回 name、taskDefinitionKey 两个字段）。
 
@@ -542,6 +564,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 | 1_009_005_003 | 当前任务处于挂起状态，不能操作 |
 | 1_009_005_004 | 目标节点不存在 |
 | 1_009_005_006 | 退回任务失败，目标节点是在并行网关上或非同一路线上，不可跳转 |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
 
 ### 2.9 委派任务
 
@@ -573,6 +596,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 | 1_009_005_002 | 流程任务不存在 |
 | 1_009_005_007 | 任务委派失败，委派人和当前审批人为同一人 |
 | 1_009_005_008 | 任务委派失败，被委派人不存在 |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
 
 ### 2.10 转派任务
 
@@ -604,6 +628,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 | 1_009_005_002 | 流程任务不存在 |
 | 1_009_005_013 | 任务转办失败，转办人和当前审批人为同一人 |
 | 1_009_005_014 | 任务转办失败，转办人不存在 |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
 
 ### 2.11 加签
 
@@ -623,7 +648,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 **响应**: CommonResult\<Boolean\>（固定 true）。
 
 **业务逻辑**:
-1. 校验任务属于当前用户；校验前后加签类型不能混用（TASK_SIGN_CREATE_TYPE_ERROR）。
+1. 校验加签类型必须存在（TASK_SIGN_CREATE_TYPE_NOT_EXISTS）；校验任务属于当前用户；校验前后加签类型不能混用（TASK_SIGN_CREATE_TYPE_ERROR）。
 2. 校验加签用户与该节点现有审批人（含 owner）不重复（TASK_SIGN_CREATE_USER_REPEAT），且用户存在（TASK_SIGN_CREATE_USER_NOT_EXIST）。
 3. 处理父任务：开启子任务计数；前加签时 owner=原审批人、清空 assignee 并置状态 WAIT；记录 scopeType 加签方式。
 4. 为每个加签用户基于父任务创建子任务（前加签设 assignee、后加签设 owner；后加签子任务状态置 WAIT）。
@@ -638,6 +663,8 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 | 1_009_005_009 | 任务加签：选择的用户不存在 |
 | 1_009_005_010 | 任务加签：当前任务已经{}，不能{} |
 | 1_009_005_011 | 任务加签失败，加签人与现有审批人[{}]重复 |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
+| 1_009_005_023 | 任务加签失败，加签类型({})不存在 |
 
 ### 2.12 减签
 
@@ -655,7 +682,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 **响应**: CommonResult\<Boolean\>（固定 true）。
 
 **业务逻辑**:
-1. 校验任务存在且必须是通过加签生成的任务（有父任务且父任务 scopeType 为加签类型），否则抛 TASK_SIGN_DELETE_NO_PARENT。
+1. 校验任务存在且必须是通过加签生成的任务（有父任务且父任务 scopeType 为加签类型），否则抛 TASK_SIGN_DELETE_NO_PARENT；校验当前用户是父任务（或祖先任务）的审批人 / 拥有人（即加签人），否则抛 TASK_SIGN_DELETE_FAIL_NOT_SELF。
 2. 校验取消人存在（优先 assignee，其次 owner）。
 3. 递归获取全部子任务，全部标记为已取消（CANCEL）并说明原因，然后删除任务及所有子任务。
 4. 在父任务上记录减签（SUB_SIGN）评论（先记录再处理，避免父任务已被完成后报错）。
@@ -667,6 +694,7 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 |--------|------|
 | 1_009_005_002 | 流程任务不存在 |
 | 1_009_005_012 | 任务减签失败，被减签的任务必须是通过加签生成的任务 |
+| 1_009_005_021 | 任务减签失败，原因：你不是该任务的加签人 |
 
 ### 2.13 抄送任务
 
@@ -703,7 +731,11 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 - **权限**: bpm:task:update
 - **说明**: 已办任务的发起节点撤回，拉回到本节点重新审批。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 taskId 为 String、必填、无校验注解、任务编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| taskId | String | 是 | 无 | 任务编号（query 参数） |
 
 **响应**: CommonResult\<Boolean\>（固定 true）。
 
@@ -730,7 +762,11 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 - **权限**: bpm:task:query
 - **说明**: 减签时查看父任务加签产生的子任务列表。
 
-**请求参数**: | 字段 | 类型 | 必填 | 校验规则 | 说明 | 其中 parentTaskId 为 String、必填、无校验注解、父级任务编号（query 参数） |
+**请求参数**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|------|------|------|---------|------|
+| parentTaskId | String | 是 | 无 | 父级任务编号（query 参数） |
 
 **响应**: CommonResult\<List\<BpmTaskRespVO\>\>，字段见公共 VO。
 
@@ -815,3 +851,6 @@ ActivityNode：id、name、nodeType（BpmSimpleModelNodeType）、status（BpmTa
 | 1_009_005_018 | 撤回失败，未查询到用户已办任务！ |
 | 1_009_005_019 | 撤回失败，此流程不允许撤回操作！ |
 | 1_009_005_020 | 撤回失败，下一节点不满足撤回条件！ |
+| 1_009_005_021 | 任务减签失败，原因：你不是该任务的加签人 |
+| 1_009_005_022 | 操作失败，原因：该任务已审批通过，等待加签任务审批完成 |
+| 1_009_005_023 | 任务加签失败，加签类型({})不存在 |

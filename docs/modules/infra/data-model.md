@@ -2,7 +2,7 @@
 
 > infra 模块的核心数据模型，包括 DO、DTO、VO 及其之间的关系。infra 模块提供平台级基础设施运维能力（参数配置、文件存储、定时任务、API 日志）与研发效率工具（代码生成器、多数据源管理），共 16 张数据表。
 >
-> 说明：当前仓库为 JDK8 分支（revision 2026.09-jdk8-SNAPSHOT，Spring Boot 2.7.18），文档中的类型与注解均以实际代码为准。
+> 说明：当前仓库为 JDK8 分支（revision 2026.10-jdk8-SNAPSHOT，Spring Boot 2.7.18），文档中的类型与注解均以实际代码为准。
 
 ## 1. 实体继承体系
 
@@ -147,7 +147,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类）
 | storage | Integer | storage | 存储器，枚举 FileStorageEnum：1 DB / 10 本地 / 11 FTP / 12 SFTP / 20 S3 |
 | remark | String | remark | 备注 |
 | master | Boolean | master | 是否主配置（默认上传走主配置，全局仅一条 master=true） |
-| config | FileClientConfig | config | 客户端配置，JSON 多态存储（DBFileClientConfig / LocalFileClientConfig / FtpFileClientConfig / SftpFileClientConfig / S3FileClientConfig），由内部 FileClientConfigTypeHandler 反序列化（含老版本 @class 包路径兼容逻辑） |
+| config | FileClientConfig | config | 客户端配置，JSON 多态存储（DBFileClientConfig / LocalFileClientConfig / FtpFileClientConfig / SftpFileClientConfig / S3FileClientConfig），由内部 FileClientConfigTypeHandler 反序列化（含老版本 @class 包路径兼容逻辑）；S3 配置兼容 MinIO、RustFS 及云厂商 |
 
 **继承**: BaseDO
 **索引**: 主键 `id`；无二级索引
@@ -167,7 +167,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类）
 
 **继承**: BaseDO
 **索引**: 主键 `id`；无二级索引
-**特性**: `@TenantIgnore` 全局表；每次上传记录一条；`FileController` 的 `/{configId}/get/**` 访问路径为 @PermitAll + @TenantIgnore（SecurityConfiguration 放行），upload/presigned-url/create 仅需登录；经 FileApi 供 system/ai/mp/oa/pms/fms 等模块消费。
+**特性**: `@TenantIgnore` 全局表；每次上传记录一条；类型白名单含 `.bin` 二进制固件通道（type 落库为 application/octet-stream）；`FileController` 的 `/{configId}/get/**` 访问路径为 @PermitAll + @TenantIgnore（SecurityConfiguration 放行），upload/presigned-url/create 仅需登录；经 FileApi 供 system/ai/mp/oa/pms/fms 等模块消费。
 
 #### FileContentDO (infra_file_content)
 
@@ -221,7 +221,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类）
 
 **继承**: BaseDO
 **索引**: 主键 `id`；普通索引 `idx_job_id(job_id)`（按任务查日志）、`idx_create_time(create_time)`（日志清理 Job 按时间清理）。
-**特性**: `@TenantIgnore` 全局表；由 jobLogCleanJob 定期清理过期日志。
+**特性**: `@TenantIgnore` 全局表；由 jobLogCleanJob 定期清理过期日志，清理 SQL 按当前数据源方言动态生成（`SqlDialectUtils.deleteBatchByLessThan`）。
 
 ### 2.5 API 日志（logger）
 
@@ -253,7 +253,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类）
 
 **继承**: BaseDO
 **索引**: 主键 `id`；普通索引 `idx_create_time(create_time)` —— 支撑日志分页查询与 accessLogCleanJob 按时间清理。
-**特性**: 租户表（表含 tenant_id，拦截器自动处理）；requestParams/responseBody 为 text 大字段。
+**特性**: 租户表（表含 tenant_id，拦截器自动处理）；requestParams/responseBody 为 text 大字段；accessLogCleanJob 按时间清理，清理 SQL 按当前数据源方言动态生成。
 
 #### ApiErrorLogDO (infra_api_error_log)
 
@@ -284,7 +284,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类）
 
 **继承**: BaseDO
 **索引**: 主键 `id`；普通索引 `idx_create_time(create_time)` —— 支撑分页查询与 errorLogCleanJob 按时间清理。
-**特性**: 租户表（表含 tenant_id，拦截器自动处理）；"处理"动作（标记已处理/忽略）会更新 processStatus/processTime/processUserId。
+**特性**: 租户表（表含 tenant_id，拦截器自动处理）；"处理"动作（标记已处理/忽略）会更新 processStatus/processTime/processUserId；errorLogCleanJob 按时间清理，清理 SQL 按当前数据源方言动态生成。
 
 ### 2.6 代码生成示例（demo）
 

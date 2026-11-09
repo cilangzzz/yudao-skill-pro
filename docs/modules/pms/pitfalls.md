@@ -60,7 +60,7 @@ public String execute(String param) { ... }
 
 **问题**: 并发创建工作项时 `serialNumber` 重复、并发拖拽看板时 `sort` 重复；并发创建项目时出现重复的"未开始/进行中/已完成"状态行。
 
-**原因**: 三处并发防御都隐式依赖数据库唯一索引，而 `yudao-module-pms/src/test/resources/sql/create_tables.sql` 里除主键外只有 `pms_knowledge_document_share.token` 一处 UNIQUE：
+**原因**: 三处并发防御都隐式依赖数据库唯一索引，而 `yudao-module-pms/src/test/resources/sql/create_tables.sql` 里除主键外只有 `pms_knowledge_document_share.token` 与 `pms_work_item_user_sort.uk_tenant_project_work_item_user_deleted` 两处 UNIQUE，`pms_work_item`、`pms_work_item_status` 均无业务唯一索引：
 1. `PmsWorkItemMapper#selectMaxSerialNumberByProjectId` / `#selectMaxSortByStatusId` 是"查 max 后在 Java 里 +1"的模式，`pms_work_item` 无 `(project_id, serial_number)` 唯一约束，并发下产生重复编号；
 2. `PmsWorkItemStatusServiceImpl#initMissingSystemWorkItemStatuses`（创建项目时调用）按 `systemCode` 补插默认状态并 `catch (DuplicateKeyException ignored)` 容忍并发重复初始化，但 `pms_work_item_status` 只有主键——唯一索引缺失时该 catch 是死代码，并发下会插入重复系统状态；
 3. `PmsWorkItemStatusServiceImpl#updateWorkItemStatusSort` 注释里的"按状态编号稳定加锁"实际只是 `Collections.sort(statusIds)` 后 `updateBatch`，用于降低死锁概率，并非真正加锁。
@@ -74,6 +74,14 @@ public String execute(String param) { ... }
 **原因**: `PmsProjectMemberServiceImpl#updateProjectMemberList` 先 `deleteByProjectIdAndUserIds` 再 `insertBatch`；`PmsKnowledgeLibraryMemberServiceImpl#updateLibraryMemberList` 先 `deleteByLibraryIdAndLevels(ADMIN, MEMBER)` 再 `insertBatch`，且重建后还要级联清理内容协作权限（`contentPermissionService.deleteContentPermissionMembersByLibraryId`）。全程在一个事务内但无版本号/行锁，读到的 oldMembers 快照在并发下过期。另有隐含规则：项目成员请求中包含创建人会抛 `PROJECT_MEMBER_CREATOR_CANNOT_REMOVE`，伪造 OWNER/CREATOR 级别分别抛 `PROJECT_MEMBER_OWNER_LEVEL_CANNOT_ASSIGN` / `KNOWLEDGE_LIBRARY_MEMBERS_INVALID`。
 
 **解决**: 成员管理入口做前端互斥或后端按 `updateTime` 乐观校验；理解"创建人不在请求中、级别不可指定"的约定，避免前端把创建人带回请求导致保存失败。
+
+### 3.3 个人排序更新会锁定项目行，与项目删除共用加锁顺序
+
+**问题**: 并发拖拽待规划区（Backlog）排序时，个人排序表出现同一工作项的重复记录或排序丢失；或项目被回收/删除的同一瞬间仍能写入个人排序；或与项目删除并发时出现死锁。
+
+**原因**: `PmsWorkItemUserSortServiceImpl#updateWorkItemUserSort` 先调用 `PmsProjectService#getProjectForUpdate`（底层用 `BaseMapperX#selectOneForUpdate`，即 `SELECT ... FOR UPDATE`，PmsProjectMapper 继承）锁定项目行，再删除并重建该用户的个人排序记录——用项目行作为同一项目个人排序更新的串行化锁，同时锁内复核项目存在且处于 ACTIVE（项目不存在抛 `PROJECT_NOT_EXISTS`，非 ACTIVE 抛 `PROJECT_STATUS_INVALID`）。`PmsProjectServiceImpl#deleteProject` 也改为先 `getProjectForUpdate` 锁定项目行再校验回收站状态，二者保持"先项目行、后业务表"的加锁顺序，避免交叉加锁死锁。注意锁粒度是整个项目而非单个用户，同一项目下不同成员的个人排序也会串行；锁保持到事务结束。
+
+**解决**: 不要在持有该锁的事务里做通知、文件、RPC 等耗时操作（当前实现只有 delete + insert，符合预期）；新增按项目串行化的写操作时复用 `getProjectForUpdate`，并保持先项目行再加业务行的一致顺序。另外注意 Backlog 个人排序存于 `pms_work_item_user_sort`（按用户隔离），迭代内排序写的是 `pms_work_item.sort`（项目成员共享），不要混淆。
 
 ## 4. 权限模型相关
 
@@ -118,3 +126,26 @@ public String execute(String param) { ... }
 **原因**: `PmsIterationServiceImpl#buildStatusTrends` 与 `PmsProjectServiceImpl#getProjectOverview` 的完成趋势都用**当前** `status` + `updateTime.toLocalDate()` 反推每日数量，模块没有状态流转历史表，任何批量写操作都会集中改 `updateTime` 使趋势失真；燃尽图 `buildBurnDowns` 按工时记录的 `createTime` 聚合，未填工时的天数无法体现。另外 `PmsWorkItemServiceImpl#getWorkItemPage` 在 `planningOnly + unplannedOnly` 时走"全量查询 + `workItemUserSortService.sortWorkItemList` 内存排序 + `PageUtils.buildPageResult` 内存分页"（代码注释自认"难以在 SQL 中等价表达"）。
 
 **解决**: 把趋势/燃尽视为参考值而非审计数据；业务要求精确时需另建状态流转流水。待规划区超大项目（数千根工作项）需要关注该接口的内存与耗时，必要时拆分"个人排序"与"分页"为两步查询。
+
+## 6. 数据库方言相关
+
+### 6.1 工作项标签筛选依赖 SqlDialectUtils，非 MySQL 数据库只认「平面 Long 数组」
+
+**问题**: 把工作项分页接口（`GET /pms/pm/work-item/page`）的 `labelIds` 筛选搬到 PostgreSQL / Oracle / SQL Server 上时，出现 SQL 报错或筛选结果与 MySQL 不一致；或 `label_ids` 混入非数字元素后，标签筛选对整个工作项"失效"。
+
+**原因**: `PmsWorkItemMapper#buildQueryWrapper` 的标签筛选不再硬编码 `JSON_CONTAINS(label_ids, JSON_ARRAY({0}))`，而是调用框架的 `SqlDialectUtils.jsonArrayContains("label_ids", true)`（`yudao-framework/yudao-spring-boot-starter-mybatis/src/main/java/cn/iocoder/yudao/framework/mybatis/core/util/SqlDialectUtils.java`），按当前连接数据库生成方言片段；多个标签之间以 OR 连接，语义是「匹配任一标签」，标签编号以参数绑定传入、不拼进 SQL 字符串。各方言行为：
+- MySQL / MariaDB / OceanBase / 达梦 / 神通：仍生成 `JSON_CONTAINS(label_ids, JSON_ARRAY({0}))`，为通用 JSON 数组包含判断；
+- PostgreSQL：改用 `CAST(label_ids AS jsonb) @> CAST(CONCAT('[', ..., ']') AS jsonb)`，按 BIGINT 比较，数组中的字符串 `"1"` 不匹配数字 `1`；人大金仓（KingbaseES）、瀚高（HighGo）、openGauss、GaussDB、MogDB 在 JSON 片段上也按 PostgreSQL 处理（JSON 方言单独识别，日期等其它方言仍走原有片段）；
+- Oracle / SQL Server / H2：先用正则/字符规则校验整个值（Oracle、H2 用 `REGEXP_LIKE`，SQL Server 用 `PATINDEX` + XML），再分别用 Oracle `INSTR`、H2 `LOCATE`、SQL Server `CHARINDEX` 按「,元素,」做文本精确匹配（SQL Server 的 XML 仅用于校验元素格式），**只支持「平面 Long / null 数组」**；`label_ids` 中混入字符串、嵌套数组、对象、小数或超出 Long 范围的元素时整个值不匹配，不等价于通用 `JSON_CONTAINS`。
+
+`pms_work_item.label_ids` 是 `varchar(5000)` 列，`PmsWorkItemDO.labelIds` 用 `JacksonTypeHandler` 读写 Long 编号的 JSON 数组，「平面 Long 数组」的前提由 DO 保证；风险主要来自绕过 DO 直接写入的脏数据。
+
+**解决**: 保持 `label_ids` 只存数字编号（不要混入字符串或嵌套结构）；新增按 JSON 列过滤的查询时统一走 `SqlDialectUtils.jsonArrayContains`，不要写死 `JSON_CONTAINS`；跨库验证时注意 PostgreSQL 分支对数字与字符串的区分。
+
+### 6.2 最近动态的条数限制用 BaseMapperX#selectListLimitN，不能再用 last("LIMIT ...")
+
+**问题**: 给「迭代概览最近动态」这类"取前 N 条"查询加行数限制时，写 `.last("LIMIT " + limit)` 在非 MySQL 数据库上报语法错误；或改用 `selectListLimitN` 时忘记排序，SQL Server 分页直接报错。
+
+**原因**: `PmsWorkItemActivityMapper#selectListByWorkItemIds` 已由手写 `.last("LIMIT " + limit)` 改为框架的 `BaseMapperX#selectListLimitN(queryWrapper, limit)`（`yudao-framework/yudao-spring-boot-starter-mybatis/src/main/java/cn/iocoder/yudao/framework/mybatis/core/mapper/BaseMapperX.java`），由 MyBatis-Plus 分页插件按实际数据库生成 LIMIT / ROWNUM / OFFSET FETCH 语句，且不执行 COUNT 查询。框架契约：`limit` 不能为负数（否则抛 `IllegalArgumentException`），`limit` 为 0 时直接返回空列表；该 API 已禁止再通过 `.last()` 追加行数限制；SQL Server 的分页语句要求 `queryWrapper` 带 ORDER BY（该方法按 `createTime desc, id desc` 排序）。条数上限仍为 `PmsIterationServiceImpl.RECENT_ACTIVITY_LIMIT = 50`，接口返回语义不变。
+
+**解决**: 模块内「取前 N 条」统一用 `selectListLimitN`；需要排序时务必在 wrapper 上设置 ORDER BY；不要在同一个 wrapper 上叠加 `.last("LIMIT ...")`。

@@ -244,11 +244,12 @@ AfterSaleDetailRespVO 继承 AfterSaleBaseVO（公共字段见「通用数据结
 **业务逻辑**:
 1. 控制器分流：若 `merchantRefundId` 以 `order-` 开头，说明是「未支付订单退款」回调，解析出订单编号后转交 `TradeOrderUpdateService.updatePaidOrderRefunded` 处理后直接返回。
 2. 否则为售后退款回调：按 id 查询售后单（AFTER_SALE_NOT_FOUND），校验状态为【等待平台退款】40（AFTER_SALE_REFUND_FAIL_STATUS_NOT_WAIT_REFUND）。
-3. 校验支付退款单合法性：退款单存在（AFTER_SALE_REFUND_FAIL_REFUND_NOT_FOUND）；状态为成功或失败（AFTER_SALE_REFUND_FAIL_REFUND_NOT_SUCCESS_OR_FAILURE）；退款金额与售后单一致（AFTER_SALE_REFUND_FAIL_REFUND_PRICE_NOT_MATCH）；商户退款单号与售后单编号匹配（AFTER_SALE_REFUND_FAIL_REFUND_ORDER_ID_ERROR）。
-4. 退款成功：售后单状态更新为【完成】50 并记录 refundTime，记录售后日志，调用 `TradeOrderUpdateService.updateOrderItemWhenAfterSaleSuccess` 将订单项售后状态更新为已完成（按退款金额）。
-5. 退款失败：仅记录售后日志（操作类型 SYSTEM_REFUND_FAIL），售后单状态不变。
+3. 校验退款单号：售后单绑定的 `payRefundId` 必须与回调 `payRefundId` 一致，否则抛 AFTER_SALE_REFUND_FAIL_REFUND_ORDER_ID_ERROR（1_011_000_114）。该校验位于「校验支付退款单」之前，用于防止其它支付应用、或重新退款前的退款单被用于更新状态（串单）。
+4. 校验支付退款单合法性：退款单存在（AFTER_SALE_REFUND_FAIL_REFUND_NOT_FOUND）；状态为成功或失败（AFTER_SALE_REFUND_FAIL_REFUND_NOT_SUCCESS_OR_FAILURE）；退款金额与售后单一致（AFTER_SALE_REFUND_FAIL_REFUND_PRICE_NOT_MATCH）；商户退款单号与售后单编号匹配（AFTER_SALE_REFUND_FAIL_REFUND_ORDER_ID_ERROR）。
+5. 退款成功：售后单状态更新为【完成】50 并记录 refundTime，记录售后日志，调用 `TradeOrderUpdateService.updateOrderItemWhenAfterSaleSuccess` 将订单项售后状态更新为已完成（按退款金额）。
+6. 退款失败：仅记录售后日志（操作类型 SYSTEM_REFUND_FAIL），售后单状态不变。
 
-## 域错误码（After Sale 模块，前缀 1-011-000-100）
+## 域错误码（After Sale 模块，前缀 1_011_000_100）
 
 定义于 `yudao-module-trade-api` 的 `cn.iocoder.yudao.module.trade.enums.ErrorCodeConstants`：
 
@@ -268,7 +269,7 @@ AfterSaleDetailRespVO 继承 AfterSaleBaseVO（公共字段见「通用数据结
 | 1_011_000_111 | 退款失败，退款单不存在 |
 | 1_011_000_112 | 退款失败，退款单未退款 |
 | 1_011_000_113 | 退款失败，退款金额不匹配 |
-| 1_011_000_114 | 退款失败，退款单不匹配 |
+| 1_011_000_114 | 退款失败，退款单不匹配（同时用于：售后单绑定的 payRefundId 与回调 payRefundId 不一致） |
 | 1_011_000_115 | 取消售后单失败，售后单状态不是【待审核】或【卖家同意】或【商家待收货】 |
 | 1_011_000_116 | 订单拼团中，无法申请售后 |
 

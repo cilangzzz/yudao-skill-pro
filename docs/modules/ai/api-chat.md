@@ -1,6 +1,6 @@
 # AI 聊天对话与消息接口 (AiChatConversationController / AiChatMessageController)
 
-> 提供 AI 聊天场景的对话管理（创建/更新/删除【我的】对话、管理员对话分页管理）与消息收发（段式/流式发送、知识库召回、联网搜索、附件解析）能力。
+> 提供 AI 聊天场景的对话管理（创建/更新/删除【我的】对话、管理员对话分页管理）与消息收发（段式/流式发送、知识库召回、联网搜索、附件解析与图片多模态、思考档位选择、Token 用量回传）能力。
 
 ## 接口路径前缀
 
@@ -32,10 +32,10 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-003-001 | 操作失败，该聊天模型的配置不完整 |
-| 1-040-002-000 | 聊天角色不存在（角色校验） |
-| 1-040-001-000 | 模型不存在!（模型校验） |
-| 1-040-009-000 | 知识库不存在!（知识库校验） |
+| 1_040_003_001 | 操作失败，该聊天模型的配置不完整 |
+| 1_040_002_000 | 聊天角色不存在（角色校验） |
+| 1_040_001_000 | 模型不存在!（模型校验） |
+| 1_040_009_000 | 知识库不存在!（知识库校验） |
 
 ### 1.2 更新【我的】聊天对话
 
@@ -65,9 +65,9 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-003-000 | 对话不存在! |
-| 1-040-001-000 | 模型不存在!（模型校验） |
-| 1-040-009-000 | 知识库不存在!（知识库校验） |
+| 1_040_003_000 | 对话不存在! |
+| 1_040_001_000 | 模型不存在!（模型校验） |
+| 1_040_009_000 | 知识库不存在!（知识库校验） |
 
 ### 1.3 获得【我的】聊天对话列表
 
@@ -86,9 +86,10 @@
 | title | String | 对话标题 |
 | pinned | Boolean | 是否置顶 |
 | roleId | Long | 角色编号（@Trans 自动翻译出 roleName/roleAvatar） |
-| modelId | Long | 模型编号（@Trans 自动翻译出 modelName） |
+| modelId | Long | 模型编号（@Trans 自动翻译出 modelName 与 modelReasoningConfig） |
 | model | String | 模型标志 |
 | modelName | String | 模型名字 |
+| modelReasoningConfig | ReasoningConfig | 关联模型的思考配置（`levels` + `defaultLevel`），为空表示模型未配置思考；用于前端渲染思考档位选择 |
 | systemMessage | String | 角色设定 |
 | temperature | Double | 温度参数 |
 | maxTokens | Integer | 单条回复的最大 Token 数量 |
@@ -136,7 +137,7 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-003-000 | 对话不存在! |
+| 1_040_003_000 | 对话不存在! |
 
 ### 1.6 删除未置顶的聊天对话
 
@@ -208,7 +209,7 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-003-000 | 对话不存在! |
+| 1_040_003_000 | 对话不存在! |
 
 ## 3. 聊天消息发送与查看（AiChatMessageController，仅登录用户）
 
@@ -227,6 +228,7 @@
 | useContext | Boolean | 否 | - | 是否携带上下文 |
 | useSearch | Boolean | 否 | - | 是否联网搜索 |
 | attachmentUrls | List\<String\> | 否 | - | 附件 URL 数组 |
+| reasoningLevel | String | 否 | - | 本次思考档位；为空表示使用模型默认档位，模型未配置档位时必须为空（否则报 MODEL_REASONING_NOT_CONFIGURED） |
 
 **响应**: CommonResult\<AiChatMessageSendRespVO\>
 
@@ -242,15 +244,24 @@
 | Message.segments | List\<KnowledgeSegment\> | 知识库段落数组（id/content/documentId/documentName） |
 | Message.webSearchPages | List\<WebPage\> | 联网搜索的网页内容数组 |
 | Message.createTime | LocalDateTime | 创建时间 |
+| Message.inputTokens | Long | 输入 Token 数（未知为空） |
+| Message.outputTokens | Long | 输出 Token 数（未知为空） |
+| Message.totalTokens | Long | 合计 Token 数（输入、输出都已知时才有值） |
 
-**业务逻辑**: 1. 校验对话存在且属于当前用户（事务内）。2. 加载对话历史消息，校验对话模型并获得 ChatModel。3. 若对话绑定了角色且角色配置了知识库，逐个知识库做段落向量召回；useSearch=true 且开启联网搜索时执行网络搜索（取前 10 条）。4. 插入 user 类型消息，并插入 assistant 占位消息（记录召回段落编号、联网结果）。5. 构建 Prompt：system 角色设定 + 上下文历史消息（按 maxContexts 取最近 n 组 user+assistant，需 useContext=true）+ 当前用户消息 + 知识库参考（Reference 模板）+ 联网搜索参考（WebSearch 模板）+ 附件内容（图片转 Base64、其他读取文本，Attachment 模板），并按平台构建 ChatOptions（含角色配置的工具 ToolCallback 与 MCP 工具）。6. 同步调用模型获取回复，将 content/reasoningContent 更新到 assistant 消息。7. 组装知识库段落（含文档名）与搜索网页，返回 send/receive 消息。
+**业务逻辑**: 1. 校验对话存在且属于当前用户（事务内）。2. 加载对话历史消息，校验对话模型，解析本次思考参数（已配置思考时校验模型平台、ApiKey 平台一致、档位存在与平台路由；未配置时请求带档位直接报错），再按 `modelId + 思考参数` 获得 ChatModel。3. 若对话绑定了角色且角色配置了知识库，逐个知识库做段落向量召回；useSearch=true 且开启联网搜索时执行网络搜索（取前 10 条）。4. 构建 Prompt：system 角色设定 + 上下文历史消息（按 maxContexts 取最近 n 组 user+assistant，需 useContext=true）+ 当前用户消息 + 知识库参考（Reference 模板）+ 联网搜索参考（WebSearch 模板）+ 附件内容（模型 `input_modalities` 含 image 的图片以 `Media` 与文本放入同一条 UserMessage；其余图片转 Base64、其他读取文本走 Attachment 模板），并按平台构建 ChatOptions（含角色配置的工具 ToolCallback、MCP 工具与思考参数）。**Prompt 在插入消息前构建**，图片读取失败会抛 CHAT_MESSAGE_IMAGE_READ_FAIL 且不留下任何消息。5. 插入 user 类型消息，并插入 assistant 占位消息（记录召回段落编号、联网结果、`requestId`）。6. 同步调用模型获取回复；调用异常时仍记录 FAIL 请求日志并抛出。7. 将 content/reasoningContent 与 Token 用量更新到 assistant 消息，并记录 SUCCESS 请求日志。8. 组装知识库段落（含文档名）与搜索网页，返回 send/receive 消息（含用量）。
 
 **错误码**:
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-003-000 | 对话不存在! |
-| 1-040-001-000 | 模型不存在!（模型校验） |
+| 1_040_003_000 | 对话不存在! |
+| 1_040_001_000 | 模型不存在!（模型校验） |
+| 1_040_001_004 | 该模型未配置思考档位，请刷新页面后重试 |
+| 1_040_001_005 | 该模型不支持思考档位({})，请刷新页面后重试 |
+| 1_040_001_006 | 平台({})暂不支持思考配置 |
+| 1_040_001_007 | 模型平台({})与 API 密钥平台({})不一致，无法使用思考配置 |
+| 1_040_001_009 | 思考配置不正确：{} |
+| 1_040_004_002 | 读取图片附件({})失败，请重新上传后重试 |
 
 ### 3.2 发送消息（流式）
 
@@ -260,16 +271,22 @@
 
 **请求参数 (AiChatMessageSendReqVO)**: 同 3.1
 
-**响应**: Flux\<CommonResult\<AiChatMessageSendRespVO\>\>（每帧结构同 3.1，content/reasoningContent 为增量片段；首帧附带知识库 segments 与联网搜索 webSearchPages）
+**响应**: Flux\<CommonResult\<AiChatMessageSendRespVO\>\>（每帧结构同 3.1，content/reasoningContent 为增量片段；首帧附带知识库 segments 与联网搜索 webSearchPages；每帧的 receive 消息带 inputTokens/outputTokens/totalTokens，取请求日志的最新用量快照）
 
-**业务逻辑**: 1. 校验对话归属与模型（同段式）。2. 知识库召回与联网搜索（同段式）。3. 插入 user 消息与 assistant 占位消息。4. 构建 Prompt 并调用 StreamingChatModel 得到 Flux\<ChatResponse\>。5. 流式 map：用 CAS 保证知识库段落/搜索网页仅首次计算缓存；逐帧累积 content 与 reasoningContent 并下发。6. doOnComplete：忽略租户上下文，将累积内容回写 assistant 消息。7. doOnError/doOnCancel：有部分内容则回写保留，无内容则删除 assistant 占位消息。8. onErrorResume：流异常时返回 CHAT_STREAM_ERROR 错误帧。
+**业务逻辑**: 1. 校验对话归属与模型（同段式）。2. 知识库召回与联网搜索（同段式）。3. **思考校验失败**（模型未配置档位却传入档位、档位不存在、平台不支持、平台与 ApiKey 不一致）时直接返回一个错误帧，不调用模型、不落消息。4. 插入 user 消息与 assistant 占位消息（带 `requestId`）。5. 构建 Prompt 并调用 StreamingChatModel 得到 Flux\<ChatResponse\>；**图片读取失败时返回错误帧且不落消息**。6. 流式 map：用 CAS 保证知识库段落/搜索网页仅首次计算缓存；逐帧累积 content 与 reasoningContent，并把最新用量快照随帧下发。7. doOnComplete：按请求开始时捕获的 tenantId 回写 assistant 消息与用量，并记录 SUCCESS 请求日志。8. doOnError/doOnCancel：分别记录 FAIL/CANCEL 请求日志；有部分内容则回写保留，无内容则删除 assistant 占位消息。9. onErrorResume：流异常时返回 CHAT_STREAM_ERROR 错误帧。
 
 **错误码**:
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-003-000 | 对话不存在! |
-| 1-040-004-001 | 对话生成异常! |
+| 1_040_003_000 | 对话不存在! |
+| 1_040_004_001 | 对话生成异常! |
+| 1_040_004_002 | 读取图片附件({})失败，请重新上传后重试（以错误帧返回） |
+| 1_040_001_004 | 该模型未配置思考档位，请刷新页面后重试（以错误帧返回） |
+| 1_040_001_005 | 该模型不支持思考档位({})，请刷新页面后重试（以错误帧返回） |
+| 1_040_001_006 | 平台({})暂不支持思考配置（以错误帧返回） |
+| 1_040_001_007 | 模型平台({})与 API 密钥平台({})不一致，无法使用思考配置（以错误帧返回） |
+| 1_040_001_009 | 思考配置不正确：{}（以错误帧返回） |
 
 ### 3.3 获得指定对话的消息列表
 
@@ -303,6 +320,10 @@
 | webSearchPages | List\<WebPage\> | 联网搜索的网页内容数组 |
 | attachmentUrls | List\<String\> | 附件 URL 数组 |
 | createTime | LocalDateTime | 创建时间 |
+| requestId | String | 请求编号（本地 UUID，关联 ai_request_log.request_id；仅 assistant 消息有值） |
+| inputTokens | Long | 输入 Token 数（未知为空） |
+| outputTokens | Long | 输出 Token 数（未知为空） |
+| totalTokens | Long | 合计 Token 数（输入、输出都已知时才有值） |
 | roleName | String | 角色名字（仅【对话管理】加载） |
 
 **业务逻辑**: 1. 查询对话，若不存在或不属于当前用户则返回空列表。2. 查询该对话全部消息，为空返回空列表。3. 批量查询消息引用的知识库段落及对应文档。4. 为每条消息的 segments 填充段落内容、文档编号与文档名称。
@@ -327,7 +348,7 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-004-000 | 消息不存在! |
+| 1_040_004_000 | 消息不存在! |
 
 ### 3.5 删除指定对话的消息
 
@@ -349,7 +370,7 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-004-000 | 消息不存在! |
+| 1_040_004_000 | 消息不存在! |
 
 ## 4. 聊天消息管理（AiChatMessageController，需管理员权限）
 
@@ -410,4 +431,4 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1-040-004-000 | 消息不存在! |
+| 1_040_004_000 | 消息不存在! |

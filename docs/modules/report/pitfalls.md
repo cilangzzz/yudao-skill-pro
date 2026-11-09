@@ -91,7 +91,7 @@ if (project == null || !Objects.equals(project.getCreator(), String.valueOf(getL
 
 **原因**: 根 `pom.xml` 的 `<module>yudao-module-report</module>` 与 `yudao-server/pom.xml` 的依赖声明默认都被注释；`application.yaml` 中 `spring.ai.chat.client.enabled=false` 的注释说明：`ChatClient.Builder` 自动配置要求唯一的 ChatModel Bean，而项目会创建多个，ai + report 模块同时引入时会启动报错。
 
-**解决**: 同时打开根 pom 的 `<module>` 与 yudao-server pom 的 `<dependency>` 两处注释；保持 `spring.ai.chat.client.enabled=false` 不要恢复；首次启用还需按上游/官方 SQL 建 `report_go_view_project` 表（含 `tenant_id`，见 1.1）以及积木报表自带的 `jimu_*`、`onl_drag_*` 表（由 starter 官方 SQL 维护，不在本仓库）。
+**解决**: 同时打开根 pom 的 `<module>` 与 yudao-server pom 的 `<dependency>` 两处注释；保持 `spring.ai.chat.client.enabled=false` 不要恢复；首次启用还需按上游/官方 SQL 建 `report_go_view_project` 表（含 `tenant_id`，见 1.1）以及积木报表自带的 `jimu_*`、`onl_drag_*` 表（由 starter 官方 SQL 维护，不在本仓库）。集成 UReport2 后还额外需要 `report_ureport_file` 表与 Redis（见第 6 节）。
 
 ## 4. 功能限制相关
 
@@ -129,10 +129,108 @@ if (project == null || !Objects.equals(project.getCreator(), String.valueOf(getL
 
 **解决**: 判断"已发布"用 `CommonStatusEnum.ENABLE.getStatus()`；入参校验沿用 `GoViewProjectUpdateReqVO#status` 上的 `@InEnum(CommonStatusEnum.class)`，新增 VO 时保持一致。
 
-### 5.2 错误码仅 1 个，ajreport 包是待删除的占位目录
+### 5.2 错误码分两段，ajreport 包是待删除的占位目录
 
-**问题**: 扩展 report 模块时错误提示单一（除"GoView 项目不存在"外没有其它业务错误码）；`ajreport` 相关子包看似可用，实际为空壳。
+**问题**: 扩展 report 模块时错误提示较少（目前仅 GoView 项目不存在、UReport2 报表模板不存在两个业务错误码）；`ajreport` 相关子包看似可用，实际为空壳。
 
-**原因**: `ErrorCodeConstants` 仅定义了 `GO_VIEW_PROJECT_NOT_EXISTS(1_003_000_000)` 一个错误码；`controller/admin/ajreport`、`service/ajreport`、`convert/ajreport`、`dal/dataobject/ajreport`、`dal/mysql/ajreport` 等 5 个包只有 `package-info.java`，注释为"TODO 芋艿：占位，待删除"；`framework/jmreport/core/web` 包也标注了"占位，后续会基于 Filter 实现积木报表的认证等功能，替代 JmReportTokenServiceImpl"。
+**原因**: `ErrorCodeConstants` 定义了 `GO_VIEW_PROJECT_NOT_EXISTS(1_003_000_000)`（GoView 域）与 `UREPORT2_FILE_NOT_EXISTS(1_003_001_000)`（UReport2 域）两个错误码；`controller/admin/ajreport`、`service/ajreport`、`convert/ajreport`、`dal/dataobject/ajreport`、`dal/mysql/ajreport` 等 5 个包只有 `package-info.java`（多数注释为"TODO 芋艿：占位，待删除"，`convert/ajreport` 为"TODO 占位，后续删除"，`controller/admin/ajreport` 无注释）；`framework/jmreport/core/web` 包也标注了"占位，后续会基于 Filter 实现积木报表的认证等功能，替代 JmReportTokenServiceImpl"。
 
-**解决**: 新增功能时在 `1_003_000_000` 段内顺延错误码（注意避开 system 的 1_002 段与 member 的 1_004 段）；不要在 ajreport 占位包里写代码，后续版本会被删除；jmreport 认证若要改造，参考 `framework/jmreport/core/web` 包注释的规划方向。
+**解决**: 新增功能时按子域在对应段内顺延错误码（GoView 用 `1_003_000_xxx`，UReport2 用 `1_003_001_xxx`；注意避开 system 的 1_002 段与 member 的 1_004 段）；不要在 ajreport 占位包里写代码，后续版本会被删除；jmreport 认证若要改造，参考 `framework/jmreport/core/web` 包注释的规划方向。
+
+## 6. UReport2 集成相关
+
+### 6.1 仓库缺 UReport2 建表 SQL 与菜单/权限
+
+**问题**: 按仓库 `sql/` 初始化数据库后启用 UReport2，访问报表时报 `Unknown column 'tenant_id'`，或权限标识无人拥有导致 403。
+
+**原因**: `sql/mysql/ruoyi-vue-pro.sql`（及其它数据库脚本）中没有 `report_ureport_file` 建表语句，也没有 `report:ureport:query`、`report:ureport:design` 的 `system_menu` 记录。仓库内唯一的 DDL 是测试脚本 `yudao-module-report/src/test/resources/sql/create_tables.sql`（含 `tenant_id bigint NOT NULL DEFAULT 0`），不能直接用于生产。
+
+**解决**: 启用前自行补建含 `tenant_id` 的 `report_ureport_file` 表（可参考测试 DDL 与 data-model.md 的字段表），并为「报表管理」下的「UReport2 报表」菜单与「报表设计」按钮补齐 `report:ureport:query` / `report:ureport:design` 权限，再分配给相应角色。
+
+### 6.2 数据库与 Redis 不在同一事务
+
+**问题**: 模板保存/删除成功但发布版本号失败（例如 Redis 不可用）时，各实例可能继续使用旧模板缓存。
+
+**原因**: `UReport2FileServiceImpl#saveFile`/`deleteFile` 没有外层事务（自动提交），先写数据库、再调用 `UReport2FileVersionRedisDAO#refresh` 发布新的随机版本号；二者不是同一事务。发布失败会抛异常，但数据库已提交。Redis 版本号 Key 不设置过期时间，是为避免过期后被误判为「未修改」。
+
+**解决**: 接受最终一致：待 Redis 恢复后，该模板下一次保存/删除成功、或实例重启即恢复；不要在发布版本号失败时回滚已提交的模板数据（会与 UReport2 的保存流程冲突）。监控 Redis 可用性，避免长期不一致。
+
+### 6.3 UReport2FileDO 是显式租户表，与 GoView 表方向相反
+
+**问题**: 按 GoView 表的经验省略 `tenant_id`，或误以为「报告模块的表都没有 tenant_id」。
+
+**原因**: `UReport2FileDO` 继承 `TenantBaseDO`，`report_ureport_file` 必须有 `tenant_id` 列（测试 DDL 为 `bigint NOT NULL DEFAULT 0`），租户插件会自动追加租户过滤。这与 `GoViewProjectDO` 只继承 `BaseDO`、却仍被租户插件追加条件的坑点（见 1.1）方向相反。
+
+**解决**: `report_ureport_file` 建表时必须包含 `tenant_id`；不要给 `UReport2FileDO` 加 `@TenantIgnore`，否则模板将失去租户隔离。
+
+### 6.4 模板名称是 PAD SPACE，必须规范化
+
+**问题**: 通过别名（尾部带空格）删除、保存模板后，原名称的缓存没有失效，预览仍是旧内容。
+
+**原因**: `report_ureport_file.name` 为 `varchar(128)`，MySQL `utf8mb4_bin` 属 PAD SPACE 比较规则，尾部 ASCII 空格会被忽略，`demo.ureport.xml` 与 `demo.ureport.xml ` 是同一条记录。若缓存、Redis 版本号直接使用原始名称，同一条记录的不同写法会对应不同的 key。另外该表除主键外无唯一索引，并发新增同名模板没有数据库兜底。
+
+**解决**: 所有以名称为身份的地方（数据库读写、本地缓存、Redis 版本号）都必须先经 `UReport2FileNameUtils#normalize`；扩展代码不要绕过它直接拼缓存 key。
+
+### 6.5 ureport.enabled 默认开启，引入模块即依赖 Redis 与表
+
+**问题**: 只放开 report 模块，未准备 Redis 或 `report_ureport_file` 表，启动/访问即报错。
+
+**原因**: `UReport2Configuration` 的 `@ConditionalOnProperty(prefix = "ureport", name = "enabled", havingValue = "true", matchIfMissing = true)` 默认开启；模块 `pom.xml` 已依赖 `yudao-spring-boot-starter-redis`。而根 `pom.xml` 的 `<module>yudao-module-report</module>` 与 `yudao-server/pom.xml` 的依赖仍处于注释状态，需手动打开两处。
+
+**解决**: 部署前同时准备 Redis、`report_ureport_file` 表与菜单权限；确实不启用 UReport2 时显式配置 `ureport.enabled=false`，但注意此时 `UReport2FileService` 仍可保存/删除模板（不会清理本实例缓存）。
+
+### 6.6 /ureport/** 不走租户过滤器，租户校验依赖自建过滤器
+
+**问题**: 误以为框架的 `TenantSecurityWebFilter` 会处理 `/ureport/**` 的租户校验。
+
+**原因**: `TenantSecurityWebFilter` 只拦截 `/admin-api`、`/app-api` 前缀；`/ureport/**` 的租户上下文完全由 `UReport2SecurityFilter` 依据 `LoginUser` 注入。`tenant-id` Header 与 `tenantId` URL 参数仅用于比对，与登录用户租户不一致直接返回 403。`yudao.tenant.ignore-urls` 也未加入 `/ureport/*`（因为没有对应拦截器处理）。
+
+**解决**: 越权校验必须依赖 `UReport2SecurityFilter`；二次开发新增 `/ureport` 之外的 UReport2 路径时，确保仍经过该过滤器，不要绕过它直接暴露模板数据。
+
+### 6.7 查看权限白名单非常脆弱
+
+**问题**: 只持 `report:ureport:query` 的用户访问预览/导出有时 403；UReport2 升级后原本可用的查看功能突然 403。
+
+**原因**: 查看权限仅允许 `QUERY_ACTIONS` 中的 15 个 Action（预览、分页、打印、Excel/PDF/Word 导出、chart/storeData），且要求 `_u` 以 `db:` 开头（仅已保存的数据库模板）。URI 大小写、URL 编码、路径参数、多余斜杠等变体都不会被识别为查看请求（需要设计权限）；UReport2 升级新增 Action 时若忘记同步白名单，只持查看权限的用户会 403。
+
+**解决**: 新增查看类 Action 时同步维护 `UReport2SecurityFilter#QUERY_ACTIONS`；前端 iframe/导出链接保持标准路径与 `db:` 前缀；不要把设计类 Action 误加入白名单。
+
+### 6.8 静态资源路径变化会导致页面空白
+
+**问题**: 部署后 UReport2 设计器/预览页未登录时空白，浏览器控制台显示静态资源 401/403。
+
+**原因**: 仅放行 `GET /ureport/res/ureport-asserts/**`（由 `UReportServlet.URL + "/res/ureport-asserts/"` 拼接）。若部署时 contextPath 或 starter 版本导致路径前缀变化，静态资源会被 Spring Security 拦截。
+
+**解决**: 部署时校验 contextPath 与 `UReportServlet.URL`，必要时同步调整 `SecurityConfiguration` 的放行路径与 `UReport2SecurityFilter#STATIC_RESOURCE_PREFIX`。
+
+### 6.9 模板内容可能含凭据，日志脱敏不能绕过
+
+**问题**: 二次开发自行打印 request 参数或模板内容，导致数据源账号密码泄漏到日志。
+
+**原因**: UReport2 请求参数包含 token、`tenantId`、`_u`，保存模板时还包含模板内容（可能有数据源账号密码）。本模块已用 `UReport2ErrorLogRequestWrapper` 在 `GlobalExceptionHandler` 记录异常时屏蔽请求参数、query string、请求体与上传文件。
+
+**解决**: 不要在 `UReport2SecurityFilter` 或 UReport2 扩展代码中直接打印原始 request/模板内容；需要排查时只记录 URI、方法、用户编号等非敏感信息。
+
+### 6.10 Session 编号变化会导致未保存预览/图表缓存丢失
+
+**问题**: UReport2 未保存预览报数据为空，图表数据跨请求丢失。
+
+**原因**: Spring Security 的 `SessionManagementFilter` 在每次 token 认证后调用 `changeSessionId()`，物理 Session 编号每个请求都变化，而 UReport2 的 `TempObjectCache`、`HttpSessionReportCache` 以 `getSession().getId()` 为缓存 key。
+
+**解决**: 不要移除链路中的 `UReport2SessionRequestWrapper` 包装；它按「用户类型:用户编号:租户编号」生成稳定编号，切换用户或租户时重新生成，不会串用他人缓存。
+
+### 6.11 ureport2 版本锁定 2.0.1（JDK8 适配分支）
+
+**问题**: 升级或替换 ureport2 依赖后编译/启动/运行异常。
+
+**原因**: `yudao-dependencies/pom.xml` 将 `<ureport2.version>` 锁定为 `2.0.1`，且 groupId 为 `cn.iocoder.ureport2`（JDK8 适配分支）。模块原有的 `jimureport 2.3.4 + jimubi 2.3.2` 版本约束（见 3.1）依然生效，两套报表引擎的版本约束互不影响。
+
+**解决**: 升级前验证 JDK8 兼容性与 `UReportServlet` 的 URL/Action 分发规则（影响 `QUERY_ACTIONS` 与静态资源前缀）；不要只升级 jimureport 或 ureport2 其中一个。
+
+### 6.12 reportDefinitionCache 可能不存在
+
+**问题**: 扩展代码假设 `UReport2ReportDefinitionCache` Bean 一定存在，在 `ureport.enabled=false` 时启动报依赖缺失。
+
+**原因**: `UReport2FileServiceImpl` 对 `reportDefinitionCache` 使用 `@Autowired(required = false)`，因为 `ureport.enabled=false` 时 `UReport2Configuration` 不注册该 Bean，保存/删除仍可用但不会清理本实例缓存。
+
+**解决**: 扩展代码注入缓存时同样使用 `required = false` 或 `ObjectProvider`，并判空处理。

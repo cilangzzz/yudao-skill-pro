@@ -96,7 +96,7 @@
 
 - **路径**: DELETE /promotion/diy-template/delete
 - **权限**: promotion:diy-template:delete
-- **说明**: 删除装修模板，使用中的模板不允许删除。
+- **说明**: 删除装修模板，使用中的模板不允许删除；删除模板时会级联删除该模板下的全部装修页面（事务内完成）。
 
 **请求参数**: 查询参数
 
@@ -110,6 +110,8 @@
 1. 校验模板存在（不存在抛出 DIY_TEMPLATE_NOT_EXISTS）。
 2. 校验模板未处于使用中（used = true 时抛出 DIY_TEMPLATE_USED_CANNOT_DELETE）。
 3. 按 id 删除模板记录。
+4. 查询该模板下的全部装修页面（`getDiyPageByTemplateId`）并逐个删除（`deleteDiyPage`），避免残留孤儿页面。
+5. 整个删除过程标注 `@Transactional(rollbackFor = Exception.class)`，模板与页面的删除同事务回滚。
 
 **错误码**:
 

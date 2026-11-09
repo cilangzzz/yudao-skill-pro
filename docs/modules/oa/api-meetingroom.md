@@ -182,7 +182,7 @@
 
 **业务逻辑**:
 1. 传入 managerName 时按昵称模糊匹配用户，无匹配直接返回空分页。
-2. 以当前登录用户 id 过滤，查询其可预定的会议室分页。
+2. 以当前登录用户 id 过滤，查询其可预定的会议室分页；「指定成员」范围通过 `SqlDialectUtils.jsonArrayContains("booking_user_ids", false)` 按当前数据源方言生成包含判断（MySQL 系为 `JSON_CONTAINS`，PostgreSQL 为 `jsonb @>`，Oracle / SQL Server / H2 等各有专用片段），不硬编码 MySQL 函数。
 3. 响应仅保留 id、name、location、type、status、seatCount、managerName 字段。
 
 ## 2. 会议室预定（OaMeetingRoomBookingController）

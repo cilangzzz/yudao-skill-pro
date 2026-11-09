@@ -43,7 +43,6 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1_020_008_000 | 产品不存在 |
 | 1_020_008_001 | 产品编号已存在 |
 | 1_020_009_000 | 产品分类不存在 |
 
@@ -91,6 +90,7 @@
 2. 校验产品未被合同引用（PRODUCT_DELETE_FAIL_CONTRACT_EXISTS）。
 3. 校验产品未被商机引用（PRODUCT_DELETE_FAIL_BUSINESS_EXISTS）。
 4. 删除产品记录。
+5. 将删除前的 CrmProductDO 写入操作日志上下文变量 `product`（`LogRecordContext.putVariable("product", product)`），供 `@LogRecord` 成功模板 `{{#product.name}}` 求值；缺少该变量会在日志求值阶段抛 EL1007E（数据已删除但接口报错、审计留痕缺失）。
 
 **错误码**:
 
@@ -270,6 +270,7 @@
 2. 校验是否存在子分类（PRODUCT_CATEGORY_EXISTS_CHILDREN）。
 3. 校验是否被产品使用（PRODUCT_CATEGORY_USED）。
 4. 删除分类记录。
+5. 将删除前的 CrmProductCategoryDO 写入操作日志上下文变量 `productCategory`（`LogRecordContext.putVariable("productCategory", productCategory)`），供 `@LogRecord` 成功模板 `{{#productCategory.name}}` 求值，避免 EL1007E 导致删除接口报错且审计留痕缺失。
 
 **错误码**:
 

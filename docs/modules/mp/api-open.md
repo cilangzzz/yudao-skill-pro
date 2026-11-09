@@ -7,6 +7,8 @@
 /mp/open  (Controller: MpOpenController)
 
 > 两个端点均标注 `@TenantIgnore`（不按请求头解析租户），并在 yudao-server 的 application.yaml 中通过 `security.permit-all-urls` 配置 `/admin-api/mp/open/**` 放行——微信服务器回调不携带登录凭证，无需认证。租户归属由回调参数 appId 反查账号后确定。
+>
+> 校验说明：`MpOpenCheckSignatureReqVO` / `MpOpenHandleMessageReqVO` 作为方法参数（ModelAttribute）接收，方法参数上未标注 `@Valid`/`@Validated` 触发级联校验，因此下表所列 `@NotEmpty` 在运行时**不会真正生效**，缺失参数会以 null 进入业务逻辑。
 
 ---
 
@@ -80,7 +82,7 @@
 
 ## 错误码说明
 
-本域两个端点不使用 mp 模块（1-006-000-000 段）的错误码：签名校验失败与 appId 不存在均通过 Assert 断言抛出全局异常（「非法请求」「公众号 appId({}) 不存在」「消息解析失败」），或以纯文本「非法请求」返回给微信服务器。回调链路依赖的账号数据来自公众号账号域（见 api-account.md），相关错误码如下：
+本域两个端点不使用 mp 模块（1_006_000_000 段）的错误码：签名校验失败与 appId 不存在均通过 Assert 断言抛出全局异常（「非法请求」「公众号 appId({}) 不存在」「消息解析失败」），或以纯文本「非法请求」返回给微信服务器。回调链路依赖的账号数据来自公众号账号域（见 api-account.md），相关错误码如下：
 
 | 错误码 | 说明 |
 |-------|------|

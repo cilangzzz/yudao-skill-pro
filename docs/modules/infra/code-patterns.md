@@ -99,7 +99,7 @@ public interface FileMapper extends BaseMapperX<FileDO> {
     default PageResult<FileDO> selectPage(FilePageReqVO reqVO) {
         return selectPage(reqVO, new LambdaQueryWrapperX<FileDO>()
                 .likeIfPresent(FileDO::getPath, reqVO.getPath())
-                .likeIfPresent(FileDO::getName, reqVO.getName())
+                .likeIfPresent(FileDO::getType, reqVO.getType())
                 .betweenIfPresent(FileDO::getCreateTime, reqVO.getCreateTime())
                 .orderByDesc(FileDO::getId));
     }
@@ -115,6 +115,7 @@ public interface FileMapper extends BaseMapperX<FileDO> {
 | 1_001_000_001 | 参数配置不存在 |
 | 1_001_001_000 | 定时任务不存在 |
 | 1_001_003_001 | 文件不存在 |
+| 1_001_003_004 | 不支持的文件类型（白名单外；图片、`.bin` 的内容类型与后缀不一致也复用此码） |
 | 1_001_004_002 | 表定义已经存在 |
 | 1_001_006_000 | 文件配置不存在 |
 
@@ -176,6 +177,13 @@ XXX(30, XxxFileClientConfig.class, XxxFileClient.class);
 
 4. **测试验证**：编写单元测试验证功能正确性
 
+### 放开新的二进制文件后缀（如 .hex / .ota）
+
+1. 在 `FileServiceImpl.ALLOWED_BINARY_EXTENSIONS`（当前仅含 `bin`）中加入新后缀（小写）。
+2. 保留「内容嗅探类型必须为 `application/octet-stream`」的约束，不要直接放行 `application/octet-stream` 类型，否则所有未知后缀、未知内容都会被放行。
+3. 后端上传（`createFile(byte[])`）还会校验「内容嗅探类型 == 后缀推断类型」；`presignPutUrl` / `createFile(FileCreateReqVO)` 拿不到内容，只能按后缀推断类型校验，内容安全需在存储端或业务侧补齐。
+4. 补充单元测试（参考 `FileServiceImplTest#testCreateFile_success_bin`、`testCreateFile_typeNotAllowed_binContent`、`testCreateFileByPresignedPath_success_bin`）。
+
 ### 自定义代码生成模板
 
 1. **创建模板文件**：在 `resources/codegen/` 下创建 `.vm` 模板文件
@@ -190,7 +198,11 @@ XXX(30, XxxFileClientConfig.class, XxxFileClient.class);
 
 ### 最佳实践
 
-- **文件上传路径规范**：使用 `generateUploadPath()` 方法生成唯一路径，包含日期前缀和时间戳后缀，避免文件名冲突
+- **文件上传路径规范**：使用 `generateUploadPath()` 方法生成唯一路径；默认启用日期前缀（yyyyMMdd），时间戳后缀默认关闭（`PATH_SUFFIX_TIMESTAMP_ENABLE` 静态开关可调整），避免文件名冲突
+- **文件类型白名单**：图片、文档、音视频等按内容嗅探类型命中 `ALLOWED_FILE_TYPES`；`.bin` 等固件走 `ALLOWED_BINARY_EXTENSIONS` 双条件校验（后缀 + 内容为 `application/octet-stream`）
+- **多数据库方言 SQL**：手写 Mapper SQL 涉及行数限制、日期格式化、分批限量删除时，复用框架的 `SqlDialectUtils`（如 `deleteBatchByLessThan`），不要硬编码 `LIMIT` 等 MySQL 语法；日志清理 SQL 已按此方式改造
+- **数据库类型识别归类**：`JdbcUtils.getDbType(url)` 已把 PostgreSQL 兼容的原生驱动统一归为 PostgreSQL 处理（瀚高 `jdbc:highgo:`、openGauss/MogDB `jdbc:opengauss:`、华为 GaussDB `jdbc:gaussdb:`，需 PG 兼容模式建库），复用其序列主键、Quartz、代码生成等适配；神通 OSCAR 已纳入支持（主键策略同 PostgreSQL，用 `nextval('序列名')`）。代码生成等按 `DbType` 分支的逻辑不要自行解析 URL 判断库型，统一走 `JdbcUtils`
+- **代码生成方言**：菜单 SQL 模板按数据源 URL 解析的 `DbType` 分支输出（MySQL/OceanBase、Oracle/DM/OSCAR、PostgreSQL/KingbaseES、SQL Server），新增数据库支持时同步扩展 `sql.vm`
 - **文件配置缓存**：使用 Guava LoadingCache 缓存 FileClient，避免频繁查询数据库，支持异步刷新
 - **代码生成同步**：使用 `syncCodegenFromDB()` 同步数据库表结构变更，保持代码生成定义与数据库一致
 - **定时任务幂等**：`JobHandler.execute()` 应实现幂等性，避免重复执行产生副作用
@@ -219,7 +231,7 @@ XXX(30, XxxFileClientConfig.class, XxxFileClient.class);
 | MinIO/S3 SDK | 对象存储客户端 |
 | Swagger/OpenAPI | API 文档注解 |
 
-> 本模块不依赖任何业务模块；完整的 framework starter 清单与下游依赖模块列表见 [README](README.md) 的「依赖关系」一节，模块间依赖图见 [docs/README.md](../README.md)。
+> 本模块不依赖任何业务模块；完整的 framework starter 清单与下游依赖模块列表见 [README](README.md) 的「依赖关系」一节，模块间依赖图见 [docs/README.md](../../README.md)。
 
 ## 关键文件
 
@@ -233,6 +245,7 @@ XXX(30, XxxFileClientConfig.class, XxxFileClient.class);
 | yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/codegen/CodegenServiceImpl.java | 代码生成服务实现 |
 | yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/codegen/inner/CodegenEngine.java | 代码生成引擎，模板渲染核心 |
 | yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/codegen/inner/CodegenBuilder.java | 代码生成对象构建器 |
+| yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/db/DatabaseTableServiceImpl.java | 数据库表结构解析（MyBatis-Plus Generator），含神通 OSCAR TEXT 类型转换 |
 | yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/service/job/JobServiceImpl.java | 定时任务服务实现，Quartz 集成 |
 | yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/api/file/FileApi.java | 文件 API 接口，供其他模块调用 |
 | yudao-module-infra/src/main/java/cn/iocoder/yudao/module/infra/enums/ErrorCodeConstants.java | 错误码常量定义 |

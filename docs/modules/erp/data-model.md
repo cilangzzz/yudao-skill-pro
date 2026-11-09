@@ -27,8 +27,8 @@ cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO           （抽象基类
 
 **使用规则**：
 
-- **BaseDO**：不含 `tenant_id` 的表使用。erp 模块所有 33 张表均属此类——erp 表**不支持多租户**，产品、供应商、客户、单据等数据全库共享，DO 层没有任何一个类继承 `TenantBaseDO`。
-- **TenantBaseDO**：需要租户隔离的表使用（`tenant_id` 列 + 租户插件自动拼 WHERE）。erp 表若未来需要租户隔离，需将继承改为 `TenantBaseDO` 并给表补 `tenant_id` 列，当前代码中没有这种用法。
+- **BaseDO**：全部 33 个 erp DO 继承 `BaseDO`，即 DO 层不映射 `tenant_id` 字段；但"不映射 tenantId"不等于"无租户隔离"——`yudao-spring-boot-starter-biz-tenant` 的 `TenantDatabaseInterceptor` 会对所有注册过的表生效，仅标注 `@TenantIgnore` 的实体跳过改写，其余（含仅继承 BaseDO 的实体）一律自动追加 `tenant_id = ?` 条件、INSERT 自动填充租户号。erp 模块无一处 `@TenantIgnore`，因此 erp 表在 DB 层默认按租户过滤，新建表 DDL 必须包含 `tenant_id` 列。
+- **TenantBaseDO**：在 DO 层显式映射 `tenantId` 字段时使用。erp 当前没有 DO 继承 `TenantBaseDO`；若未来需要在 DO 中读写租户号，可改为继承 `TenantBaseDO`（表仍需有 `tenant_id` 列）。
 - erp 全部表都通过 `@KeySequence("{表名}_seq")` 声明主键序列，供 Oracle/PostgreSQL/Kingbase/DB2/H2 等数据库自增使用（MySQL 下不生效、可忽略）；主键统一为 `id`（`@TableId`）。
 
 ## 2. 核心 DO 实体
@@ -767,7 +767,7 @@ erp_customer ◄──customer_id── erp_finance_receipt  ──1:N(receipt_i
 付款/收款金额回写对应业务单的 payment_price / refund_price / receipt_price 字段
 ```
 
-**跨模块关联**：erp 无对外 api 包，仅上游依赖 yudao-module-system——`sale_user_id`、`finance_user_id`、`creator`/`updater` 均指向 system 的管理员（AdminUserApi 共 19 处调用）；下游仅 yudao-server 装配引用。statistics 统计域不建表，直接对上述业务表做 XML Mapper 聚合查询。
+**跨模块关联**：erp 无对外 api 包，仅上游依赖 yudao-module-system——`sale_user_id`、`finance_user_id`、`creator`/`updater` 均指向 system 的管理员（AdminUserApi 共 23 处调用，分布于 19 个类）；下游仅 yudao-server 装配引用。statistics 统计域不建表，直接对上述业务表做 XML Mapper 聚合查询。
 
 ## 4. 全部数据表清单
 

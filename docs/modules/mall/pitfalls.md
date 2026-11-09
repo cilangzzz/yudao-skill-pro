@@ -123,6 +123,46 @@ if (updateCount == 0) {
 
 **解决**: 出现脏数据时以 Job 的处理结果为准（Job 会按团长记录统一重置整团状态）；如果做秒杀级并发优化，需要在 `createCombinationRecord` 上加针对 headId 的分布式锁，而不是改判断语句。
 
+### 4.6 订单发货状态白名单与错误码文案不一致，且已发货订单可再次发货
+
+**问题**: 按错误码 `1_011_000_017`「交易订单发货失败，订单不是【待发货】状态」的字面理解写业务判断，会把已发货订单当成不可再发货；实际行为恰好相反——【已发货】订单允许再次发货以修改物流公司/单号，而未付款/已取消/已完成等状态会抛该错误。
+
+**原因**: `TradeOrderUpdateServiceImpl.validateOrderDeliverable` 现在先做状态白名单校验：`TradeOrderStatusEnum.isUndelivered(status) || isDelivered(status)` 才放行，否则抛 `ORDER_DELIVERY_FAIL_STATUS_NOT_UNDELIVERED`（1_011_000_017）；随后才校验 `refundStatus == NONE`。基线版本只校验 refundStatus、不校验订单状态（未付款/已取消订单理论上也能被发货），本次按官方 issue https://github.com/YunaiV/ruoyi-vue-pro/issues/1310 收紧。CAS 更新条件也改为读取时的 `order.getStatus()`，避免并发收货/取消被覆盖。
+
+**解决**: 扩展发货相关逻辑时以 `isUndelivered/isDelivered` 白名单为准，不要按错误码文案判断；需要"仅首次发货"的附加值逻辑时，自行判断 `order.getStatus()` 是否已为 DELIVERED，不能依赖该错误码。
+
+### 4.7 重复发货会重复触发站内信、订阅消息与 afterDeliveryOrder
+
+**问题**: 对已发货订单再次发货（修改物流单号）时，除了刷新物流信息，站内信、微信小程序订阅消息和 `TradeOrderHandler.afterDeliveryOrder` 都会再执行一遍，用户可能收到重复通知，后置 Handler 也可能重复处理。
+
+**原因**: `deliveryOrder` 在 CAS 更新成功后无条件执行 4.1 站内信、4.2 订阅消息与第 5 步 `tradeOrderHandlers.forEach(handler -> handler.afterDeliveryOrder(order))`，没有区分"首次发货"与"再次发货"。当前唯一的发货后置 Handler 是 `TradeStatusSyncToWxaOrderHandler`（同步物流到小程序），重复执行影响较小。
+
+**解决**: 新增发货后置 Handler 时必须自行保证幂等（例如按订单号 + 物流单号去重，或先判断订单原状态）；需要区分场景时可对比 `order.getStatus()` 是否已为 DELIVERED。
+
+### 4.8 支付/退款/转账回调必须双向核对回调单号，仅校验金额与商户单号不足以防串单
+
+**问题**: 支付回调、售后退款回调、佣金提现转账回调如果只校验"商户单号 + 金额"，其它支付应用中恰好相同商户单号、相同金额的单据可能被用于串单，把别人的支付/退款/转账结果错误地记到本单上。
+
+**原因**: 本次在三条回调链路统一追加「业务单绑定单号 == 回调单号」校验：`TradeOrderUpdateServiceImpl.updateOrderPaid` 校验 `order.payOrderId == payOrderId`（不一致抛 1_011_000_014）；`AfterSaleServiceImpl.updateAfterSaleRefunded` 校验 `afterSale.payRefundId == payRefundId`（不一致抛 1_011_000_114，位于校验支付退款单之前）；`BrokerageWithdrawServiceImpl.updateBrokerageWithdrawTransferred` 校验 `withdraw.payTransferId == payTransferId`（不一致抛 1_011_008_005，位于「提现单已结束」判断之后、「校验转账单合法性」之前）。原有的幂等分支（已支付且支付单号相同直接 return）保持不变。
+
+**解决**: 二次开发新增任何支付/退款/转账回调入口时，必须照做"业务单绑定单号 == 回调单号"校验，不能只依赖金额与商户单号；排查回调异常时优先看这三处 `log.error` 中的「绑定单号与回调单号不匹配」。
+
+### 4.9 DIY 模板删除会级联删除其下全部装修页面
+
+**问题**: 删除装修模板后，模板下的装修页面（含 App 首页/我的等）会一起被删除，且数据不可恢复；如果有其它业务仍按页面 id 引用这些页面，会出现悬空引用。
+
+**原因**: `DiyTemplateServiceImpl.deleteDiyTemplate` 新增 `@Transactional(rollbackFor = Exception.class)`，删除模板记录后按 `templateId` 查出全部 `promotion_diy_page` 并逐个 `deleteDiyPage`。基线版本只删模板本身，页面会残留为孤儿数据。
+
+**解决**: 删除前确认模板未处于使用中（接口本身会拦截），并评估页面是否被其它业务引用；不要把"删模板"当作轻量操作。
+
+### 4.10 优惠券模板已被逻辑删除时，回收优惠券不回退 takeCount
+
+**问题**: 回收某张优惠券后，模板的 `takeCount` 没有减 1，排查"领取数与实际发放数不一致"时容易误判为 bug。
+
+**原因**: `CouponServiceImpl.deleteCoupon` 现在先判断 `getCouponTemplate(coupon.getTemplateId()) != null`，模板已被逻辑删除时跳过 `updateCouponTemplateTakeCount(id, -1)`。因为 `updateTakeCount` 对逻辑删除的模板匹配 0 行，基线版本会误抛 `COUPON_TEMPLATE_NOT_ENOUGH`（1_013_004_002）导致删券失败。
+
+**解决**: 模板已删场景下的计数差值属于预期；回收逻辑不要恢复成无条件回退。
+
 ## 5. 库存相关
 
 ### 5.1 所有库存扣减都是数据库条件更新（CAS），没有 Redis 预扣
@@ -160,3 +200,45 @@ if (updateCount == 0) {
 **原因**: `TradeMessageServiceImpl.sendMessageWhenDeliveryOrder` 方法第一行就是无条件 `if (true) { return; }`，后面构造 `NotifyMessageSendApi` 发送的逻辑永远不会执行，源码处留有 `// TODO 芋艿：看下模版`。`TradeOrderUpdateServiceImpl.deliveryOrder` 第 4.1 步调用的正是这个方法。
 
 **解决**: 需要站内信通知时，删除该方法开头的 `if (true) return;` 并补齐模板配置（`MessageTemplateConstants.SMS_ORDER_DELIVERY`）；不要误以为是配置问题反复排查通知模板。
+
+## 8. Mapper 与 SQL 可移植性约定
+
+### 8.1 取前 N 条/单条不要再用 `.last("LIMIT n")`
+
+**问题**: 用 `wrapper.last("LIMIT " + count)` 或 `selectOne(... .last("LIMIT 1"))` 取前 N 条/单条，在非 MySQL 数据库（Oracle/SQL Server/PostgreSQL）上会因方言不支持而报错；在 SQL Server 上还要求分页语句必须带 ORDER BY。
+
+**原因**: 框架已在 `BaseMapperX` 提供 `selectListLimitN(Wrapper, int)` 与 `selectFirstOne(Wrapper)`：前者走 MyBatis-Plus 分页插件，按当前数据库生成 LIMIT / ROWNUM / OFFSET FETCH，且不执行 COUNT；后者等价于 `selectListLimitN(wrapper, 1)` 取第一条。本次 mall 已把 `BargainActivityMapper`、`BargainRecordMapper`、`CombinationRecordMapper`、`CouponTemplateMapper`、`KeFuMessageMapper` 等处的 `.last("LIMIT n")` 全部迁移，并为砍价相关查询补齐了确定性的 `ORDER BY id`。
+
+**解决**: 新增/修改查询统一写成：
+
+```java
+// 前 N 条：wrapper 必须自带 orderBy（SQL Server 分页要求排序）
+return selectListLimitN(new LambdaQueryWrapperX<XxxDO>()
+        .eq(XxxDO::getStatus, status)
+        .orderByAsc(XxxDO::getId), count);
+
+// 单条
+return selectFirstOne(new LambdaQueryWrapper<XxxDO>()
+        .eq(XxxDO::getUserId, userId)
+        .orderByDesc(XxxDO::getId));
+```
+
+`selectListLimitN` 对 limit 为负数会直接抛 `IllegalArgumentException`（防负数被分页插件视为不分页而查全表），limit=0 直接返回空列表。
+
+### 8.2 统计 XML 的日期分组必须走 SqlDialectUtils，布尔/逻辑删除字面量不要硬编码
+
+**问题**: 统计 Mapper XML 中直接写 `CAST(create_time AS DATE)`、`CONCAT(EXTRACT(...))`、`pay_status = TRUE`、`deleted = FALSE`，在部分数据库不可用。
+
+**原因**: 日期分组已统一改为方言片段 `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@castDate('create_time')}` / `castDateText(...)` / `formatYearDashMonth(...)`，并用 `resultMap` 显式把 `statDate` 映射回响应字段 `date`（`MemberStatisticsMapper.xml`、`TradeOrderStatisticsMapper.xml`）；布尔字面量改为 `<bind name="trueValue" value="true"/>` + `#{trueValue}` 绑定（`ProductStatisticsMapper.xml`、`TradeOrderStatisticsMapper.xml`）；注解 SQL 中的 `deleted = FALSE` 统一改为 `deleted = 0`（`BrokerageRecordMapper`、`BrokerageUserMapper`）。以上改动不改变任何接口的入参/出参（`date` / `orderPayCount` / `orderPayPrice` / `count` 字段保持不变）。
+
+**解决**: 新增统计 SQL 时不要直接写 `CAST`/`EXTRACT`/`TRUE`/`FALSE`；日期分组用 `SqlDialectUtils` 对应方法并配 `resultMap`，布尔值用 `#{trueValue}`，逻辑删除条件写 `deleted = 0`。`formatYearDashMonth` 等方法的列名参数只接受代码中固定的安全列名（内部有 `checkColumn` 校验）。
+
+## 9. 子模块依赖与参数校验约定
+
+### 9.1 product 子模块新增对 trade-api 的依赖，SPU 配送方式在参数校验阶段拦截
+
+**问题**: 给 `ProductSpuSaveReqVO.deliveryTypes` 传非法配送方式（非 1/2）时，接口直接返回 HTTP 400「配送方式不正确」，不会落库；同时 product 的 `pom.xml` 多了一条对 `yudao-module-trade-api` 的依赖。
+
+**原因**: 本次为 `deliveryTypes` 新增 `@InEnum(value = DeliveryTypeEnum.class, message = "配送方式不正确")`，`DeliveryTypeEnum` 位于 `yudao-module-trade-api`（取值：1 快递发货 / 2 用户自提），因此 product → trade-api 成为新的内部依赖方向。基线版本只有 `@NotEmpty`，非法值会被静默写入数据库。
+
+**解决**: 跨子模块共享枚举优先放 `yudao-module-trade-api`（其中已含 18 个订单/售后/分销/配送/通知枚举，另含 ErrorCodeConstants 等 3 个常量类），但 trade-api 的定位是「纯 API 骨架包」，不要在 trade-api 中引入任何实现类依赖，以免重新形成循环依赖。新增需要枚举校验的字段时，直接复用 `@InEnum(XxxEnum.class)`，不要手写 if 判断。

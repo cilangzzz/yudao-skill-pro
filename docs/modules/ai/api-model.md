@@ -28,7 +28,7 @@
 | apiKey | String | 是 | @NotEmpty | 密钥 |
 | platform | String | 是 | @NotEmpty | 平台，如「OpenAI」 |
 | url | String | 否 | - | 自定义 API 地址 |
-| status | Integer | 是 | @NotNull | 状态（1 开启 / 2 禁用） |
+| status | Integer | 是 | @NotNull | 状态（0 开启 / 1 关闭，CommonStatusEnum） |
 
 **响应**: CommonResult&lt;Long&gt; — 密钥编号
 
@@ -142,16 +142,27 @@
 | name | String | 是 | @NotEmpty | 模型名字 |
 | model | String | 是 | @NotEmpty | 模型标识，如 gpt-3.5-turbo-0125 |
 | platform | String | 是 | @NotEmpty、@InEnum(AiPlatformEnum) | 模型平台 |
-| type | Integer | 是 | @NotNull、@InEnum(AiModelTypeEnum) | 模型类型（1 语言 / 2 图片 / 3 音乐等） |
+| type | Integer | 是 | @NotNull、@InEnum(AiModelTypeEnum) | 模型类型（1 对话 / 2 图片 / 3 语音 / 4 视频 / 5 向量 / 6 重排序） |
 | sort | Integer | 是 | @NotNull | 排序 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态 |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态（0 开启 / 1 关闭） |
 | temperature | Double | 否 | - | 温度参数 |
 | maxTokens | Integer | 否 | - | 单条回复的最大 Token 数量 |
 | maxContexts | Integer | 否 | - | 上下文的最大 Message 数量 |
+| inputModalities | List\<String\> | 否 | @InEnum(AiModelInputModalityEnum) | 输入模态数组，取值 text / image / video；仅对话模型（type=1）使用，为空视为仅支持 text |
+| reasoningConfig | ReasoningConfig | 否 | - | 思考配置（`levels` + `defaultLevel`）；null 或 `levels` 为 [] 表示不配置思考（更新时清空） |
+
+**思考配置 (ReasoningConfig) 与思考档位 (ReasoningLevel)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|-----|---------|------|
+| levels | List\<ReasoningLevel\> | 是 | @NotNull、@Valid（元素 @NotNull、档位值不能重复） | 档位数组，从低到高；`[]` 表示清空思考配置 |
+| defaultLevel | String | 否 | @AssertTrue（必须在 levels 中；levels 为空时不能传） | 默认档位 |
+| ReasoningLevel.level | String | 是 | @NotNull、@Pattern(`^[a-z0-9_-]{1,32}$`) | 档位值，`off` 表示关闭思考 |
+| ReasoningLevel.options | Map\<String, Object\> | 是 | @NotNull、@AssertTrue（任意层级不允许 null） | 该档位的思考参数（JSON 对象） |
 
 **响应**: CommonResult&lt;Long&gt; — 模型编号
 
-**业务逻辑**: 1. AiPlatformEnum.validatePlatform 校验平台合法；2. apiKeyService.validateApiKey 校验密钥存在且未禁用（否则抛 MODEL_NOT_EXISTS 相关联的 API_KEY_NOT_EXISTS / API_KEY_DISABLE）；3. VO 转 AiModelDO 插入；4. 返回模型编号。
+**业务逻辑**: 1. AiPlatformEnum.validatePlatform 校验平台合法；2. apiKeyService.validateApiKey 校验密钥存在且未禁用（否则抛 MODEL_NOT_EXISTS 相关联的 API_KEY_NOT_EXISTS / API_KEY_DISABLE）；3. VO 转 AiModelDO；4. 校验思考配置（仅配置了思考时才校验）：模型类型必须为 CHAT、模型平台必须与 API 密钥平台一致、平台必须支持思考路由、每档 options 的顶层键需符合该路由规则（HTTP 路由禁止 model/messages/stream/stream_options/tools/tool_choice；OPENAI 路由禁止与强类型字段同名且 reasoning_effort 必须是非空字符串；通义只认 enable_thinking 布尔值与 thinking_budget 正整数）；5. 未配置思考（null 或 levels 为空）时把 reasoningConfig 归一为 null 后插入；6. 返回模型编号。
 
 **错误码**:
 
@@ -159,6 +170,9 @@
 |-------|------|
 | 1_040_000_000 | API 密钥不存在 |
 | 1_040_000_001 | API 密钥已禁用！ |
+| 1_040_001_007 | 模型平台({})与 API 密钥平台({})不一致，无法使用思考配置 |
+| 1_040_001_006 | 平台({})暂不支持思考配置 |
+| 1_040_001_009 | 思考配置不正确：{} |
 
 ### 2.2 更新模型
 
@@ -170,7 +184,7 @@
 
 **响应**: CommonResult&lt;Boolean&gt; — 固定 true
 
-**业务逻辑**: 1. 校验模型存在（MODEL_NOT_EXISTS）；2. 校验平台合法；3. 校验密钥存在且未禁用；4. 转 DO 后按 id 更新。
+**业务逻辑**: 1. 校验模型存在（MODEL_NOT_EXISTS）；2. 校验平台合法；3. 校验密钥存在且未禁用；4. 思考配置校验同 2.1；5. 未配置思考时把 reasoningConfig 归一为 null，并通过 `AiChatMapper#updateForSave` 以一条 UPDATE 显式把该列置空（否则 MyBatis-Plus 的 null 字段不会出现在 UPDATE 语句中，旧的思考配置会残留）；6. 按 id 更新。
 
 **错误码**:
 
@@ -179,6 +193,9 @@
 | 1_040_001_000 | 模型不存在! |
 | 1_040_000_000 | API 密钥不存在 |
 | 1_040_000_001 | API 密钥已禁用！ |
+| 1_040_001_007 | 模型平台({})与 API 密钥平台({})不一致，无法使用思考配置 |
+| 1_040_001_006 | 平台({})暂不支持思考配置 |
+| 1_040_001_009 | 思考配置不正确：{} |
 
 ### 2.3 删除模型
 
@@ -221,6 +238,8 @@
 | temperature | Double | 温度参数 |
 | maxTokens | Integer | 单条回复的最大 Token 数量 |
 | maxContexts | Integer | 上下文的最大 Message 数量 |
+| inputModalities | List\<String\> | 输入模态数组（text / image / video），为空视为仅支持 text |
+| reasoningConfig | ReasoningConfig | 思考配置（`levels` + `defaultLevel`），为空表示未配置思考 |
 | createTime | LocalDateTime | 创建时间 |
 
 **业务逻辑**: 1. 按 id 查询；2. 转 RespVO 返回（不存在时返回 null）。
@@ -257,9 +276,9 @@
 | type | Integer | 是 | - | 模型类型 |
 | platform | String | 否 | - | 平台，如 midjourney |
 
-**响应**: CommonResult&lt;List&lt;AiModelRespVO&gt;&gt;（仅填充 id、name、model、platform 四个字段）
+**响应**: CommonResult&lt;List&lt;AiModelRespVO&gt;&gt;（仅填充 id、name、model、platform、inputModalities 五个字段；不返回 reasoningConfig）
 
-**业务逻辑**: 1. 按状态=开启、类型、平台（可选）查询模型列表；2. 转精简 RespVO 返回。
+**业务逻辑**: 1. 按状态=开启、类型、平台（可选）查询模型列表；2. 转精简 RespVO 返回（含 inputModalities，供前端判断模型是否支持图片输入）。
 
 ---
 
@@ -400,7 +419,7 @@
 | toolIds | List&lt;Long&gt; | 否 | - | 引用的工具编号列表 |
 | mcpClientNames | List&lt;String&gt; | 否 | - | 引用的 MCP Client 名字列表 |
 | publicStatus | Boolean | 是 | @NotNull | 是否公开 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态 |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态（0 开启 / 1 关闭） |
 
 **响应**: CommonResult&lt;Long&gt; — 角色编号
 
@@ -628,6 +647,11 @@
 | 1_040_001_001 | 模型({})已禁用! | 模型 |
 | 1_040_001_002 | 操作失败，找不到默认模型 | 模型 |
 | 1_040_001_003 | 操作失败，该模型的模型类型不正确 | 模型 |
+| 1_040_001_004 | 该模型未配置思考档位，请刷新页面后重试 | 模型（发送时校验） |
+| 1_040_001_005 | 该模型不支持思考档位({})，请刷新页面后重试 | 模型（发送时校验） |
+| 1_040_001_006 | 平台({})暂不支持思考配置 | 模型（保存/发送时校验） |
+| 1_040_001_007 | 模型平台({})与 API 密钥平台({})不一致，无法使用思考配置 | 模型（保存/发送时校验） |
+| 1_040_001_009 | 思考配置不正确：{} | 模型（保存/发送时校验） |
 | 1_040_002_000 | 聊天角色不存在 | 聊天角色 |
 | 1_040_001_001 | 聊天角色({})已禁用!（源码中与模型禁用共用同一编号） | 聊天角色 |
 | 1_040_009_000 | 知识库不存在 | 聊天角色（引用校验） |

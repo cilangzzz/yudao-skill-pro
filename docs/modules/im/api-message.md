@@ -12,7 +12,7 @@
 | /im/manager/message/group | ImGroupMessageManagerController | 群聊消息管理（管理后台） |
 | /im/manager/message/private | ImPrivateMessageManagerController | 私聊消息管理（管理后台） |
 
-消息类型 type 取值参见 `ImContentTypeEnum`：用户聊天消息（normal）为 101 文本 / 102 图片 / 103 语音 / 104 视频 / 105 文件 / 107 合并转发 / 108 名片 / 115 表情；消息状态 status 参见 `ImMessageStatusEnum`（0 正常 / 撤回）；回执状态 receiptStatus 参见 `ImMessageReceiptStatusEnum`（无需回执 / 待回执 / 回执完成）。用户端接口均要求登录（已认证），按 `getLoginUserId()` 取当前用户；管理端接口需 `im:manager:message:query` 权限。
+消息类型 type 取值参见 `ImContentTypeEnum`：用户聊天消息（normal）为 101 文本 / 102 图片 / 103 语音 / 104 视频 / 105 文件 / 107 合并转发 / 108 名片 / 115 表情 / 125 素材（`MATERIAL`，normal=true，用户可直接发送）；消息状态 status 参见 `ImMessageStatusEnum`（0 正常 / 2 已撤回，-1 发送中仅客户端本地状态）；回执状态 receiptStatus 参见 `ImMessageReceiptStatusEnum`（无需回执 / 待回执 / 回执完成）。用户端接口均要求登录（已认证），按 `getLoginUserId()` 取当前用户；管理端接口需 `im:manager:message:query` 权限。
 
 ## 1. 群聊消息（Controller: ImGroupMessageController，前缀 /im/message/group）
 

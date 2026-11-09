@@ -1,6 +1,6 @@
 # 认证与验证码接口 (AuthController / CaptchaController)
 
-> 管理后台的认证入口：账号密码登录、注册、短信登录、社交登录、令牌刷新与登出、权限信息获取，以及 AJ-Captcha 行为验证码的获取与校验。
+> 管理后台的认证入口：账号密码登录、注册、短信登录、社交登录、扫码登录、令牌刷新与登出、权限信息获取，以及 AJ-Captcha 行为验证码的获取与校验。
 
 ## 接口路径前缀
 
@@ -65,7 +65,7 @@
 
 **业务逻辑**:
 1. 从请求头或请求参数中解析访问令牌，为空则直接返回 true。
-2. 调用 OAuth2TokenService.removeAccessToken 删除访问令牌。
+2. 调用 OAuth2TokenService.removeAccessToken 删除访问令牌：除目标访问令牌外，**级联删除同一 refresh_token 名下的其它访问令牌**（MySQL + Redis），并删除该刷新令牌本身。
 3. 令牌不存在（返回 null）时直接结束，不记日志。
 4. 删除成功后记录登出日志（LOGOUT_SELF 类型）：管理员用户取用户名，其他用户类型取会员手机号。
 
@@ -85,7 +85,9 @@
 
 **业务逻辑**:
 1. 调用 OAuth2TokenService.refreshAccessToken(refreshToken, 默认客户端 default) 刷新访问令牌。
-2. 将新的 OAuth2AccessTokenDO 转换为 AuthLoginRespVO 返回（含新 accessToken/refreshToken/expiresTime）。
+2. 若刷新令牌已过期：先删除该 refresh_token 名下的全部访问令牌，再删除刷新令牌，并抛出 401「刷新令牌已过期」。
+3. 刷新成功时**不再删除**该 refresh_token 名下的旧访问令牌（MySQL 与 Redis 均保留），旧令牌由自身有效期自然结束；仅创建并返回新的访问令牌。
+4. 将新的 OAuth2AccessTokenDO 转换为 AuthLoginRespVO 返回（含新 accessToken/refreshToken/expiresTime）。
 
 ### 1.4 获取登录用户的权限信息
 
@@ -316,6 +318,94 @@
 | 1_002_003_003 | 用户不存在 |
 | 1_002_018_000 | 社交授权失败，原因是：{} |
 
+### 1.11 生成扫码登录二维码
+
+- **路径**: POST /system/auth/create-qrcode
+- **权限**: @PermitAll（匿名可访问）
+- **说明**: 为「电脑端扫码、手机端确认」流程生成二维码，返回二维码编号、领取凭证与二维码内容。
+- **备注**: 标注 `@ApiAccessLog(requestEnable = false, responseEnable = false)`，不记录请求与响应内容。
+
+**请求参数**: 无
+
+**响应**: CommonResult&lt;AuthQrcodeCreateRespVO&gt;
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| qrcodeId | String | 二维码编号（32 位 UUID，无连字符） |
+| secret | String | 电脑领取凭证（仅保存在生成二维码的页面，不随二维码内容下发） |
+| qrContent | String | 二维码内容，格式为 `YuDaoLogin:{qrcodeId}`（不含领取凭证） |
+| expiresIn | Integer | 有效期，单位：秒，固定 180 |
+
+**业务逻辑**:
+1. 生成两个 32 位 UUID：二维码编号 qrcodeId 与领取凭证 secret。
+2. 将 qrcodeId 与 secret 的 SHA-256 摘要写入 Redis（key：`auth_qrcode:{qrcodeId}:{tenantId}`，多租户关闭时无租户后缀），Hash 结构为 `status` + `secretHash`，TTL 180 秒。
+3. 写入使用 Lua 脚本原子执行（`EXISTS` 判断编号未占用 → `HSET` → `EXPIRE`），编号已存在则抛 AUTH_QRCODE_INVALID。
+4. 返回 qrcodeId、secret、qrContent（`YuDaoLogin:` + qrcodeId）与 expiresIn。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_002_000_009 | 二维码已失效或领取凭证不正确，请重新扫码 |
+
+### 1.12 手机确认扫码登录
+
+- **路径**: POST /system/auth/confirm-qrcode
+- **权限**: 已认证（需登录，用当前登录用户确认二维码）
+- **说明**: 手机端扫码后调用，将二维码与当前登录用户绑定，等待电脑端领取。
+
+**请求参数 (AuthQrcodeConfirmReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| qrcodeId | String | 是 | @NotEmpty、@Pattern("[a-f0-9]{32}") | 二维码编号 |
+
+**响应**: CommonResult&lt;Boolean&gt;（固定返回 true）
+
+**业务逻辑**:
+1. 以 Lua 脚本原子确认：二维码不存在或已过期（返回 nil）抛 AUTH_QRCODE_INVALID；已被**其它**用户确认时抛 AUTH_QRCODE_ALREADY_CONFIRMED；同一用户重复确认则幂等返回成功。
+2. 确认成功后在 Hash 中写入 `userId` 并将状态改为 CONFIRMED（1），**不刷新 TTL**（仍在原 180 秒有效期内）。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_002_000_009 | 二维码已失效或领取凭证不正确，请重新扫码 |
+| 1_002_000_010 | 二维码已被其他用户确认，请重新扫码 |
+
+### 1.13 电脑轮询领取扫码登录结果
+
+- **路径**: POST /system/auth/qrcode-login
+- **权限**: @PermitAll（匿名可访问）
+- **说明**: 电脑端轮询二维码状态；手机确认后领取登录令牌，**仅可领取一次**。
+
+**请求参数 (AuthQrcodePollReqVO，继承 AuthQrcodeConfirmReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| qrcodeId | String | 是 | @NotEmpty、@Pattern("[a-f0-9]{32}") | 二维码编号 |
+| secret | String | 是 | @NotEmpty、@Pattern("[a-f0-9]{32}") | 生成二维码时获得的领取凭证 |
+
+**响应**: CommonResult&lt;AuthQrcodePollRespVO&gt;
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| status | Integer | 扫码状态，参见 AuthQrcodeStatusEnum：0 等待手机确认（WAITING）、1 手机已确认（CONFIRMED） |
+| login | AuthLoginRespVO | 电脑独立登录结果（字段同 1.1），仅确认成功时返回；等待确认时为 null |
+
+**业务逻辑**:
+1. 以 Lua 脚本原子轮询：先比对 `secretHash`（secret 的 SHA-256 摘要），不一致直接返回空；状态为 WAITING 时返回 WAITING 且**不删除** key；状态为 CONFIRMED 时读取 `userId` 并**原子 DEL** key（保证只能领取一次），返回 CONFIRMED 与用户编号。
+2. 二维码过期、已被领取或凭证不正确（脚本返回空列表）时抛 AUTH_QRCODE_INVALID。
+3. 领取成功后按 userId 查询管理员用户，不存在抛 USER_NOT_EXISTS；随后走 `createTokenAfterLoginSuccess`（记录 LOGIN_QRCODE 登录日志、更新最后登录 IP、创建 OAuth2 访问令牌）返回登录信息。
+4. 注意：二维码在领取时即被删除，若登录过程失败或响应丢失，需重新扫码。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_002_000_009 | 二维码已失效或领取凭证不正确，请重新扫码 |
+| 1_002_003_003 | 用户不存在 |
+
 ---
 
 ## 2. 验证码接口（CaptchaController）
@@ -373,7 +463,7 @@
 
 ---
 
-## 附：认证域相关错误码汇总（AUTH 模块 1-002-000-000 段）
+## 附：认证域相关错误码汇总（AUTH 模块 1_002_000_000 段）
 
 | 错误码 | 说明 |
 |-------|------|
@@ -383,3 +473,5 @@
 | 1_002_000_005 | 未绑定账号，需要进行绑定 |
 | 1_002_000_007 | 手机号不存在 |
 | 1_002_000_008 | 验证码不正确，原因：{} |
+| 1_002_000_009 | 二维码已失效或领取凭证不正确，请重新扫码 |
+| 1_002_000_010 | 二维码已被其他用户确认，请重新扫码 |

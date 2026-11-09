@@ -154,7 +154,7 @@
 | /mp/statistics/user-summary | GET | 获得粉丝增减数据 | mp:statistics:query |
 | /mp/statistics/user-cumulate | GET | 获得粉丝累计数据 | mp:statistics:query |
 | /mp/statistics/upstream-message | GET | 获取消息发送概况数据 | mp:statistics:query |
-| /mp/statistics/interface-summary | GET | 获取接口分析数据 | mp:statistics:query |
+| /mp/statistics/interface-summary | GET | 获取接口分析数据（源码 @Operation 文案为「获取消息发送概况数据」，属复制粘贴笔误，见 api-statistics.md） | mp:statistics:query |
 
 ## 数据模型
 
@@ -163,7 +163,7 @@
 | mp_account | 公众号账号 | TenantBaseDO | appId、appSecret、token、aesKey、qrCodeUrl、name、account |
 | mp_menu | 公众号菜单 | BaseDO | accountId、appId、menuKey、parentId、type、url、replyMessageType、replyArticles(JSON) |
 | mp_user | 公众号粉丝 | BaseDO | openid、unionId、subscribeStatus、subscribeTime、nickname、tagIds(List)、accountId |
-| mp_tag | 公众号标签 | BaseDO | tagId、name、count(粉丝数冗余)、accountId、appId（id 为 INPUT 主键，存微信 tagId） |
+| mp_tag | 公众号标签 | BaseDO | tagId、name、count(粉丝数冗余)、accountId、appId（id 为 `@TableId(type = IdType.INPUT)` 的本地主键，tagId 单独存微信标签 id） |
 | mp_message | 公众号消息 | BaseDO | msgId、openid、userId、type、sendFrom、content、mediaId、event、eventKey、articles(JSON) |
 | mp_auto_reply | 公众号自动回复 | BaseDO | accountId、type、requestKeyword、requestMatch、requestMessageType、responseMessageType、responseArticles(JSON) |
 | mp_message_template | 公众号模板消息 | BaseDO | templateId、title、content、example、primaryIndustry、deputyIndustry |

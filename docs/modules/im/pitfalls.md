@@ -4,13 +4,13 @@
 
 ## 1. 多租户相关
 
-### 1.1 im 全部业务表没有 tenant_id，新增 DO 不要随手继承 TenantBaseDO
+### 1.1 DO 继承 BaseDO 不等于「忽略租户」：租户插件仍会拼接 tenant_id
 
-**问题**: 新增表时习惯性让 DO 继承 `TenantBaseDO`，启动后所有 SQL 直接报「Unknown column 'tenant_id'」；或者反过来，误以为 im 数据按租户隔离，实际同一套数据全租户共享。
+**问题**: 两个方向的误解都会踩坑：一是以为 DO 继承 `BaseDO`（未映射 tenantId 字段）就会跳过租户过滤，新建表漏加 `tenant_id` 列，启动后 SQL 报「Unknown column 'tenant_id'」；二是反过来以为只有继承 `TenantBaseDO` 才参与租户，从而得出「im 数据全租户共享」的错误结论，写全局统计 / 清理时漏掉租户隔离前提。
 
-**原因**: im 模块 17 张 `@TableName` 表的 DO（`ImGroupDO`、`ImFriendDO`、`ImPrivateMessageDO`、`ImRtcCallDO` 等）全部继承 `BaseDO`，表里没有 tenant_id 列。框架的租户拦截不是靠配置表清单，而是 `TenantDatabaseInterceptor#computeIgnoreTable` 按实体类型自动判定：继承 `TenantBaseDO` → 拼租户条件，否则忽略。im 全部表因此自动跳过租户过滤，数据物理上全局共享，租户概念只体现在「不同租户的用户是不同的人」这一层。
+**原因**: 框架判定逻辑在 `TenantDatabaseInterceptor#computeIgnoreTable`，并非「继承 TenantBaseDO 才拦截」：找不到 TableInfo（非本项目表）→ 忽略；实体类带 `@TenantIgnore` → 忽略；其余一律**不忽略**，包括只继承 `BaseDO` 的普通实体。im 的 17 个 `@TableName` DO（`ImGroupDO`、`ImFriendDO`、`ImPrivateMessageDO`、`ImRtcCallDO` 等）全部只继承 `BaseDO`、也未加 `@TenantIgnore`，因此租户插件照常给 SQL 追加 `tenant_id = ?`（查询）与 tenant_id 插入值；模块单测建表脚本 `create_tables.sql` 中每张 im 表都带 `tenant_id bigint NOT NULL DEFAULT 0`。`TenantBaseDO` 的作用只是把 tenantId 映射为 DO 字段（需要在 DO/VO 读写租户号的场景），并不决定是否拦截。整个模块唯一的 `@TenantIgnore` 在 LiveKit Webhook 入口（见 1.2）。
 
-**解决**: im 模块内新增 DO 一律继承 `BaseDO`，建表不要加 tenant_id 列；需要按租户区分的数据只能通过用户归属（system 侧的租户）间接体现。若某张表确实要接入租户体系，必须同时改表结构 + 换基类 + 排查所有历史数据，不能只改一处。
+**解决**: im 新增表必须带 `tenant_id` 列，DO 继承 `BaseDO` 即可，不要把它当成「忽略租户」的标志。若某张表确实要全租户共享，需要在实体类上标 `@TenantIgnore`（并确认跨租户读写语义可接受），或把表加入 `yudao.tenant.ignore-tables`；这属于改变数据隔离语义的决策，不能只改基类。
 
 ### 1.2 LiveKit Webhook 是唯一的 @PermitAll + @TenantIgnore 端点，整条链路运行在无租户上下文中
 
@@ -18,7 +18,7 @@
 
 **原因**: `ImRtcLiveKitController#webhook` 是模块内唯一的 `@PermitAll + @TenantIgnore` 端点。框架启动时会把带 `@TenantIgnore` 的接口 URL 自动加入 `TenantSecurityWebFilter` 的忽略清单（`YudaoTenantAutoConfiguration#getTenantIgnoreUrls`），请求不带 tenant-id 头也放行，并设置 `TenantContextHolder.setIgnore(true)`。此后整条链路（签名校验 → `handleParticipantLeft` / `handleRoomFinished` → `endSession` → 消息落库、WebSocket 推送）都没有租户编号。
 
-**解决**: Webhook 链路内保持「租户无关」：只操作 im 自身表（本来就不参与租户过滤），按 room/userId 精确定位数据，不调用任何 `getRequiredTenantId()` 或依赖租户上下文的组件。需要跨模块取用户信息时用 `adminUserApi.getUser(userId)` 按 id 查（ignore 态下不过租户过滤，仍能查到）。安全由 `liveKitClient.verifyWebhookSignature` 的 JWT + body sha256 签名校验兜底，不要为了「方便联调」把签名校验短路。
+**解决**: Webhook 链路内保持「租户无关」：只操作 im 自身表（`TenantContextHolder.isIgnore()` 为 true 时租户插件不追加 tenant_id 条件，按主键 / room / userId 精确定位即可），不调用任何 `getRequiredTenantId()` 或依赖租户上下文的组件。需要跨模块取用户信息时用 `adminUserApi.getUser(userId)` 按 id 查（ignore 态下不过租户过滤，仍能查到）。安全由 `liveKitClient.verifyWebhookSignature` 的 JWT + body sha256 签名校验兜底，不要为了「方便联调」把签名校验短路。
 
 ### 1.3 @TenantIgnore 上下文里 Spring Cache 键不带租户后缀，webhook 链路与正常请求是两套缓存
 
@@ -28,13 +28,13 @@
 
 **解决**: 认识到这是已知边界，依赖 1h TTL 收敛即可，影响仅限通知受众多算（条件 UPDATE 保证状态机本身不受影响）。若要彻底消除，可在 Webhook 链路读成员时绕过 Spring Cache（直接走 `groupMemberMapper` 查询），或在 `invalidateSensitiveWordBsCaches` 同款的主动失效里补 `invalidateAll`。注意不要在正常请求路径里也读无后缀键，否则同一份数据两处缓存更难排查。
 
-### 1.4 RTC 兜底 Job 加了 @TenantJob，但 im 表不分租户，N 个租户会把同一批数据扫 N 遍
+### 1.4 RTC 兜底 Job 必须保留 @TenantJob：Job 按租户逐个执行，im 表也按租户隔离
 
-**问题**: 部署多租户环境后，`ImRtcCallCleanupJob`（僵尸通话清理）和 `ImRtcParticipantTimeoutJob`（振铃超时）每次调度的耗时和 LiveKit `listParticipants` 调用量随租户数线性膨胀；任务日志里清理数量看起来也「偏多」。
+**问题**: 部署多租户环境后，`ImRtcCallCleanupJob`（僵尸通话清理）和 `ImRtcParticipantTimeoutJob`（振铃超时）每次调度的耗时随租户数增长，容易被误判为「重复扫描」而去掉 `@TenantJob`，结果 Job 在没有租户上下文时直接失败（`getRequiredTenantId()` 抛异常）或查不到任何数据。
 
-**原因**: `TenantJobAspect#around` 会取全量租户列表并 `parallelStream` 逐租户执行（`TenantUtils.execute(tenantId, ...)`）。im 表不参与租户过滤（见 1.1），每个租户的执行都是对同一批全局数据的全量扫描：`cleanupZombieCalls` 扫 `selectListByStatusInAndStartTimeBefore`，`timeoutInvitingParticipants` 扫 `selectListByStatusAndInviteTimeBefore`。并发租户同时命中同一通话时，靠 `endSession` / `timeoutInvitingParticipant` 的条件 UPDATE（影响 0 行即跳过）保证不重复处理。
+**原因**: `TenantJobAspect#around` 会取全量租户列表并 `parallelStream` 逐租户执行（`TenantUtils.execute(tenantId, ...)`）。im 表虽只继承 `BaseDO`，但仍受租户插件过滤（见 1.1），每个租户的执行只会扫到本租户 `tenant_id` 的数据：`cleanupZombieCalls` 扫 `selectListByStatusInAndStartTimeBefore`，`timeoutInvitingParticipants` 扫 `selectListByStatusAndInviteTimeBefore`。因此开销是「租户数 × 单租户数据量」的累加，而不是同一批全局行被扫 N 遍；同一租户内多实例并发命中同一通话时，靠 `endSession` / `timeoutInvitingParticipant` 的条件 UPDATE（影响 0 行即跳过）保证不重复处理。
 
-**解决**: 正确性有 CAS 兜底，可以不改；但要明白开销来自「租户数 × 全表扫描」。若租户多、数据量大，可去掉 `@TenantJob` 改为单次全局执行（内部方法已不依赖租户上下文），或在 Job 参数里调大 `cleanupZombieThresholdMinutes` / `inviteTimeoutMinutes`（`ImProperties.Rtc`，默认 5 / 1 分钟）降低扫描频率。
+**解决**: 保留 `@TenantJob`，不要改成单次全局执行（那样没有租户上下文，且会漏掉其它租户的数据）。耗时随租户增多属于预期；若单租户数据量大，调大 `cleanupZombieThresholdMinutes` / `inviteTimeoutMinutes`（`ImProperties.Rtc`，默认 5 / 1 分钟）降低扫描频率。
 
 ## 2. 缓存相关
 
@@ -114,9 +114,9 @@ public void myWritePath(Long userId, Long friendUserId) { ... }
 
 ### 6.1 新增消息类型必须登记 ImContentTypeEnum（OpenIM 段位复用 + persistent / normal 双标志）
 
-**问题**: 新消息类型没登记枚举，发送时 `ImContentTypeEnum.validate(type)` 直接 `Assert` 失败；或者登记了但 `persistent` 配错，导致离线用户 pull 不到、或系统事件被当成聊天消息计未读。
+**问题**: 新消息类型没登记枚举，发送时 `ImContentTypeEnum.validate(type)` 直接 `Assert` 失败；或者登记了但标志位配错：`persistent` 错会让离线用户 pull 不到（或系统事件被错误落库），`normal` 错会让引导用户消息被当成系统事件拒绝发送，或让系统事件被当成普通聊天消息（可发送 / 可置顶 / 计入运营统计）。
 
-**原因**: 模块的消息类型、WebSocket 通知 contentType 都收敛在 `ImContentTypeEnum` 一个枚举里，编号大量复用 OpenIM 段位：聊天消息 101-105（文本/图片/语音/视频/文件）、好友通知 1201-1210、群事件 1501-1520、通话信令 1601-1603（`persistent=false` 不入库）、RTC 通话 tip 1610/1611（入库）、撤回 2101、回执 2200、已读 2201、频道扩展自 125 起步。每个枚举值带 `persistent`（是否入 `im_xxx_message` 表，决定离线 pull 能否拉到）和 `normal`（是否计会话未读）两个标志；内部触达类消息（RTC_CALL_END、群事件等）靠 `sendGroupMessage(senderId, dto)` 重载按 `type.persistent` 决定落库，并用 `ImContentTypeEnum.validate` 强制登记。
+**原因**: 模块的消息类型、WebSocket 通知 contentType 都收敛在 `ImContentTypeEnum` 一个枚举里，编号大量复用 OpenIM 段位：普通聊天消息 101 文本 / 102 图片 / 103 语音 / 104 视频 / 105 文件 / 107 合并转发 / 108 名片 / 115 表情 / 125 素材（频道扩展段起步）、好友通知 1201-1210、群事件 1501-1533、通话信令 1601-1603（`persistent=false` 不入库）、RTC 通话 tip 1610/1611（入库）、撤回 2101、回执 2200、已读 2201。每个枚举值带两个标志：`persistent`（是否入 `im_xxx_message` 表，决定离线 pull 能否拉到）与 `normal`（是否普通用户聊天消息：决定用户能否发送、能否被置顶、是否计入运营统计）；内部触达类消息（RTC_CALL_END、群事件等）靠 `sendGroupMessage(senderId, dto)` 重载按 `type.persistent` 决定落库，并用 `ImContentTypeEnum.validate` 强制登记。
 
 **解决**: 加类型先在枚举里按段位表选号并正确配置 persistent / normal；需要「仅在线推送、离线丢弃」的信号类设 `persistent=false`；需要「多端同步但不打扰对方」的场景参考 `silentReAddFriend` 的 `setPersistent(false)` 单边语义（senderId 收 `ImPrivateMessageSendDTO`，对方完全不感知）。
 
@@ -124,6 +124,57 @@ public void myWritePath(Long userId, Long friendUserId) { ... }
 
 **问题**: 新增业务域时错误码随手编号，与其它段位撞号导致前端文案错乱；新加的用户侧接口照抄 manager 侧的 `@PreAuthorize`，Web 客户端全部 403。
 
-**原因**: im 错误码固定用 `1_040_000_000` 段，域内再分段（`ErrorCodeConstants`）：消息 1_040_300_xxx、群 1_040_400_xxx、群成员 1_040_500_xxx、加群申请 1_040_510_xxx、好友 1_040_600_xxx、好友申请 1_040_610_xxx、敏感词 1_040_700_xxx、表情 1_040_800_xxx、频道 1_040_810_xxx、RTC 1_040_900_xxx（段内 001 / 006 / 012 等空号是历史预留，新增按已有最大值顺延）。权限模型是双轨：用户侧控制器（channel / face / friend / group / message / rtc 业务域包）全部**无** `@PreAuthorize`，只靠登录态 + 业务校验（`validateParticipant`、`validateMemberInGroup` 等从 `getLoginUserId` 推操作者）；运营侧 `controller/admin/manager` 统一 `im:manager:{域}:{操作}`，仅 `ImChannelManagerController` 与 `ImChannelMaterialManagerController` 的 `/simple-list` 两个端点无权限注解。
+**原因**: im 错误码固定用 `1_040_000_000` 段，域内再分段（`ErrorCodeConstants`）：消息 1_040_300_xxx、群 1_040_400_xxx、群成员 1_040_500_xxx、加群申请 1_040_510_xxx、好友 1_040_600_xxx、好友申请 1_040_610_xxx、敏感词 1_040_700_xxx、表情 1_040_800_xxx、频道 1_040_810_xxx、RTC 1_040_900_xxx（部分子段存在历史空号，如消息段的 001 / 006 / 012、群成员段的 000 / 002；新增按该子段已有最大值顺延，不要回填空号）。权限模型是双轨：用户侧控制器（channel / face / friend / group / message / rtc 业务域包）全部**无** `@PreAuthorize`，只靠登录态 + 业务校验（`validateParticipant`、`validateMemberInGroup` 等从 `getLoginUserId` 推操作者）；运营侧 `controller/admin/manager` 统一 `im:manager:{域}:{操作}`，仅 `ImChannelManagerController` 与 `ImChannelMaterialManagerController` 的 `/simple-list` 两个端点无权限注解。
 
 **解决**: 新域先查 `ErrorCodeConstants` 选段位，权限点按 `im:manager:{域}:{操作}` 登记 SQL 菜单；用户侧接口永远不接收参数里的 userId，一律 `getLoginUserId()` 推导，防越权靠业务校验而不是注解。
+
+### 6.3 新增或移动 VO 时包目录必须全小写（`useritem`，不是 `userItem`）
+
+**问题**: 新增表情包个人表情 VO 时照旧目录或按 Windows 本地习惯写成 `controller/admin/face/vo/userItem/`，本机编译通过，提交到 Linux CI 后报「程序包不存在」或找不到 `ImFaceUserItemRespVO`。
+
+**原因**: Windows 文件系统大小写不敏感，Linux 大小写敏感。模块已将两个个人表情 VO 统一到全小写目录 `controller/admin/face/vo/useritem/`，`package` 声明同步为 `cn.iocoder.yudao.module.im.controller.admin.face.vo.useritem`，控制器 import 也使用小写路径。
+
+**解决**: 新建、移动 VO 时目录名与 `package` / `import` 全部使用小写 `useritem`；不要保留 `userItem` 目录或大小写混用的路径。
+
+## 7. 多数据库兼容与 DAL 约定
+
+### 7.1 手写 SQL / Wrapper 不要硬编码 `LIMIT`、`FOR UPDATE`、`DATE()`
+
+**问题**: 二次开发复制旧代码，继续写 `.last("LIMIT " + size)`、`.last("FOR UPDATE")`、手写统计 SQL 里的 `DATE(create_time)`；MySQL 联调一切正常，切到 PostgreSQL / Oracle / SQL Server 后报语法错误或统计结果类型不一致。
+
+**原因**: im 已适配多数据库，相关能力由基线之后新增的框架层提供：`SqlDialectUtils` 按实际执行的数据源输出日期分桶、行数限制等片段；`BaseMapperX#selectListLimitN` 走 MyBatis-Plus 分页插件生成 `LIMIT` / `FETCH FIRST` / `OFFSET ... FETCH`；`selectOneForUpdate` 由锁定读拦截器改写锁定 SQL。硬编码会绕过这些适配。
+
+**解决**: 沿用 im 既有 Mapper 写法完成替换：
+
+| 旧写法 | 新写法 |
+|---|---|
+| `.last("LIMIT " + n)` + `selectList(...)` | `selectListLimitN(wrapper, n)` |
+| `.last("FOR UPDATE")` + `selectOne(...)` | `selectOneForUpdate(...)`；群记录用 `ImGroupMapper#selectByIdForUpdate` |
+| 手写 `@Select` 中的 `DATE(col)` | `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@date('col')}`，`SELECT` 与 `GROUP BY` 复用同一片段 |
+| 手写 `@Select` 中的 `LIMIT #{limit}` | `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@limitParam('limit', true)}` |
+
+这些是框架能力，不要写成 im 模块自研逻辑。
+
+### 7.2 `selectListLimitN` 的边界行为，以及 SQL Server 的排序要求
+
+**问题**: 给 `selectListLimitN` 传 0 或负数，或复用到 SQL Server 时抛分页语法错误；也有人在它外面再叠加 `.last("LIMIT ...")`，导致限量重复或 SQL 解析失败。
+
+**原因**: 框架实现为：`limit == 0` 不查询、直接返回空列表；`limit < 0` 抛 `IllegalArgumentException`（因为分页插件会把负数 size 视为不分页，从而查全表）；内部走 `selectPage` 且不执行 COUNT。SQL Server 的 `OFFSET ... FETCH` 必须跟在 `ORDER BY` 之后，因此 Wrapper 需要设置排序。
+
+**解决**: 调用前保证 `limit >= 1`；im 的增量拉取/历史查询均已在 Wrapper 上设置 `orderByAsc` / `orderByDesc`，新增查询也必须保留排序；不要再叠加 `.last("LIMIT ...")`。对外接口的入参校验（`size` / `limit` 上的 `@Min(1)`，部分列表接口另有 `@Max(200)`）继续保留。
+
+### 7.3 `selectOneForUpdate` 必须在事务中调用，且 Wrapper 不能带 `last` / `groupBy` / `having` / 参数别名
+
+**问题**: 在无事务的方法里调用锁定读，看似查到了数据但并发下仍会超卖/重复操作；或者给锁定读 Wrapper 加了 `last("LIMIT 1")`、`groupBy`、自定义参数别名，直接抛 `IllegalArgumentException`。
+
+**原因**: 锁定读依赖数据库行锁，auto-commit 下语句结束即释放锁，起不到互斥作用；框架的 `checkForUpdateWrapper` 会校验 Wrapper：`last`、`groupBy`、`having`、参数别名都会使内置锁定 SQL 与条件片段不一致，因此主动拒绝。
+
+**解决**: 在 `@Transactional(rollbackFor = Exception.class)` 的公开方法内调用；Wrapper 只使用实体字段条件与排序。群操作的锁定读路径（`validateGroupOwnerForUpdate` / `validateGroupExistsForUpdate`）目前都在事务方法内：群治理类方法自身带 `@Transactional`，`validateMemberCountLimit` 自身未标注，但调用方 `ImGroupRequestServiceImpl#applyJoinGroup` / `#agreeGroupRequest` 带 `@Transactional`。新增群治理逻辑时不要绕开这两个方法直接查群，也不要在无事务的方法里调用锁定读。
+
+### 7.4 统计 SQL 行键是 `statDate` / `sizeRange`，对外接口字段仍是 `range`
+
+**问题**: 二次开发读取看板统计结果时仍用 `row.get("date")` / `row.get("range")`，得到 null 或类型转换异常；或者误以为接口契约变了，把 `ImStatisticsManagerGroupSizeRespVO.range` 也改掉导致前端字段消失。
+
+**原因**: 手写统计 SQL 的列别名已改为 `statDate`（按天统计）与 `sizeRange`（群规模分桶），避免 `date`、`range` 等数据库保留字在部分数据库上报错。`ImStatisticsManagerServiceImpl` 已同步读取新键（`toDailyCountMap` 读 `statDate`，`getGroupSizeCountMap` 读 `sizeRange`），但 Controller 组装响应时仍映射到 VO 的 `range` / `count`，对外契约不变。
+
+**解决**: 业务侧读取 Mapper 返回的 `Map` 时使用 `statDate` / `sizeRange`；对外响应继续使用原有字段名，不要混用内外两层命名。新增统计 SQL 时同样给别名取业务名，避开数据库保留字。

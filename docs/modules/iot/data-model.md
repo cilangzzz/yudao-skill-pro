@@ -2,11 +2,11 @@
 
 > iot 模块的核心数据模型，包括 DO、DTO、VO 及其之间的关系。
 
-iot 模块采用 **biz/core/gateway 三子模块 + MySQL/TDengine 双存储**架构：
+iot 模块采用 **biz/core/gateway 三子模块 + MySQL/时序库（TDengine 或 IoTDB）双存储**架构：
 
-- **MySQL**：存储业务配置数据（产品、设备、物模型、OTA、规则、告警），DO 位于 `yudao-module-iot-biz` 的 `dal/dataobject` 下，Mapper 位于 `dal/mysql` 下；
-- **TDengine**：存储时序数据（设备消息日志、设备属性历史值），DO 无 `@TableName`，Mapper 位于 `dal/tdengine` 下，超级表由应用启动时自动创建（`TDengineTableInitRunner`）；
-- **Redis**：存储设备属性的"最新值"缓存（`IotDevicePropertyDO`），由 `DevicePropertyRedisDAO` 读写。
+- **MySQL**：存储业务配置数据（产品、设备、物模型、设备影子、OTA、规则、告警），DO 位于 `yudao-module-iot-biz` 的 `dal/dataobject` 下，Mapper 位于 `dal/mysql` 下；
+- **时序库**：存储时序数据（设备消息日志、设备属性历史值），由 `yudao.iot.storage.type` 二选一：`tdengine`（默认，Mapper 位于 `dal/tdengine`，超级表由应用启动时自动创建）或 `iotdb`（`dal/iotdb`，DAO 通过 `@ConditionalOnProperty` 装配）；两种实现的 DO 均无 `@TableName`，统一由 `dal/storage` 下的 DAO 接口抽象；
+- **Redis**：存储设备属性的"最新值"缓存（`IotDevicePropertyDO`，由 `DevicePropertyRedisDAO` 读写）、设备影子读缓存（`DeviceShadowRedisDAO`，TTL 60s）与网关协议实例存活标记（`iot:gateway_server:{serverId}`）。
 
 ## 1. 实体继承体系
 
@@ -16,6 +16,7 @@ BaseDO（通用审计字段：creator 创建者、createTime 创建时间、upda
 ├── TenantBaseDO（多租户扩展：+ tenantId 租户编号）
 │   ├── IotDeviceDO                 （iot_device               设备）
 │   ├── IotProductDO                （iot_product              产品）
+│   ├── IotDeviceShadowDO           （iot_device_shadow        设备影子）
 │   ├── IotDeviceModbusConfigDO     （iot_device_modbus_config 设备 Modbus 连接配置）
 │   ├── IotDeviceModbusPointDO      （iot_device_modbus_point  设备 Modbus 点位配置）
 │   └── IotSceneRuleDO              （iot_scene_rule           场景联动规则）
@@ -32,15 +33,16 @@ BaseDO（通用审计字段：creator 创建者、createTime 创建时间、upda
 └── IotOtaTaskRecordDO              （iot_ota_task_record      OTA 升级任务记录）
 
 不继承基类（非 MySQL 存储，无审计字段）：
-├── IotDeviceMessageDO              （TDengine 超级表 device_message，自带 tenantId 字段）
-└── IotDevicePropertyDO             （Redis Hash iot:device_property:{deviceId}，属性最新值）
+├── IotDeviceMessageDO              （时序库 device_message，自带 tenantId 字段）
+├── IotDevicePropertyDO             （Redis Hash iot:device_property:{deviceId}，属性最新值）
+└── IotDeviceShadow 读缓存          （Redis String iot:device_shadow:{deviceId}，值为 IotDeviceShadowDO JSON）
 ```
 
 **使用规则**：
 
-- **TenantBaseDO**：业务数据归属租户、需要多租户隔离的表使用，目前仅 5 张：`iot_device`、`iot_product`、`iot_device_modbus_config`、`iot_device_modbus_point`、`iot_scene_rule`；
+- **TenantBaseDO**：业务数据归属租户、需要多租户隔离的表使用，目前 6 张：`iot_device`、`iot_product`、`iot_device_shadow`、`iot_device_modbus_config`、`iot_device_modbus_point`、`iot_scene_rule`；
 - **BaseDO**：平台级/全局共享的配置数据（产品分类、设备分组、物模型、OTA、规则引擎、告警等）使用，仅含审计与逻辑删除字段；
-- **无基类**：TDengine / Redis 存储的 DO 不继承 MyBatis-Plus 基类，租户字段（`tenantId`）在 `IotDeviceMessageDO` 中以普通列形式冗余存储，`IotDevicePropertyDO` 则完全由设备维度 Key 隔离。
+- **无基类**：时序库 / Redis 存储的 DO 不继承 MyBatis-Plus 基类，租户字段（`tenantId`）在 `IotDeviceMessageDO` 中以普通列形式冗余存储，`IotDevicePropertyDO` 则完全由设备维度 Key 隔离。
 
 > 说明：仓库内未包含 iot 模块表的物理建表 DDL（`sql/` 目录仅有字典数据），下文"索引"均指**从 Mapper/Service 代码推断的逻辑唯一约束与高频查询路径**，不代表物理索引。
 
@@ -66,6 +68,8 @@ BaseDO（通用审计字段：creator 创建者、createTime 创建时间、upda
 | netType | Integer | net_type | 联网方式，枚举 IotNetTypeEnum |
 | protocolType | String | protocol_type | 协议类型，枚举 core 的 IotProtocolTypeEnum |
 | serializeType | String | serialize_type | 序列化类型，枚举 core 的 IotSerializeTypeEnum |
+| scriptContent | String | script_content | 产品级数据解析脚本（JS ES5，decode/encode），UTF-8 上限 32KB |
+| scriptEnabled | Boolean | script_enabled | 是否启用数据解析脚本；启用时脚本内容不能为空 |
 
 **继承**: TenantBaseDO
 **索引**: `product_key` 逻辑唯一（`IotProductMapper#selectByProductKey` 按忽略大小写 selectOne 校验）；高频查询列：`name`、`product_key`、`status`、`device_type`。
@@ -170,9 +174,10 @@ BaseDO（通用审计字段：creator 创建者、createTime 创建时间、upda
 | thingModelId | Long | thing_model_id | 物模型属性编号，关联 IotThingModelDO |
 | identifier | String | identifier | 属性标识符，冗余 IotThingModelDO.identifier |
 | name | String | name | 属性名称，冗余 IotThingModelDO.name |
-| functionCode | Integer | function_code | Modbus 功能码，取值 FC01-04（读线圈/离散输入/保持寄存器/输入寄存器） |
+| functionCode | Integer | function_code | Modbus 功能码，枚举 IotModbusFunctionCodeEnum（读线圈/离散输入/保持寄存器/输入寄存器等） |
 | registerAddress | Integer | register_address | 寄存器起始地址 |
 | registerCount | Integer | register_count | 寄存器数量 |
+| bitIndex | Integer | bit_index | 位索引（0-15，0 为最低位）；仅 FC03/FC04、rawDataType=BOOLEAN、registerCount=1 时允许，为空表示整个寄存器 |
 | byteOrder | String | byte_order | 字节序，枚举 IotModbusByteOrderEnum |
 | rawDataType | String | raw_data_type | 原始数据类型，枚举 IotModbusRawDataTypeEnum |
 | scale | BigDecimal | scale | 缩放因子 |
@@ -182,36 +187,61 @@ BaseDO（通用审计字段：creator 创建者、createTime 创建时间、upda
 **继承**: TenantBaseDO
 **索引**: `(device_id, thing_model_id)` 逻辑唯一（设备 + 物模型属性对应一个采集点位）。
 
-### 2.3 设备消息与属性（TDengine / Redis 存储）
+#### IotDeviceShadowDO (iot_device_shadow)
 
-#### IotDeviceMessageDO (TDengine 超级表 device_message)
+设备影子：DB 为权威数据源（写入、版本校验、开关都读 DB），Redis 仅作 60s 读缓存。desired、reported 各自最多 128 个属性；version 为乐观锁，更新按 version 条件重试 3 次；version=-1 表示清空影子。
 
-设备消息日志，存储在 TDengine：超级表 `device_message`，按设备自动建子表 `device_message_{deviceId}`，`device_id` 为 TAG。应用启动时由 `TDengineTableInitRunner` 调用 `defineDeviceMessageStable()` 创建（`CREATE STABLE IF NOT EXISTS`）。
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|--------|------|
+| id | Long | id | 影子编号，主键自增 |
+| deviceId | Long | device_id | 设备编号，关联 IotDeviceDO |
+| productId | Long | product_id | 产品编号，关联 IotProductDO |
+| productKey | String | product_key | 产品标识，冗余 IotProductDO.productKey |
+| deviceName | String | device_name | 设备名称，冗余 IotDeviceDO.deviceName |
+| reported | Map&lt;String, Object&gt; | reported | 上报状态，JSON 存储（JacksonTypeHandler） |
+| desired | Map&lt;String, Object&gt; | desired | 期望状态，JSON 存储 |
+| metadata | Map&lt;String, Object&gt; | metadata | 元数据：{ desired: { key: { timestamp } }, reported: { ... } }，JSON 存储 |
+| version | Long | version | 版本号（乐观锁），重置时归 0 |
+| shadowTime | Long | shadow_time | 文档最后更新时间（epoch 秒） |
+| status | Integer | status | 影子状态，枚举 CommonStatusEnum（开/关） |
 
-| 字段 | 类型 | TDengine 列 | 说明 |
+**继承**: TenantBaseDO
+**索引**: `device_id` 逻辑一对一（`IotDeviceShadowMapper#selectByDeviceId`）；更新走 `updateByDeviceIdAndVersion` 条件更新；`@KeySequence("iot_device_shadow_seq")`。Redis Key `iot:device_shadow:{deviceId}`（`RedisKeyConstants.DEVICE_SHADOW`，TTL 60s），写操作在事务提交后删除缓存。
+
+### 2.3 设备消息与属性（时序库 / Redis 存储）
+
+#### IotDeviceMessageDO (时序库：TDengine 超级表 / IoTDB 表 device_message)
+
+设备消息日志，存储在时序库（由 `yudao.iot.storage.type` 选择 TDengine 或 IoTDB）：
+
+- **TDengine**：超级表 `device_message`，按设备自动建子表 `device_message_{deviceId}`，`device_id` 为 TAG。应用启动时由 `IotStorageInitRunner` 调用 `IotDeviceMessageTDengineDAO#initialize` 创建（`CREATE STABLE IF NOT EXISTS`）。
+- **IoTDB（表模型）**：一张全局表 `device_message`，身份为 `(device_id, time)`；`device_id` 为唯一 TAG，其余列为 FIELD；`IotDeviceMessageIoTDBDAO#initialize` 在表不存在时创建，并校验列结构（不兼容时抛出异常要求人工处理，不自动改表）。
+
+| 字段 | 类型 | 列（TDengine / IoTDB） | 说明 |
 |-----|------|------------|------|
-| ts | Long | ts TIMESTAMP | 存储时间戳（主时间轴） |
-| id | String | id NCHAR(50) | 消息编号 |
-| reportTime | Long | report_time TIMESTAMP | 上报时间戳 |
-| deviceId | Long | device_id BIGINT（TAG） | 设备编号，关联 IotDeviceDO，子表维度 |
-| tenantId | Long | tenant_id BIGINT | 租户编号 |
-| serverId | String | server_id NCHAR(50) | 服务编号，该消息由哪个 server 发送 |
-| upstream | Boolean | upstream BOOL | 是否上行消息，由 IotDeviceMessageUtils 计算，便于统计上下行数量 |
-| reply | Boolean | reply BOOL | 是否回复消息，由 IotDeviceMessageUtils 计算，便于统计请求/回复数量 |
-| identifier | String | identifier NCHAR(100) | 标识符，对应 IotThingModelDO.identifier，仅事件上报、服务调用时有值 |
-| requestId | String | request_id NCHAR(50) | 请求编号，设备生成，对应 Alink 协议 id / 华为云 request_id |
-| method | String | method NCHAR(100) | 请求方法，枚举 IotDeviceMessageMethodEnum，如 thing.property.post |
-| params | Object | params VARCHAR(8192) | 请求参数（属性上报 properties、事件上报 params） |
-| data | Object | data VARCHAR(8192) | 响应结果 |
-| code | Integer | code INT | 响应错误码 |
-| msg | String | msg NCHAR(256) | 响应提示 |
+| ts | Long | ts TIMESTAMP / time | 存储时间戳（主时间轴） |
+| id | String | id NCHAR(50) / id STRING | 消息编号 |
+| reportTime | Long | report_time TIMESTAMP / report_time STRING | 上报时间戳 |
+| deviceId | Long | device_id BIGINT（TAG）/ device_id STRING（TAG） | 设备编号，关联 IotDeviceDO，子表/身份维度 |
+| tenantId | Long | tenant_id BIGINT / tenant_id STRING | 租户编号 |
+| serverId | String | server_id NCHAR(50) / server_id STRING | 服务编号，该消息由哪个 server 发送 |
+| upstream | Boolean | upstream BOOL / upstream INT32 | 是否上行消息，由 IotDeviceMessageUtils 计算，便于统计上下行数量 |
+| reply | Boolean | reply BOOL / reply INT32 | 是否回复消息，由 IotDeviceMessageUtils 计算，便于统计请求/回复数量 |
+| identifier | String | identifier NCHAR(100) / identifier STRING | 标识符，对应 IotThingModelDO.identifier，仅事件上报、服务调用时有值 |
+| requestId | String | request_id NCHAR(50) / request_id STRING | 请求编号，设备生成，对应 Alink 协议 id / 华为云 request_id |
+| method | String | method NCHAR(100) / method STRING | 请求方法，枚举 IotDeviceMessageMethodEnum，如 thing.property.post |
+| params | Object | params VARCHAR(8192) / params STRING | 请求参数（属性上报 properties、事件上报 params） |
+| data | Object | data VARCHAR(8192) / data STRING | 响应结果 |
+| raw | String | raw VARCHAR(8192) / raw STRING | 与设备实际收发的原始字节（Base64）；为空表示没有原始帧 |
+| code | Integer | code INT / code STRING | 响应错误码 |
+| msg | String | msg NCHAR(256) / msg STRING | 响应提示 |
 
-**继承**: 无（不继承 BaseDO，TDengine 存储）
-**索引**: 主时间轴 `ts`；TAG `device_id` 决定子表路由；查询按子表 `device_message_{deviceId}` 过滤 `method` / `upstream` / `reply` / `identifier`，统计查询走超级表（TIMETRUNCATE 按小时分组）。
+**继承**: 无（不继承 BaseDO，时序库存储）
+**索引**: 主时间轴 `ts`；TAG `device_id` 决定子表路由（TDengine）/ 行身份（IoTDB）；查询按 `device_id`、`method`、`upstream`、`reply`、`identifier`、`raw` 过滤，统计查询按小时分组。分页查询 raw 过滤：TDengine 用 `IS NOT NULL` / `IS NULL`，IoTDB 用编码前缀（`v:` 表示有值、`n:` 表示空）。
 
 #### IotDevicePropertyDO (Redis Hash iot:device_property:{deviceId})
 
-设备属性"最新值"，存储在 Redis Hash：Key 为 `iot:device_property:{deviceId}`（RedisKeyConstants.DEVICE_PROPERTY），Hash field 为属性 identifier，value 为该 DO 的 JSON。属性"历史值"存 TDengine。
+设备属性"最新值"，存储在 Redis Hash：Key 为 `iot:device_property:{deviceId}`（RedisKeyConstants.DEVICE_PROPERTY），Hash field 为属性 identifier，value 为该 DO 的 JSON。属性"历史值"存时序库（TDengine / IoTDB）。
 
 | 字段 | 类型 | 存储位置 | 说明 |
 |-----|------|---------|------|
@@ -221,7 +251,12 @@ BaseDO（通用审计字段：creator 创建者、createTime 创建时间、upda
 **继承**: 无（Redis DO）
 **索引**: 按 Key `iot:device_property:{deviceId}` 整体读写（Hash 结构）。
 
-**TDengine 属性超级表（随物模型动态变更）**：超级表 `product_property_{productId}`（按产品维度建表），TAG 为 `device_id BIGINT`；固定列 `ts TIMESTAMP`、`report_time TIMESTAMP`，其余列为该产品物模型全部属性（identifier 作为列名，类型由 ThingModelProperty 推断）。子表为 `device_property_{deviceId}`。物模型变更时由 `IotDevicePropertyMapper#alterProductPropertySTable` 自动 `ALTER STABLE` 增加/删除/修改列。注意：建表维度是 `productId`（而非 productKey）。
+**属性历史表（随物模型动态变更）**：按产品维度建表 `product_property_{productId}`，TAG 为 `device_id`；固定列包含时间轴与上报时间，其余列为该产品物模型全部属性。
+
+- **TDengine 实现**：超级表 `product_property_{productId}`，TAG `device_id BIGINT`；固定列 `ts TIMESTAMP`、`report_time TIMESTAMP`，属性 identifier 直接作为列名，类型由 ThingModelProperty 推断。子表为 `device_property_{deviceId}`。物模型变更时由 `IotDevicePropertyMapper#alterProductPropertySTable` 自动 `ALTER STABLE` 增加/删除/修改列。
+- **IoTDB 实现**：表 `product_property_{productId}`，`device_id` 为 TAG；用户属性列统一加 `p_` 前缀（避免与 time、device_id、report_time 冲突），类型映射：INT/ENUM/BOOL→INT32、FLOAT→FLOAT、DOUBLE→DOUBLE、TEXT/STRUCT/ARRAY→STRING、DATE→TIMESTAMP。IoTDB 不支持修改列类型，物理类型变化用 DROP + ADD 完成（旧列历史数据不保留）；DDL 不参与事务，但 ADD/DROP 幂等，失败后再次定义即可收敛。
+
+> 注意：建表维度是 `productId`（而非 productKey）。
 
 ### 2.4 OTA 聚合（固件 / 任务 / 记录）
 
@@ -380,9 +415,10 @@ IotProductCategory 1 ──< n IotProduct 1 ──< n IotDevice >── n IotDev
                           │  └── 1 IotDeviceModbusConfig（1 设备 1 份连接配置）
                           │         └── IotDeviceModbusPoint n >── 1 IotThingModel（点位绑定物模型属性）
                           │
-IotDevice 1 ──< n TDengine device_message_{deviceId} 子表（消息日志，TAG device_id）
+IotDevice 1 ──< n 时序库 device_message（TDengine 子表 device_message_{deviceId} / IoTDB 全局表按 device_id 区分）（消息日志）
 IotDevice 1 ── 1 Redis iot:device_property:{deviceId}（属性最新值）
-IotProduct 1 ── 1 TDengine product_property_{productId} 超级表（属性历史值，动态列 = 物模型属性）
+IotDevice 1 ── 1 IotDeviceShadowDO（1 设备 1 影子；Redis 读缓存 iot:device_shadow:{deviceId}）
+IotProduct 1 ── 1 时序库 product_property_{productId}（属性历史值，动态列 = 物模型属性）
 IotDevice 1 ── 1 IotDeviceModbusConfig；1 IotDevice ──< n IotDeviceModbusPoint
 
 IotSceneRule（triggers/actions JSON 内引用 IotProduct / IotDevice / IotThingModel / IotAlertConfig）
@@ -399,7 +435,8 @@ IotAlertRecord n >── 1 IotAlertConfig；n >── 1 IotSceneRule；n >──
 4. **OTA 链路**：固件 → 升级任务 → 升级记录（任务 1 → n 记录，记录 n → 1 设备），设备当前固件记录在 `iot_device.firmware_id`；
 5. **规则引擎**：场景联动的触发器/条件/动作全部 JSON 化内嵌，运行时加载进 Redis 缓存由 Matcher 策略匹配；数据流转规则通过 `sink_ids` 关联多个数据目的；
 6. **告警链路**：场景联动动作（ALERT_TRIGGER）触发告警 → 按 IotAlertConfigDO 配置（级别、接收人、接收渠道、模板）发送通知 → 落库 IotAlertRecordDO；
-7. **跨模块引用**：告警接收人关联 `system_users`，短信/邮件/站内信模板关联 system 模块的 Template 表（按 code 关联）。
+7. **跨模块引用**：告警接收人关联 `system_users`，短信/邮件/站内信模板关联 system 模块的 Template 表（按 code 关联）；
+8. **设备影子**：设备 → 影子一对一，影子记录 desired/reported/metadata 与版本号；管理后台查询走 Redis 读缓存，写操作以 DB 为准并在事务提交后清缓存。
 
 ## 4. 全部数据表清单
 
@@ -408,7 +445,8 @@ IotAlertRecord n >── 1 IotAlertConfig；n >── 1 IotSceneRule；n >──
 | iot_device | IotDeviceDO | IoT 设备（含网关/子设备、状态、位置、密钥） |
 | iot_device_group | IotDeviceGroupDO | IoT 设备分组 |
 | iot_device_modbus_config | IotDeviceModbusConfigDO | 设备 Modbus 连接配置（IP/端口/从站/模式） |
-| iot_device_modbus_point | IotDeviceModbusPointDO | 设备 Modbus 点位配置（功能码/寄存器/字节序/轮询） |
+| iot_device_modbus_point | IotDeviceModbusPointDO | 设备 Modbus 点位配置（功能码/寄存器/位索引/字节序/轮询） |
+| iot_device_shadow | IotDeviceShadowDO | IoT 设备影子（上报状态/期望状态/元数据/版本号） |
 | iot_product | IotProductDO | IoT 产品（协议、序列化、动态注册） |
 | iot_product_category | IotProductCategoryDO | IoT 产品分类 |
 | iot_thing_model | IotThingModelDO | 产品物模型功能（属性/事件/服务，JSON 定义） |
@@ -420,7 +458,7 @@ IotAlertRecord n >── 1 IotAlertConfig；n >── 1 IotSceneRule；n >──
 | iot_data_sink | IotDataSinkDO | 数据流转目的（9 种类型，多态配置） |
 | iot_alert_config | IotAlertConfigDO | 告警配置（级别、接收人、通知模板） |
 | iot_alert_record | IotAlertRecordDO | 告警记录（触发消息快照、处理状态） |
-| device_message（TDengine 超级表，子表 device_message_{deviceId}） | IotDeviceMessageDO | 设备消息日志（上下行、方法、参数、响应） |
-| product_property_{productId}（TDengine 超级表，子表 device_property_{deviceId}） | （无独立 DO，动态列映射物模型属性） | 设备属性历史值（按产品建超级表，物模型变更自动 ALTER） |
+| device_message（时序库：TDengine 超级表 + 子表 device_message_{deviceId}；或 IoTDB 全局表） | IotDeviceMessageDO | 设备消息日志（上下行、方法、参数、响应、原始字节 raw） |
+| product_property_{productId}（时序库：TDengine 超级表 + 子表 device_property_{deviceId}；或 IoTDB 表） | （无独立 DO，动态列映射物模型属性） | 设备属性历史值（按产品建表，物模型变更自动 ALTER） |
 
-补充：设备属性**最新值**不在任何数据库表中，存于 Redis Hash `iot:device_property:{deviceId}`（DO 为 IotDevicePropertyDO），由 `DevicePropertyRedisDAO` 维护；规则引擎运行态缓存存于 `iot:scene_rule_list`、`iot:data_rule_list`、`iot:data_sink`、`iot:thing_model_list`、`iot:device`、`iot:product` 等 Redis Key（见 RedisKeyConstants）。
+补充：设备属性**最新值**不在任何数据库表中，存于 Redis Hash `iot:device_property:{deviceId}`（DO 为 IotDevicePropertyDO），由 `DevicePropertyRedisDAO` 维护；设备影子读缓存存于 Redis Key `iot:device_shadow:{deviceId}`（TTL 60s，由 `DeviceShadowRedisDAO` 维护）；网关协议实例存活标记存于 `iot:gateway_server:{serverId}`；规则引擎运行态缓存存于 `iot:scene_rule_list`、`iot:data_rule_list`、`iot:data_sink`、`iot:thing_model_list`、`iot:device`、`iot:product` 等 Redis Key（见 RedisKeyConstants）。

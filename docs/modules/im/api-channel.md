@@ -366,7 +366,7 @@
 | materialId | Long | 素材编号 |
 | type | Integer | 消息类型（ImContentTypeEnum） |
 | content | String | 消息内容；payload JSON 快照 |
-| receiptStatus | Integer | 当前用户回执/已读态（ImMessageReceiptStatusEnum：2 已读 DONE / 1 未读 PENDING） |
+| receiptStatus | Integer | 当前用户回执/已读态（ImMessageReceiptStatusEnum：0 无需回执 NO_RECEIPT / 1 待完成 PENDING / 2 已完成 DONE） |
 | sendTime | LocalDateTime | 发送时间 |
 
 **业务逻辑**: 1. 按当前登录用户 + minId 游标查询消息（命中条件：id 大于游标，且接收人为空表示全员，或定向接收列表包含当前用户），按 id 升序、限制条数；2. 批量查询当前用户在各频道的已读游标（已读最大消息 id）；3. 逐条比对游标，已读最大 id ≥ 消息 id 记为 DONE，否则 PENDING，转换 VO 返回。
@@ -384,7 +384,7 @@
 
 ---
 
-## 错误码汇总（频道域 1-040-810-000 段）
+## 错误码汇总（频道域 1_040_810_000 段）
 
 | 错误码 | 说明 |
 |-------|------|

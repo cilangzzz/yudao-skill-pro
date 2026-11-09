@@ -14,9 +14,10 @@
 |-----|------|
 | 引擎本地集成 | 通过 flowable-spring-boot-starter-process 内嵌 Flowable 6 引擎，流程数据存于 Flowable 自带的 ACT_* 表，业务扩展数据存于 bpm_* 表，互不侵入 |
 | 扩展表模式 | Flowable 的 Model / ProcessDefinition 不支持扩展字段，通过 `bpm_process_definition_info` 扩展表补充表单配置、审批人规则、图标、可见性等业务属性 |
-| 审批人策略化 | 候选人计算抽象为 `BpmTaskCandidateStrategy` 策略族（15 个实现），通过自定义 `BpmActivityBehaviorFactory` 替换 Flowable 默认的用户任务分配行为 |
+| 审批人策略化 | 候选人计算抽象为 `BpmTaskCandidateStrategy` 策略族（16 个实现），通过自定义 `BpmActivityBehaviorFactory` 替换 Flowable 默认的用户任务分配行为 |
 | 双设计器并存 | 同时支持 BPMN 设计器与仿钉钉/飞书的 SIMPLE 精简设计器，`SimpleModelUtils` 负责钉钉风格节点 JSON 与 BPMN XML 的互转 |
 | 事件驱动解耦 | 流程实例状态变更后通过 Spring 事件发布 `BpmProcessInstanceStatusEvent`，下游模块以监听器方式回调业务状态，避免与业务模块双向耦合 |
+| 国产数据库兼容 | Flowable 启动时按 JDBC ProductName 自动识别 GaussDB / openGauss（按 PostgreSQL 方言）、神通 OSCAR（按 Oracle 方言），无需显式配置 databaseType |
 | 统一审计基类 | 全部业务表继承 BaseDO（creator/createTime/updater/updateTime/deleted），JSON 数组字段使用 JacksonTypeHandler / LongListTypeHandler 存储 |
 
 ## 核心功能点
@@ -195,12 +196,44 @@
 
 | 模式 | 应用位置 | 用途 |
 |-----|---------|------|
-| 策略模式 | framework/flowable/core/candidate/strategy（`BpmTaskCandidateStrategy` 接口 + 15 个实现，如 Role/Post/UserGroup/DeptMember/DeptLeader/FormUser/Expression 等） | 按不同规则计算任务审批人，`BpmTaskCandidateInvoker` 按枚举路由到对应策略 |
+| 策略模式 | framework/flowable/core/candidate/strategy（`BpmTaskCandidateStrategy` 接口 + 16 个实现，如 Role/Post/UserGroup/DeptMember/DeptLeader/FormUser/Expression 等） | 按不同规则计算任务审批人，`BpmTaskCandidateInvoker` 按枚举路由到对应策略 |
 | 模板方法模式 | candidate/strategy/dept/`AbstractBpmTaskCandidateDeptLeaderStrategy` | 抽取"部门负责人"类策略的公共层级查找逻辑，子类只实现差异步骤 |
 | 工厂模式 | framework/flowable/core/behavior/`BpmActivityBehaviorFactory`（继承 Flowable DefaultActivityBehaviorFactory） | 接管用户任务 Behavior 与多实例 Behavior 的创建，注入自定义分配逻辑 |
 | 策略模式 | service/task/trigger（`BpmTrigger` 接口 + `BpmSyncHttpRequestTrigger`/`BpmHttpCallbackTrigger`/`BpmFormUpdateTrigger`/`BpmFormDeleteTrigger`） | 流程节点触发时按触发类型分发到 HTTP 请求/回调或表单联动处理 |
 | 观察者模式 | api/event（`BpmProcessInstanceStatusEvent` + `BpmProcessInstanceStatusEventListener` 抽象监听器） | 流程实例状态变更后发布 Spring 事件，CRM/OA/HRM 模块订阅后回写业务单据状态 |
 | 事件监听模式 | framework/flowable/core/listener（`BpmProcessInstanceEventListener`、`BpmTaskEventListener`）与 service/task/listener（`BpmUserTaskListener`、`BpmCallActivityListener`） | 监听 Flowable 引擎实例/任务事件，维护扩展状态、超时提醒与抄送；service/message（`BpmMessageService`）负责审批短信通知 |
+
+## 配置项
+
+### HTTP 请求黑白名单（yudao.bpm.http-request）
+
+流程模型中配置的出站 HTTP 请求（HTTP 请求触发器、HTTP 回调触发器、任务/流程前置后置通知、审批人监听器 HTTP）在发起前，可开启域名 / IP 黑白名单校验。配置类 `BpmHttpRequestProperties` 由 `BpmFlowableConfiguration` 上的 `@EnableConfigurationProperties` 注册，前缀 `yudao.bpm.http-request`：
+
+| 配置项 | 类型 | 默认值 | 说明 |
+|-------|------|-------|------|
+| yudao.bpm.http-request.enabled | Boolean | false | 是否开启黑白名单校验；关闭时不做任何校验，与旧版行为一致 |
+| yudao.bpm.http-request.allow-hosts | Set\<String\> | 空集合 | 白名单（域名 / IP）。非空时只允许列表中的主机；为空时不额外限制 |
+| yudao.bpm.http-request.deny-hosts | Set\<String\> | 空集合 | 黑名单（域名 / IP）。优先于白名单判断，命中即拒绝 |
+
+- 仅接受 `http` / `https` 且能解析出 host 的绝对地址；相对地址、ftp/file 等一律拒绝。
+- 主机匹配忽略大小写、去首尾空白，IPv6 去方括号后精确匹配，不支持通配符 / 前缀 / 后缀。
+- 校验拒绝时复用错误码 `1_009_004_006`「流程 Http 请求调用失败」，且发生在审批事务内，会连带回滚当次审批。
+- 默认关闭，升级零行为变化。开启方式：在 yudao-server 的 `application.yaml` 增加 `yudao.bpm.http-request.*`，或直接修改 `BpmHttpRequestProperties` 字段默认值。
+- 仅校验 URL 中填写的域名 / IP，不解析 DNS，不是完整的 SSRF 防护，详见 [pitfalls.md](pitfalls.md)。
+
+### 数据库兼容（Flowable 方言自动推断）
+
+`BpmFlowableConfiguration.initDatabaseType` 在 Flowable 未显式配置 `databaseType` 且数据源非空时，通过 Flowable 自身数据源读取一次数据库元数据，按 ProductName 自动映射方言：
+
+| 数据库 / 驱动 | JDBC 前缀 | ProductName | 映射的 Flowable 方言 |
+|------|------|------|------|
+| 华为 GaussDB 原生驱动 | jdbc:gaussdb: | GaussDB | PostgreSQL（DATABASE_TYPE_POSTGRES） |
+| org.opengauss 驱动（含连接 MogDB） | jdbc:opengauss: | openGauss | PostgreSQL（DATABASE_TYPE_POSTGRES） |
+| 神通 OSCAR | jdbc:oscar: | OSCAR | Oracle（DATABASE_TYPE_ORACLE） |
+
+- 无新增 yaml 配置项，纯启动时行为；其它数据库不处理，仍由 Flowable 自动识别。
+- GaussDB / openGauss 需使用 PG 兼容模式（DBCOMPATIBILITY='PG'）创建的数据库；神通按 Oracle 处理（大写表名、BLOB/CLOB）。
+- ProductName 为大小写敏感的字面量匹配；元数据读取失败仅打 warn 日志、不设置方言。
 
 ## 依赖关系
 

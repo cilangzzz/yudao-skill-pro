@@ -5,7 +5,7 @@
 ## 模块概述
 - **模块路径**: yudao-module-erp
 - **业务定位**: 提供中小企业进销存 + 财务结算能力。以"单据驱动"为核心：采购订单 → 采购入库 → 付款单、销售订单 → 销售出库 → 收款单，单据间通过订单项回写（inCount/outCount/returnCount）联动数量控制；所有库存变动统一经由库存台账（erp_stock + erp_stock_record）记账。业务单据均为"未审核/已审核"两态审核流（审核/反审核）。
-- **技术栈**: Spring Boot 2.7.18（JDK8 版本，仓库 revision 2026.09-jdk8-SNAPSHOT）/ MyBatis-Plus（yudao-spring-boot-starter-mybatis）/ springdoc-openapi（Swagger v3 注解）/ EasyExcel（starter-excel）/ Redis（starter-redis）；统计查询使用原生 XML Mapper。
+- **技术栈**: Spring Boot 2.7.18（JDK8 版本，仓库 revision 2026.10-jdk8-SNAPSHOT）/ MyBatis-Plus（yudao-spring-boot-starter-mybatis）/ springdoc-openapi（Swagger v3 注解）/ EasyExcel（starter-excel）/ Redis（starter-redis）；统计查询使用原生 XML Mapper。
 
 ## 设计原则
 | 原则 | 说明 |
@@ -14,7 +14,7 @@
 | 统一库存台账 | 8 类出入库单据不直接改库存，统一调用 `ErpStockRecordService.createStockRecord`（入参 `ErpStockRecordCreateReqBO`）完成"库存增减 + 流水写入"，保证 erp_stock 与 erp_stock_record 一致 |
 | 两态审核状态机 | 单据统一使用 `ErpAuditStatus`（10 未审核 / 20 已审核）+ 字典 `erp_audit_status`；已审核单据禁止改删，反审核校验下游单据是否存在 |
 | 数量联动防超扣 | 订单明细维护 inCount/outCount/returnCount 累计字段，入库/出库/退货时校验"不得超过最大允许数量"，删除时回滚累计值 |
-| 全部 DO 继承 BaseDO | ERP 表不含 tenant_id，不支持多租户隔离；权限统一为 `erp:{功能}:{操作}` 五段式操作（create/update/delete/query/export 及 update-status 等） |
+| 全部 DO 继承 BaseDO | 33 个 DO 均继承 BaseDO、不映射 tenantId 字段；但表在 DB 层仍默认参与租户隔离（`TenantDatabaseInterceptor` 会为未标注 `@TenantIgnore` 的实体自动追加 `tenant_id` 条件），新建 erp 表必须带 `tenant_id` 列。权限统一为 `erp:{功能}:{操作}` 五段式操作（create/update/delete/query/export 及 update-status 等） |
 
 ## 核心功能点
 | 功能域 | 说明 | 关键实体 |
@@ -24,7 +24,7 @@
 | 销售管理 | 客户档案；销售订单 → 销售出库 → 销售退货全流程，支持销售员（saleUserId）归属 | ErpCustomerDO、ErpSaleOrderDO、ErpSaleOutDO、ErpSaleReturnDO |
 | 仓库库存 | 仓库档案、产品库存（按仓库+产品）、其它入库/出库、库存调拨（跨仓库）、库存盘点（差异回补）、库存流水明细 | ErpWarehouseDO、ErpStockDO、ErpStockInDO、ErpStockOutDO、ErpStockMoveDO、ErpStockCheckDO、ErpStockRecordDO |
 | 财务管理 | 结算账户、付款单（对采购入库/退货核销）、收款单（对销售出库/退货核销），明细按业务单（bizType/bizId）核销金额 | ErpAccountDO、ErpFinancePaymentDO、ErpFinanceReceiptDO |
-| 统计报表 | 采购/销售金额汇总统计（全部 + 时间段），基于 XML SQL 聚合 | 复用 purchase/sale 单据表，无独立表 |
+| 统计报表 | 采购/销售金额汇总统计（全部 + 时间段，仅统计已审核 status = 20 单据），基于 XML SQL 聚合 | 复用 purchase/sale 单据表，无独立表 |
 
 ## API 接口索引
 
@@ -87,7 +87,7 @@
 | ErpPurchaseStatisticsController | 采购统计（/erp/purchase-statistics） | 2 |
 | ErpSaleStatisticsController | 销售统计（/erp/sale-statistics） | 2 |
 
-代表性端点：`GET /erp/purchase-statistics/summary`、`GET /erp/sale-statistics/time-summary`，权限均为 `erp:statistics:query`。
+代表性端点：`GET /erp/purchase-statistics/summary`、`GET /erp/sale-statistics/time-summary`，权限均为 `erp:statistics:query`。统计口径为"已审核入库/出库 − 已审核退货"（仅 `status = 20` 单据计入，未审核与反审核单据不计入）。
 
 ## 数据模型
 
@@ -136,9 +136,9 @@
 
 ## 依赖关系
 - **上游**（本模块依赖）:
-  - 业务模块：yudao-module-system（唯一业务依赖，经 pom 引入；代码中 19 处使用 `AdminUserApi` 查询用户昵称用于单据创建人/审核人展示）
+  - 业务模块：yudao-module-system（唯一业务依赖，经 pom 引入；代码中 19 个类共 23 处调用 `AdminUserApi`（13 处 `getUserMap`、10 处 `validateUser`），查询用户昵称用于单据创建人/审核人展示）
   - framework starter：yudao-spring-boot-starter-web、yudao-spring-boot-starter-security、yudao-spring-boot-starter-mybatis、yudao-spring-boot-starter-redis、yudao-spring-boot-starter-excel、yudao-spring-boot-starter-test
-- **下游**（依赖本模块）: 仅 yudao-server（装配入口）依赖本模块；无其它业务模块依赖 erp
+- **下游**（依赖本模块）: 仅 yudao-server（装配入口）依赖本模块，无其它业务模块依赖 erp。注意：当前仓库根 `pom.xml` 的 `<module>yudao-module-erp</module>` 与 `yudao-server/pom.xml` 的 erp 依赖均默认**注释**（为保证编译速度），使用前需手动取消注释。
 
 ## 对外暴露的 API
 无。erp 模块未提供 `api` 包，不向其它业务模块暴露跨模块 Api（属纯终端业务模块）。

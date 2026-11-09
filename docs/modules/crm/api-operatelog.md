@@ -11,7 +11,7 @@
 ### 1.1 获得操作日志
 
 - **路径**: GET /crm/operate-log/page
-- **权限**: 已认证（无 @PreAuthorize 权限标识，仅需登录）
+- **权限**: 已认证（无 @PreAuthorize 权限标识，但 Controller 方法标注 `@CrmPermission(bizTypeValue = "#pageReqVO.bizType", bizId = "#pageReqVO.bizId", level = READ)`，校验当前用户对该业务数据的 READ 级数据权限）
 - **说明**: 按数据类型 + 数据编号查询某个 CRM 业务对象的全部操作日志，默认不分页（一次返回全部记录）
 
 **请求参数 (CrmOperateLogPageReqVO)**:
@@ -39,10 +39,11 @@
 | createTime | LocalDateTime | 操作时间 |
 
 **业务逻辑**:
-1. Controller 内维护静态映射 BIZ_TYPE_MAP：将 CrmBizTypeEnum 的数字类型（1~8）映射为 LogRecordConstants 中定义的日志模块类型字符串（如 CRM_CUSTOMER_TYPE = "CRM 客户"、CRM_CLUE_TYPE = "CRM 线索"）。
-2. 构造 system 模块的 OperateLogPageReqDTO，并将 pageSize 强制设置为 PAGE_SIZE_NONE（-1），即默认不分页、一次性返回该业务对象的所有操作日志（代码注释：需要分页需自行调整）。
-3. 以 bizType 映射出的 type 字符串和 bizId 作为查询条件，调用 system 模块的 OperateLogApi.getOperateLogPage 查询操作日志。
-4. system 模块 OperateLogServiceImpl.getOperateLogPage 委托 OperateLogMapper.selectPage，按 type、bizId、userId 等值匹配查询（eqIfPresent），并按 id 倒序排列。
-5. 查询结果先转换为 OperateLogRespDTO（方法带 @TransMethodResult，用户编号自动翻译出 userName），再由 BeanUtils 转换为 CrmOperateLogRespVO 分页返回。
+1. 通过 `@CrmPermission` 切面校验当前用户对该业务数据（bizType + bizId）拥有 READ 级权限。
+2. Controller 内维护静态映射 BIZ_TYPE_MAP：将 CrmBizTypeEnum 的数字类型（1~8）映射为 LogRecordConstants 中定义的日志模块类型字符串（如 CRM_CUSTOMER_TYPE = "CRM 客户"、CRM_CLUE_TYPE = "CRM 线索"）。
+3. 构造 system 模块的 OperateLogPageReqDTO，并将 pageSize 强制设置为 PAGE_SIZE_NONE（-1），即默认不分页、一次性返回该业务对象的所有操作日志（代码注释：需要分页需自行调整）。
+4. 以 bizType 映射出的 type 字符串和 bizId 作为查询条件，调用 system 模块的 OperateLogApi.getOperateLogPage 查询操作日志。
+5. system 模块 OperateLogServiceImpl.getOperateLogPage 委托 OperateLogMapper.selectPage，按 type、bizId、userId 等值匹配查询（eqIfPresent），并按 id 倒序排列。
+6. 查询结果先转换为 OperateLogRespDTO（system 模块的 `OperateLogApiImpl#getOperateLogPage` 标注 `@TransMethodResult`，用户编号自动翻译出 userName），再由 BeanUtils 转换为 CrmOperateLogRespVO 分页返回。
 
 **错误码**: 无（该域未定义专属错误码，参数校验失败由框架返回 400）

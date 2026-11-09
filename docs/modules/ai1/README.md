@@ -6,7 +6,7 @@
 
 - **模块路径**: `yudao-module-ai1-springai`（单模块布局，无子模块拆分；当前在 `yudao-server/pom.xml` 中处于注释未启用状态）
 - **业务定位**: 参考 XXL-AI 重新实现的 AI Agent 能力模块，采用「harness 编排层 + service 业务层」的分层结构。`harness` 包是平台调用大模型（`Ai1LlmChatTool` / `Ai1LlmModelFactory`）、MCP 服务（`Ai1McpClientTool` / `Ai1McpToolFactory`）、知识库 RAG（`Ai1RagTool`）、SKILL 物化（`Ai1SkillToolFactory`）、长期记忆（`Ai1MemoryTool` / `Ai1MemoryArchiveTool`）、供应商探测（`Ai1ProviderTool`）与会话流（`Ai1SessionStreamTool`）的客户端与工厂集合，模型可调用的工具在会话时才另行装配；Service 层只做校验与消息落库，流式生成与下发整体委托 `Ai1SessionStreamTool`。所有对话/嵌入模型统一按 OpenAI 兼容协议经 Spring AI 程序化构建，配置存数据库（支持 `${ENV}` 占位符，密钥留在环境变量），按「编号 + 配置指纹」Guava 缓存。
-- **技术栈**: Spring Boot 2.7.18（本仓库 JDK8 分支根 pom 实际版本，模块按 Spring AI 1.x 设计、当前注释未启用，校验体系为 javax，见 [pitfalls.md](pitfalls.md) 1.1）+ Spring AI 1.x（BOM 管理：spring-ai-openai / spring-ai-client-chat / spring-ai-advisors-vector-store / spring-ai-milvus-store）+ MyBatis-Plus + Redisson（RStream / RLock / RTopic，原生 StringCodec）+ Milvus 向量库（milvus-sdk-java 3.0.10）+ MCP Java SDK 2.0.1（stdio / Streamable HTTP 客户端）+ spring-ai-agent-utils 0.13.0（SkillsTool 及 Shell / FileSystem / Glob / Grep / ListDirectory 执行工具）+ Quartz JobHandler
+- **技术栈**: Spring Boot 2.7.18（本仓库 JDK8 分支根 pom 实际版本，模块按 Spring AI 1.x 设计、当前注释未启用，校验体系为 javax，见 [pitfalls.md](pitfalls.md) 1.1）+ Spring AI 1.x（spring-ai-openai / spring-ai-client-chat / spring-ai-advisors-vector-store / spring-ai-milvus-store；模块 pom 未声明版本、未导入 spring-ai-bom，见 [code-patterns.md](code-patterns.md) 模块依赖注意）+ MyBatis-Plus + Redisson（RStream / RLock / RTopic，原生 StringCodec）+ Milvus 向量库（milvus-sdk-java 3.0.10）+ MCP Java SDK 2.0.1（stdio / Streamable HTTP 客户端）+ spring-ai-agent-utils 0.13.0（SkillsTool 及 Shell / FileSystem / Glob / Grep / ListDirectory 执行工具）+ Quartz JobHandler
 
 ## 设计原则
 
@@ -17,7 +17,7 @@
 | 配置进 DB、密钥留环境 | Provider/模型/MCP/SKILL 配置存数据库并支持 `${ENV}` 占位符，仅在发起调用前经 `Ai1Utils.resolveSpringPlaceholders` 解析，接口响应仍返回占位符本身 |
 | 无状态编排 + Redis Stream | 生成任务队列（消费组）、结果流（助手消息编号即结果流标识）、停止意图/通知、执行锁全放 Redis；生成与连接解耦——任意节点都能转发、续传，worker 可独立扩容；会话/消息/记忆水位线落 MySQL |
 | Redisson 原生 RStream + StringCodec | 字段按纯字符串存储，刻意不用项目 RedisTemplate（JSON 序列化会破坏 Stream 字段），也不用 Spring Data opsForStream（阻塞读取无数据时抛 ClassCastException 且占满连接池） |
-| 缓存 + 配置指纹 | 模型（providerId:modelId:配置指纹）、MCP 客户端/工具列表（编号+指纹）、向量存储（嵌入模型实例引用）、SKILL 快照（编号:更新时间指纹）都以指纹为 key，配置变化自然命中新 key 并淘汰旧实例；模型缓存 10 分钟过期兜底其他节点 |
+| 缓存 + 配置指纹 | 模型（providerId:modelId:配置指纹）、MCP 客户端/工具列表（编号+指纹）、向量存储（嵌入模型实例引用）、SKILL 快照（编号:更新时间指纹）都以指纹为 key，配置变化自然命中新 key 并淘汰旧实例；模型缓存对象含配置指纹，其他节点下次调用即按新配置重建，10 分钟 TTL 仅回收旧 key |
 | SKILL 物化执行 | 数据库文件树物化到 `agent_{agentId}` 本地沙箱，先清空再物化防残留，spring-ai-agent-utils 的 SkillsTool/ShellTools/FileSystemTools/Glob/Grep/ListDirectory 全部限定 allowedDirectory，Shell 后台进程由 `Ai1SkillShellTracker` 统一回收 |
 | 降级与安全兜底 | RAG/记忆装配失败降级跳过并把提示写入思考流；RAG 集合按「调用方先在当前租户查出知识库再传入」防越权；SKILL 路径名 sanitize 防目录穿越；HTTP 探测异常信息脱敏；工具名超长用 sha256 摘要防冲突 |
 | 多租户贯穿 | 全部 11 张业务表 100% 继承 TenantBaseDO；任务投递存在租户才携带 tenantId，worker 统一在 `TenantUtils.execute` 中还原租户上下文（禁止 executeIgnore）；归档 Job 用 @TenantJob 按租户执行 + Redisson 归档锁互斥 |
@@ -33,7 +33,7 @@
 | MCP 工具 | 管理端维护 MCP 配置（远程 Streamable HTTP / 本地 stdio 进程），提供连通测试（initialize + tools/list）；会话时由 `Ai1McpToolFactory` 把 MCP 工具桥接为 Spring AI FunctionToolCallback，LLM 以 function calling 方式调用 | `Ai1McpDO` |
 | SKILL 技能 | Claude Agent Skills 风格的提示词能力包，以「管理信息表 + 内容文件树表」存储（SKILL.md 为入口，scripts/、reference/ 为固定目录），文件树级 CRUD；物化到本地沙箱目录并注册 SkillsTool 与执行类工具 | `Ai1SkillDO`、`Ai1SkillFileDO` |
 | 长期记忆 | 每个「用户 × Agent」一条 Markdown 记忆（按用户画像/偏好习惯/关键事实/目标与意图/近期进展五个维度），归档 Job 按水位线增量生成；对话时开启 memoryEnabled 的 Agent 自动注入；管理端只提供查询/修改/删除 | `Ai1MemoryDO` |
-| 工作台首页 | 资源总量（Agent/SKILL/MCP/模型数量）、近 N 天每日消息趋势、近 N 天各 Agent 消息排行三类只读统计，无独立表，由 `Ai1HomeMapper` 原生 @Select 聚合 | 无独立实体（`Ai1HomeMapper`） |
+| 工作台首页 | 资源总量（Agent/SKILL/MCP/模型数量）、近 N 天每日消息趋势、近 N 天各 Agent 消息排行三类只读统计，无独立表，由 `Ai1HomeMapper` 原生 @Select 聚合；统计 SQL 经 `SqlDialectUtils` 方言化（日期文本、Oracle FROM DUAL），兼容 MySQL/H2/PostgreSQL/Oracle/SQL Server | 无独立实体（`Ai1HomeMapper`） |
 
 ## API 接口索引
 
@@ -160,7 +160,7 @@
 | /ai1/session/create-my | POST | 创建【我的】会话 | ai1:session:my |
 | /ai1/session/update-my | PUT | 修改【我的】会话标题 | ai1:session:my |
 | /ai1/session/delete-my | DELETE | 删除【我的】会话，连带删除消息 | ai1:session:my |
-| /ai1/session/my-list | GET | 获得【我的】会话列表（指定 Agent 下，按创建时间倒序） | ai1:session:my |
+| /ai1/session/my-list | GET | 获得【我的】会话列表（指定 Agent 下，按编号倒序，近似创建时间倒序） | ai1:session:my |
 | /ai1/session/page | GET | 获得会话分页（管理端查看全部用户的会话） | ai1:session:query |
 
 ### 会话消息 (Ai1SessionMessageController)
@@ -226,7 +226,7 @@
 
 | 模式 | 应用位置 | 用途 |
 |-----|---------|------|
-| 工厂模式 + 配置指纹缓存 | `Ai1LlmModelFactory`（构建 OpenAiChatModel/OpenAiEmbeddingModel）、`Ai1McpToolFactory`（MCP 工具桥接为 FunctionToolCallback）、`Ai1SkillToolFactory`（物化并构建 SkillsTool + 执行类工具） | 按数据库运行时快照程序化构建，缓存 key 携带配置指纹，配合显式 evict/evictByProviderId/evictByModelId 失效与 TTL 兜底，双重检查锁 + 按 ID 串行初始化避免并发重建 |
+| 工厂模式 + 配置指纹缓存 | `Ai1LlmModelFactory`（构建 OpenAiChatModel/OpenAiEmbeddingModel）、`Ai1McpToolFactory`（MCP 工具桥接为 FunctionToolCallback）、`Ai1SkillToolFactory`（物化并构建 SkillsTool + 执行类工具） | 按数据库运行时快照程序化构建，缓存 key 携带配置指纹，显式 evict/evictByProviderId/evictByModelId 只失效本节点；其他节点靠 key 中的配置指纹在下次调用时自然重建，TTL 仅回收旧 key；双重检查锁 + 按 ID 串行初始化避免并发重建 |
 | Redis Stream 生产者-消费者 + PEL 超时认领 | `Ai1SessionStreamTool` 的 submit / consumeLoop / reclaimTasks / handleTask（队列 `ai1:session:tasks`，消费组 `ai1-session-workers`） | 生成任务异步化：XADD 投递 → XREADGROUP 消费 → XACK 确认；listPending + claim 认领超时遗留任务实现 worker 故障接管；NOGROUP 时自动重建消费组 |
 | 结果流断点续传 + 双写补偿 | `Ai1SessionStreamTool#streamResult`（XREAD 转发 + lastEventId 重放）、`#completeTaskResult`（终态补偿） | 助手消息编号即结果流标识，SSE 事件 id=条目编号实现续传；DB 回填与结果流写入非同一事务，补偿只补齐缺失 error/done 后才 XACK，接管任务不重跑、按结果流还原部分输出 |
 | 装配-执行-回调骨架（模板方法思想） | `Ai1LlmChatTool.chat` | 固定「装配消息 → 附加 tools/advisors → 流式执行 → 增量回调」骨架，onThinking/onContent 由调用方注入，传输方式（SSE、Redis Stream）由调用方决定，记忆归档等场景复用 |
@@ -245,7 +245,7 @@
 - **上游**（本模块依赖）
   - 业务模块: `yudao-module-system`（用户、部门、租户等系统能力，AdminUserApi 查询用户昵称）、`yudao-module-infra`（文件、配置等基础设施能力）
   - framework starter: `yudao-spring-boot-starter-biz-tenant`（多租户，任务投递携带 tenantId、@TenantJob）、`yudao-spring-boot-starter-security`、`yudao-spring-boot-starter-mybatis`、`yudao-spring-boot-starter-redis`（Redis/Redisson：RStream、RLock、RTopic、RBucket）、`yudao-spring-boot-starter-test`
-  - 三方 AI: Spring AI（spring-ai-openai 对话/嵌入模型，spring-ai-client-chat，spring-ai-advisors-vector-store 的 QuestionAnswerAdvisor，spring-ai-milvus-store 向量存储，版本由 spring-ai-bom 管理）、`milvus-sdk-java` 3.0.10、`spring-ai-agent-utils` 0.13.0（SkillsTool 技能系统及 Shell/FileSystem/Glob/Grep/ListDirectory 执行工具）、`mcp-json-jackson2` 2.0.1（官方 Java MCP SDK，stdio / Streamable HTTP 客户端）
+  - 三方 AI: Spring AI（spring-ai-openai 对话/嵌入模型，spring-ai-client-chat，spring-ai-advisors-vector-store 的 QuestionAnswerAdvisor，spring-ai-milvus-store 向量存储；模块 pom 未声明这四个构件的版本号、也未导入 spring-ai-bom，单独构建会因缺版本失败——启用模块前需参考 yudao-module-ai（spring-ai.version=1.1.8）在模块 pom 补充 BOM import 或版本声明）、`milvus-sdk-java` 3.0.10、`spring-ai-agent-utils` 0.13.0（SkillsTool 技能系统及 Shell/FileSystem/Glob/Grep/ListDirectory 执行工具）、`mcp-json-jackson2` 2.0.1（官方 Java MCP SDK，stdio / Streamable HTTP 客户端）
 - **下游**（依赖本模块）
   - `yudao-server` 聚合引用（当前 `yudao-server/pom.xml` 第 112-116 行处于注释未启用状态，启用需取消该段注释后随 yudao-server 打包；无其他业务模块依赖 ai1 模块）
 

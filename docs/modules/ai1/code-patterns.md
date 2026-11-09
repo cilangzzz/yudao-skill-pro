@@ -84,7 +84,7 @@ private Ai1SessionMessageServiceImpl getSelf() {
 ### 数据访问层（DAL）规范
 
 - MySQL：Mapper 继承 `BaseMapperX`，通用查询封装为接口 `default` 方法，用 `LambdaQueryWrapperX` 的 `eqIfPresent/likeIfPresent`
-- DO 继承 `TenantBaseDO`（Agent/会话/记忆等租户表）；Agent 的集合绑定字段用 `@TableField(typeHandler = LongListTypeHandler.class)` 存 JSON 数组，DO 必须保持 `autoResultMap = true`
+- DO 继承 `TenantBaseDO`（Agent/会话/记忆等租户表）；Agent 的集合绑定字段用 `@TableField(typeHandler = LongListTypeHandler.class)` 存逗号分隔字符串（如 `"1,2,3"`，数据库列类型为 varchar），DO 必须保持 `autoResultMap = true`
 
 ```java
 @TableName(value = "ai1_agent", autoResultMap = true)
@@ -95,9 +95,10 @@ public class Ai1AgentDO extends TenantBaseDO {
 }
 ```
 
-- JSON 数组列做引用计数时不能用 `IN`，用 `MyBatisUtils.findInSet` 拼 `FIND_IN_SET`（见 `Ai1AgentMapper#selectCountBySkillIds`）
+- 逗号分隔字符串列做引用计数时不能用 `IN`，用 `MyBatisUtils.findInSet` 拼 `FIND_IN_SET`（见 `Ai1AgentMapper#selectCountBySkillIds`）
 - Redis：`Ai1RedisKeyConstants` 集中定义 key 与多租户约定（结果流 key 不带 tenantId、由字段隔离）；锁封装在 `Ai1MemoryLockRedisDAO`，不设租期、由 Redisson 看门狗续期
-- 统计类查询（`Ai1HomeMapper`）用原生 `@Select` + 标量子查询，列别名与 VO 字段同名直接映射；**原生 SQL 必须手写 `deleted = FALSE`**（不享受 `@TableLogic` 自动拼接），日期聚合用 `CAST(create_time AS DATE)` 兼容 MySQL/H2 单测
+- 统计类查询（`Ai1HomeMapper`）用原生 `@Select` + 标量子查询，列别名与 VO 字段同名直接映射；**原生 SQL 必须手写 `deleted = 0`**（不享受 `@TableLogic` 自动拼接；用 0/1 而非 `FALSE`，兼容 Oracle / SQL Server），日期分组、Oracle `FROM DUAL` 等方言差异必须用 `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@castDateText('create_time')}`、`${@...SqlDialectUtils@fromDual()}` 生成，不能硬编码 `CAST(...)` 或 `DATE(...)`；`${}` 静态方法参数只允许代码中固定且通过 `checkColumn` 白名单校验的列名，业务值继续用 `#{}` 绑定
+- 限量查询用 `BaseMapperX.selectListLimitN(wrapper, limit)` / `selectFirstOne(wrapper)`（走 MyBatis-Plus 分页插件，按执行时数据库生成 `LIMIT` / `ROWNUM` / `OFFSET FETCH`），不要用 `QueryWrapperX.limitN` 拼字面 `LIMIT`（仅 MySQL 可用）；`limit=0` 返回空列表、负数抛 `IllegalArgumentException`，SQL Server 要求 wrapper 带 `ORDER BY`
 
 ### harness 层规范（AI 调用统一入口）
 
@@ -141,7 +142,7 @@ for (Object tool : tools) {
 | 模式 | 应用位置 | 用途 |
 |-----|---------|------|
 | harness 工具化 | `harness/` 全部 `*Tool` / `*Factory` | 编排（`Ai1SessionStreamTool#generate`）与执行（`Ai1LlmChatTool#chat`）分离；编排失败一律降级跳过（RAG/记忆提示写入思考流），不中断对话 |
-| 工厂 + 配置指纹缓存 | `Ai1LlmModelFactory`（Guava Cache，容量 128、写入后 10 分钟过期） | 缓存 key = `providerId:modelId:Objects.hash(配置指纹)[:sessionKey]`；配置变化自然命中新 key，Service 变更时显式 `evictByModelId/evictByProviderId`（仅本节点，其他节点靠 TTL 收敛） |
+| 工厂 + 配置指纹缓存 | `Ai1LlmModelFactory`（Guava Cache，容量 500、写入后 10 分钟过期） | 缓存 key = `providerId:modelId:Objects.hash(配置指纹)[:sessionKey]`；配置变化自然命中新 key，Service 变更时显式 `evictByModelId/evictByProviderId`（仅本节点；其他节点下次调用即按新配置重建，10 分钟 TTL 只回收旧 key） |
 | Redis Stream 生产者-消费者 | `Ai1SessionStreamTool`：任务流 `ai1:session:tasks` + 消费组 `ai1-session-workers` | XADD 投递 → XREADGROUP 消费 → XACK 确认；`reclaimTasks` 认领 PEL 超时任务（接管不重跑）；实现 SmartLifecycle 启停 worker；Redisson 原生 `RStream + StringCodec` 纯字符串存取 |
 | 结果流断点续传 | 助手消息编号即结果流 `ai1:session:result:{messageId}` 标识 | SSE 事件 id = 结果流条目编号，携带 lastEventId 从断点重放不重新生成；DB 回填与结果流写入非同一事务，XACK 前由 `completeTaskResult` 补齐缺失终态 |
 | SKILL 物化执行 | `Ai1SkillToolFactory`（spring-ai-agent-utils 0.13.0） | DB 文件树物化到 `${yudao.ai1.skill.root}/agent_{agentId}`，按「编号:更新时间」指纹整目录重建（先清空防残留）+ `.fingerprint` 标记文件；Shell 后台进程经 `Ai1SkillShellTracker`（装饰器实现 ExecBackend）登记回收 |
@@ -273,13 +274,15 @@ infra 定时任务触发 Ai1MemoryArchiveJob#execute（@TenantJob 逐租户）
 
 | 依赖 | 版本 | 用途 |
 |-----|------|-----|
-| spring-ai-openai | spring-ai-bom 管理 | 对话/嵌入模型（OpenAI 兼容协议），排除 swagger-annotations-jakarta |
-| spring-ai-client-chat | spring-ai-bom 管理 | ChatClient 1.x（agent-utils 的 Spring AI 依赖为 provided，显式对齐基础项目 BOM） |
-| spring-ai-advisors-vector-store | spring-ai-bom 管理 | RAG Advisor（QuestionAnswerAdvisor） |
-| spring-ai-milvus-store | spring-ai-bom 管理 | Milvus 向量存储，排除 slf4j-reload4j 解决日志冲突 |
+| spring-ai-openai | 未声明版本（见下方注意） | 对话/嵌入模型（OpenAI 兼容协议），排除 swagger-annotations-jakarta |
+| spring-ai-client-chat | 未声明版本（见下方注意） | ChatClient 1.x（agent-utils 的 Spring AI 依赖为 provided，显式对齐基础项目的 1.x ChatClient） |
+| spring-ai-advisors-vector-store | 未声明版本（见下方注意） | RAG Advisor（QuestionAnswerAdvisor） |
+| spring-ai-milvus-store | 未声明版本（见下方注意） | Milvus 向量存储，排除 slf4j-reload4j 解决日志冲突 |
 | milvus-sdk-java | 3.0.10 | Milvus Java SDK，同样排除 slf4j-reload4j |
 | spring-ai-agent-utils | 0.13.0 | SkillsTool 技能系统（SKILL.md）及 Shell/FileSystem/Glob/Grep/ListDirectory 执行工具 |
 | mcp-json-jackson2 | 2.0.1 | 官方 Java MCP SDK（stdio / Streamable HTTP 客户端） |
+
+> **注意（spring-ai 版本管理缺口）**：模块 pom 只在注释中提到 spring-ai-bom（「以下依赖不在 spring-ai-bom 中，需显式声明版本」），但**没有实际导入 spring-ai-bom，也未给四个 spring-ai 构件写版本号**；父 pom 链（root pom → yudao-dependencies）同样不管理 spring-ai。当前模块在根 pom 与 yudao-server 中均处于注释未启用状态，掩盖了该问题；单独构建 `yudao-module-ai1-springai` 会因 spring-ai 依赖缺版本而解析失败。启用模块前需在模块 pom 补充 `spring-ai-bom` import 或显式版本（可参考 yudao-module-ai：`spring-ai.version=1.1.8` 并在其 pom 内导入 spring-ai-bom）。
 
 ## 关键文件
 
@@ -312,7 +315,7 @@ infra 定时任务触发 Ai1MemoryArchiveJob#execute（@TenantJob 逐租户）
 
 | 聚合根 | 包含实体 | 说明 |
 |-------|---------|------|
-| Agent | `Ai1AgentDO` | 编排核心：绑定 Provider/Model/知识库/MCP/SKILL（后三者 `LongListTypeHandler` JSON 数组列）+ 系统指令 + 记忆开关 |
+| Agent | `Ai1AgentDO` | 编排核心：绑定 Provider/Model/知识库/MCP/SKILL（后三者 `LongListTypeHandler` 逗号分隔字符串列）+ 系统指令 + 记忆开关 |
 | 会话 | `Ai1SessionDO`、`Ai1SessionMessageDO` | 会话包含消息；助手消息编号同时是 Redis 结果流标识 |
 | 知识库 | `Ai1KnowledgeBaseDO`、`Ai1KnowledgeDocumentDO` | 文档向量化进 Milvus，集合名按知识库编号隔离 |
 | SKILL | `Ai1SkillDO`、`Ai1SkillFileDO` | 文件树（parentId 邻接表）物化到本地沙箱执行 |

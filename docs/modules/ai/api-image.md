@@ -22,8 +22,8 @@
 
 | 字段 | 类型 | 必填 | 校验规则 | 说明 |
 |-----|------|-----|---------|------|
-| pageNo | Long | 是 | @NotNull、@Min(1) | 页码，从 1 开始 |
-| pageSize | Long | 是 | @NotNull、@Min(1)、@Max(100) | 每页条数 |
+| pageNo | Integer | 是 | @NotNull、@Min(1) | 页码，从 1 开始，默认 1 |
+| pageSize | Integer | 是 | @NotNull、@Min(1)、@Max(200) | 每页条数，默认 10 |
 | userId | Long | 否 | - | 用户编号（管理端分页用，本接口按登录用户覆盖） |
 | platform | String | 否 | - | 平台，如 OpenAI |
 | prompt | String | 否 | - | 提示词（模糊匹配） |
@@ -45,8 +45,8 @@
 
 | 字段 | 类型 | 必填 | 校验规则 | 说明 |
 |-----|------|-----|---------|------|
-| pageNo | Long | 是 | @NotNull、@Min(1) | 页码 |
-| pageSize | Long | 是 | @NotNull、@Min(1)、@Max(100) | 每页条数 |
+| pageNo | Integer | 是 | @NotNull、@Min(1) | 页码，默认 1 |
+| pageSize | Integer | 是 | @NotNull、@Min(1)、@Max(200) | 每页条数，默认 10 |
 | prompt | String | 否 | - | 提示词（模糊匹配） |
 
 **响应**: CommonResult<PageResult<AiImageRespVO>>
@@ -157,7 +157,9 @@
 
 **响应**: CommonResult\<Long\>（绘画记录编号）
 
-**业务逻辑**: 1. 校验模型存在且可用，并断言平台为 Midjourney（否则报「平台不匹配」）；获取 MidjourneyApi。 2. 落库：userId、publicStatus=false、status=进行中、platform=MIDJOURNEY、modelId、model。 3. referImageUrl 非空时下载图片并转 base64 作为参考图，组装 ImagineRequest（含 width/height/version/model 的 state）调用 midjourneyApi.imagine 提交任务。 4. 提交失败（code 不在成功码中）时抛 IMAGE_MIDJOURNEY_SUBMIT_FAIL，quota_not_enough 场景提示「账户余额不足」。 5. 提交成功则回写 taskId 与请求参数 options。 6. 返回绘画编号。
+**业务逻辑**: 1. 校验模型存在且可用，并断言平台为 Midjourney（否则报「平台不匹配」）；获取 MidjourneyApi。 2. 落库：userId、publicStatus=false、status=进行中、platform=MIDJOURNEY、modelId、model。 3. referImageUrl 非空时下载图片并转 base64 作为参考图；按 width/height/version/model 生成 state（`--ar`、`--niji` 或 `--v`），**同时把 state 拼接到 prompt 末尾**后组装 ImagineRequest（含 state 字段）调用 midjourneyApi.imagine 提交任务——Midjourney Proxy 的 `state` 只是自定义透传参数，不会提交给 Midjourney，绘图参数必须体现在 prompt 中。 4. 提交失败（code 不在成功码中）时抛 IMAGE_MIDJOURNEY_SUBMIT_FAIL，quota_not_enough 场景提示「账户余额不足」。 5. 提交成功则回写 taskId 与请求参数 options。 6. 返回绘画编号。
+
+> MidjourneyApi 鉴权：除 `Authorization: Bearer {apiKey}` 外，还同时下发 `mj-api-secret: {apiKey}` 请求头，以兼容开启 `mj.api-secret` 的 novicezk/midjourney-proxy。
 
 **错误码**:
 
@@ -211,7 +213,9 @@
 
 **响应**: CommonResult\<Long\>（新生成的绘画记录编号）
 
-**业务逻辑**: 1. 校验绘画记录存在且属于当前登录用户（否则抛 IMAGE_NOT_EXISTS）；获取 MidjourneyApi。 2. 在记录的 buttons 中查找 customId 匹配的按钮，不存在抛 IMAGE_CUSTOM_ID_NOT_EXISTS。 3. 调用 midjourneyApi.action 提交任务，提交失败抛 IMAGE_MIDJOURNEY_SUBMIT_FAIL（quota_not_enough 提示「账户余额不足」）。 4. 新增一条绘画记录：沿用原记录的 userId/prompt/model/width/height/options，publicStatus=false、status=进行中、taskId 为新任务编号。 5. 返回新记录编号。
+**业务逻辑**: 1. 校验绘画记录存在且属于当前登录用户（否则抛 IMAGE_NOT_EXISTS）；获取 MidjourneyApi。 2. 在记录的 buttons 中查找 customId 匹配的按钮，不存在抛 IMAGE_CUSTOM_ID_NOT_EXISTS。 3. 调用 `midjourneyApi.action(new ActionRequest(taskId, customId, null))` 提交任务（参数顺序为 taskId、customId），提交失败抛 IMAGE_MIDJOURNEY_SUBMIT_FAIL（quota_not_enough 提示「账户余额不足」）。 4. 新增一条绘画记录：沿用原记录的 userId/prompt/model/**modelId**/width/height/options，publicStatus=false、status=进行中、taskId 为新任务编号（新记录补齐 modelId，避免后续定时同步找不到对应的 Midjourney Proxy）。 5. 返回新记录编号。
+
+> 定时同步（`AiMidjourneySyncJob` → `AiImageServiceImpl#midjourneySync`）：先按 `modelId` 分组，逐组用各自的 Midjourney Proxy 查询 task；未关联 `modelId` 的历史图片跳过同步，依赖回调 `/midjourney/notify` 更新状态。
 
 **错误码**:
 
@@ -320,7 +324,7 @@
 | finishTime | LocalDateTime | 完成时间 |
 | createTime | LocalDateTime | 创建时间 |
 
-## 错误码汇总（绘画 1-040-005-000 段）
+## 错误码汇总（绘画 1_040_005_000 段）
 
 | 错误码 | 说明 |
 |-------|------|

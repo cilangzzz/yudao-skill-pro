@@ -95,7 +95,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO        （框架通用
 | defaultStatus | Boolean | default_status | 是否默认收件地址（true 为默认） |
 
 **继承**: BaseDO
-**索引**: 源码未声明额外索引；常规查询路径为 `selectListByUserIdAndDefaultStatus`（按 user_id 过滤）
+**索引**: 源码未声明额外索引；常规查询路径为 `selectListByUserIdAndDefaulted`（`MemberAddressMapper`，按 user_id + 可选 default_status 过滤）
 
 #### MemberConfigDO (member_config)
 
@@ -145,7 +145,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO        （框架通用
 | levelId | Long | level_id | 等级编号，关联 MemberLevelDO#getId() |
 | level | Integer | level | 变更后的会员等级值（冗余 MemberLevelDO#level，避免等级配置后续修改影响历史记录） |
 | discountPercent | Integer | discount_percent | 该等级对应的享受折扣（同样冗余快照） |
-| experience | Integer | experience | 该等级的升级经验（冗余快照） |
+| experience | Integer | experience | 等级升级经验快照（自动升级路径冗余 MemberLevelDO#experience；管理员调整路径写的是变动经验，语义不统一，见 pitfalls 5.3） |
 | userExperience | Integer | user_experience | 变更时会员的累计经验 |
 | remark | String | remark | 备注 |
 | description | String | description | 变更描述 |
@@ -292,11 +292,11 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO        （框架通用
 
 **关系要点**：
 
-- `member_user` 是模块中心表，其余 9 张含 `user_id` 的表均通过 `user_id` 逻辑关联（member_address、member_level_record、member_experience_record、member_point_record、member_sign_in_record）。
+- `member_user` 是模块中心表，其余 5 张含 `user_id` 的表均通过 `user_id` 逻辑关联（member_address、member_level_record、member_experience_record、member_point_record、member_sign_in_record）。
 - `member_user.levelId → member_level.id`、`member_user.groupId → member_group.id` 为单值逻辑外键；等级变更时 member_level_record 会额外冗余 level/discountPercent/experience 三个字段作历史快照。
 - `member_user.tagIds → member_tag.id` 为多值关联，不建中间表，而是用 `LongListTypeHandler` 在 tag_ids 列以逗号分隔存储 `List<Long>`，查询时通过 `FIND_IN_SET(tag_ids, ?)` 匹配（见 MemberUserMapper）。
 - `member_config` 与 `member_sign_in_config` 是纯配置表，不直接引用用户。
-- 跨模块引用：mall-trade 消费 `MemberAddressApi`/`MemberConfigApi`/`MemberPointApi`（下单、积分抵扣）、mall-promotion 消费 `MemberUserApi`（注册发券，监听 member 模块事务提交后发布的 `MemberUserCreateMessage` Spring 事件）、mall-statistics/product 消费 `MemberUserApi`/`MemberLevelApi`。
+- 跨模块引用：mall-trade 消费 `MemberAddressApi`/`MemberConfigApi`/`MemberLevelApi`/`MemberPointApi` 与 `MemberUserApi`（下单收件地址、积分抵扣/赠送、订单加经验、订单用户信息）；mall-promotion 与 mall-product 消费 `MemberUserApi`（注册发券、砍价/评论等展示用户信息，promotion 另外监听 member 模块事务提交后发布的 `MemberUserCreateMessage` Spring 事件）；mall-statistics 不通过 API，而是在自己的 `MemberStatisticsMapper` 中直接查 `member_user` 等表做统计。
 
 ---
 

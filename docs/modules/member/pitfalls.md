@@ -33,24 +33,25 @@
 
 **问题**: `MemberPointRecordServiceImpl#createPointRecord` 中，Java 层预计算 `totalPoint < 0` 时只 `log.error(USER_POINT_NOT_ENOUGH)` 后直接 `return`——不抛异常、不扣积分、不写流水。管理后台"更新积分"（`MemberUserController#updateUserPoint`，`MemberUserUpdatePointReqVO.point` 允许负数）调整负积分遇到余额不足时，接口仍返回 `success(true)` 假成功。类似地，`MemberPointApiImpl#addPoint` 在 bizType 非法时也只 `log.error` 后 `return`，而 `reducePoint` 同场景却抛 `POINT_RECORD_BIZ_NOT_SUPPORT`，加/扣行为不对称。
 
-**原因**: 真正抛 `USER_POINT_NOT_ENOUGH` 的分支只有 `memberUserService.updateUserPoint` 更新行数为 0（用户不存在）这一种；余额不足被实现为"记日志跳过"。
+**原因**: "静默跳过"只发生在 Java 预检 `totalPoint < 0` 这一条分支；真正抛 `USER_POINT_NOT_ENOUGH` 的是 `memberUserService.updateUserPoint` 返回 false（`updatePointDecr` 更新行数为 0）。而 `updatePointDecr` 的 UPDATE 已带 `point >= 扣减额` 条件，因此**并发下余额已被其他请求扣走时，后到的请求会抛 1_004_001_003 使整个事务回滚**；只有非并发的预检不足才会被静默跳过。
 
-**解决**: 外部调用（如订单积分抵扣 `MemberPointApi#reducePoint`）前自行校验用户余额；或修改 `createPointRecord`，将 `totalPoint < 0` 分支改为抛出 `USER_POINT_NOT_ENOUGH`。
+**解决**: 外部调用（如订单积分抵扣 `MemberPointApi#reducePoint`）前自行校验用户余额；或修改 `createPointRecord`，将 `totalPoint < 0` 分支也改为抛出 `USER_POINT_NOT_ENOUGH`，统一语义。
 
-### 3.2 积分扣减非原子，并发下可扣成负数
+### 3.2 积分扣减的余额校验与扣减非原子（SQL 已保证不会扣成负数）
 
-**问题**: 两个并发扣积分请求可能同时通过余额校验，把 `member_user.point` 扣成负数，且积分流水里的 `totalPoint` 与库中实际值对不上。
+**问题**: 并发扣减时，Java 预检可能读不到其他事务尚未提交的扣减，两个请求都通过预检；后到的请求在真正执行 UPDATE 时才发现余额不足，`createPointRecord` 因更新行数为 0 抛 `USER_POINT_NOT_ENOUGH` 并回滚事务。调用方需把该错误码视为正常业务失败处理，而不是系统异常。另外写入流水时的 `totalPoint` 是扣减后重新 `getUser` 读取的，并非用预检时的旧积分推算。
 
-**原因**: 余额校验在 Java 层"先读后算"（`getUser` 取 `point` 再加变动值），而 `MemberUserMapper#updatePointDecr` 的 SQL 是 `point = point + 负数`，没有 `point + ? >= 0` 的条件保护；`updatePointIncr`/`updatePointDecr` 均用 `setSql(" point = point + " + incrCount)` 字符串拼接，入参必须保证是 `Integer`。
+**原因**: 余额校验（`getUser` 读 `point` + 变动值）与扣减是两次独立操作；但 `MemberUserMapper#updatePointDecr` 的 UPDATE 已带 `.ge(MemberUserDO::getPoint, -(long) incrCount)` 条件（`point >= 扣减额` 才更新，且用 `long` 取反避免溢出），**并发下不会把 `point` 扣成负数**。`updatePointIncr`/`updatePointDecr` 均用 `setSql(" point = point + " + incrCount)` 字符串拼接，入参必须保证是 `Integer`（方法内已用 `Assert.isTrue` 限制正负号）。
 
-**解决**: 给扣减语句加余额条件并以更新行数判断成败，例如：
+**解决**: 依赖 UPDATE 的余额条件兜底（源码已实现，对应提交 `fix(member): 防止并发扣减积分透支并修正流水余额`）；调用方捕获 `1_004_001_003` 按业务失败提示用户，不要当 500 处理。
 
-```java
-LambdaUpdateWrapper<MemberUserDO> wrapper = new LambdaUpdateWrapper<MemberUserDO>()
-        .setSql(" point = point + " + incrCount)
-        .eq(MemberUserDO::getId, id)
-        .apply("point + {0} >= 0", incrCount);
-```
+### 3.3 createPointRecord 未校验用户存在，用户不存在时 NPE
+
+**问题**: `MemberPointRecordServiceImpl#createPointRecord` 直接 `memberUserService.getUser(userId).getPoint()`，用户不存在时抛空指针（HTTP 500），而不是 `USER_NOT_EXISTS`。管理端"更新积分"（`MemberUserController#updateUserPoint`）传入不存在的用户编号时会触发。
+
+**原因**: 方法假定 `userId` 一定有效，未对 `getUser` 结果判空。
+
+**解决**: 调用前先校验用户存在；或在方法内对 `getUser` 结果判空并抛 `USER_NOT_EXISTS` / `USER_POINT_NOT_ENOUGH`。
 
 ## 4. 签到相关
 
@@ -91,6 +92,16 @@ LambdaUpdateWrapper<MemberUserDO> wrapper = new LambdaUpdateWrapper<MemberUserDO
 
 **解决**: 变更经验必须走 `MemberLevelService#addExperience` / `updateUserLevel`，不要直接 update `member_user.experience`（否则记录缺失、等级不联动）；需要等级变更通知时在 `notifyMemberLevelChange` 中补实现。
 
+### 5.3 member_level_record.experience 语义不统一
+
+**问题**: 同一个 `experience` 字段在不同写入路径含义不同，按"变动经验"或"等级升级经验"理解历史记录都可能出错：
+- 管理员调整（`MemberLevelService#updateUserLevel`）：先 `MemberLevelRecordConvert#copyTo` 复制等级配置，随后 `setExperience(目标等级升级经验 - 会员当前经验)` 覆盖，最终写入的是**变动经验（可为负）**，`userExperience` 为调整后的经验；
+- 自动升级（`MemberLevelService#addExperience`）：先以变动经验构造记录，命中新等级后 `copyTo(newLevel, levelRecord)` 把 `experience` 覆盖成**该等级的升级经验（正数）**。
+
+**原因**: `MemberLevelRecordDO#experience` 的 Javadoc 写"升级经验"（冗余 `MemberLevelDO#experience`），但 `updateUserLevel` 又把它当变动值使用，两条路径未统一。
+
+**解决**: 读历史记录时结合 `description`/`remark` 与 `userExperience` 判断语义；如需严格区分，新增独立列（如 `changeExperience`）而非复用 `experience`。
+
 ## 6. 权限与接口相关
 
 ### 6.1 权限标识与接口元数据三处不一致
@@ -129,3 +140,13 @@ LambdaUpdateWrapper<MemberUserDO> wrapper = new LambdaUpdateWrapper<MemberUserDO
 **原因**: `saveConfig` 是"先 `getConfig()` 查、无则 insert"的模式，`getConfig()` 取 `selectList()` 第一条（`CollectionUtils.getFirst`），无唯一约束兜底；一旦产生多条，之后永远只有第一条生效。
 
 **解决**: 给 `member_config` 加单行约束（固定主键 + `INSERT ... ON DUPLICATE KEY UPDATE`），或保存时加分布式锁。
+
+## 8. 多数据库兼容相关
+
+### 8.1 "取最近一条签到记录"已去除 MySQL 专属 limit 1，改用 selectFirstOne 生成方言 SQL
+
+**问题**: 早期 `MemberSignInRecordMapper#selectLastRecordByUserId` 用 `QueryWrapper#last("limit 1")` 取最近一条签到记录，属于 MySQL 专属语法，在 Oracle / SQL Server / PostgreSQL 等数据库下会报错；该方法的调用方是签到动作与服务端连续签到统计（`getSignInRecordSummary`），影响签到主流程。
+
+**原因**: 现实现改为 `selectFirstOne(new LambdaQueryWrapperX<MemberSignInRecordDO>().eq(MemberSignInRecordDO::getUserId, userId).orderByDesc(MemberSignInRecordDO::getCreateTime))`。`BaseMapperX#selectFirstOne(Wrapper)` 内部通过 `selectListLimitN(wrapper, 1)` 交给 MyBatis-Plus 分页插件，按执行时连接的数据库类型生成 `LIMIT` / `ROWNUM` / `OFFSET FETCH` 等语句，并且不执行 COUNT。
+
+**解决**: 自定义"取最新/首条"查询时不要再用 `last("limit 1")`，改用 `selectFirstOne` / `selectListLimitN`；`selectFirstOne(Wrapper)` 保留 queryWrapper 的排序，SQL Server 分页语句要求必须带 `ORDER BY`，所以一定要设置排序字段。

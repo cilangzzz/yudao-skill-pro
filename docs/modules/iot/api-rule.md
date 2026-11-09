@@ -27,7 +27,7 @@
 | id | Long | 否 | - | 数据流转规则编号（新增不传，修改必传） |
 | name | String | 是 | @NotEmpty | 数据流转规则名称 |
 | description | String | 否 | - | 数据流转规则描述 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 规则状态（1 开启、0 禁用） |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 规则状态（0 开启、1 禁用） |
 | sourceConfigs | List\<SourceConfig\> | 是 | @NotEmpty | 数据源配置数组 |
 | sinkIds | List\<Long\> | 是 | @NotEmpty | 数据目的编号数组，关联 IotDataSinkDO |
 
@@ -37,7 +37,7 @@
 |---|---|---|---|---|
 | method | String | 是 | @NotEmpty | 消息方法，取 IotDeviceMessageMethodEnum 中的上行（upstream）部分 |
 | productId | Long | 否 | - | 产品编号，关联 IotProductDO |
-| deviceId | Long | 是 | @NotEmpty | 设备编号，关联 IotDeviceDO；为 DEVICE_ID_ALL（-1）时表示全部设备 |
+| deviceId | Long | 是 | @NotEmpty | 设备编号，关联 IotDeviceDO；为 DEVICE_ID_ALL（0）时表示全部设备 |
 | identifier | String | 否 | - | 标识符；物模型时对应 IotThingModelDO.identifier |
 
 **响应**: CommonResult\<Long\> —— 新建的规则编号
@@ -124,7 +124,7 @@
 | id | Long | 数据流转规则编号 |
 | name | String | 数据流转规则名称 |
 | description | String | 数据流转规则描述 |
-| status | Integer | 规则状态（1 开启、0 禁用） |
+| status | Integer | 规则状态（0 开启、1 禁用） |
 | sourceConfigs | List\<SourceConfig\> | 数据源配置数组（结构见 1.1） |
 | sinkIds | List\<Long\> | 数据目的编号数组 |
 | createTime | LocalDateTime | 创建时间 |
@@ -172,11 +172,34 @@
 | id | Long | 否 | - | 数据目的编号（新增不传，修改必传） |
 | name | String | 是 | @NotEmpty | 数据目的名称 |
 | description | String | 否 | - | 数据目的描述 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 数据目的状态（1 开启、0 禁用） |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 数据目的状态（0 开启、1 禁用） |
 | type | Integer | 是 | @NotNull、@InEnum(IotDataSinkTypeEnum) | 数据目的类型：1 HTTP、2 TCP、3 WebSocket、10 MQTT、20 Database、21 Redis、30 RocketMQ、31 RabbitMQ、32 Kafka |
 | config | IotAbstractDataSinkConfig | 是 | @NotNull | 数据目的配置（多态对象，见下方说明） |
 
 **config 多态说明**: `IotAbstractDataSinkConfig` 含 `type`（String）字段，Jackson 按 `type` 属性反序列化为对应子类：1→IotDataSinkHttpConfig、2→IotDataSinkTcpConfig、3→IotDataSinkWebSocketConfig、10→IotDataSinkMqttConfig、20→IotDataSinkDatabaseConfig、21→IotDataSinkRedisConfig、30→IotDataSinkRocketMQConfig、31→IotDataSinkRabbitMQConfig、32→IotDataSinkKafkaConfig。
+
+**Database 目的配置 (IotDataSinkDatabaseConfig)**:
+
+| 字段 | 类型 | 校验规则 | 说明 |
+|-----|------|---------|------|
+| jdbcUrl | String | - | JDBC 连接地址，支持 MySQL、PostgreSQL、Oracle、SQL Server、DM 达梦等；HikariCP 按 URL 自动加载驱动 |
+| username | String | - | 数据库用户名 |
+| password | String | - | 数据库密码 |
+| tableName | String | @NotEmpty、@Pattern(TABLE_NAME_REGEX) | 目标表名；只允许字母、数字、下划线且不以数字开头，支持可选 `schema.table` 格式 |
+
+> Database 目的写入固定列 `id、device_id、tenant_id、method、report_time、data(JSON)、create_time`。表名在保存时按 `TABLE_NAME_REGEX` 校验，执行时再次校验（防止历史非法表名被拼接到 SQL）。`create_time` 使用外部数据库时间：Oracle、Microsoft SQL Server 用 `CURRENT_TIMESTAMP`，其它数据库用 `NOW()`。
+
+**HTTP 目的配置 (IotDataSinkHttpConfig)**:
+
+| 字段 | 类型 | 校验规则 | 说明 |
+|-----|------|---------|------|
+| url | String | - | 请求 URL |
+| method | String | - | 请求方法 |
+| headers | Map&lt;String, String&gt; | - | 请求头 |
+| query | Map&lt;String, String&gt; | - | 请求参数 |
+| body | String | - | 请求体 |
+
+> HTTP 目的使用独立私有 RestTemplate 实例（不复用全局共享实例），连接超时 3 秒、读取超时 5 秒，避免状态变更消息在事务内长时间持有设备行锁与数据库连接。
 
 **响应**: CommonResult\<Long\> —— 新建的数据目的编号
 
@@ -249,7 +272,7 @@
 | id | Long | 数据目的编号 |
 | name | String | 数据目的名称 |
 | description | String | 数据目的描述 |
-| status | Integer | 数据目的状态（1 开启、0 禁用） |
+| status | Integer | 数据目的状态（0 开启、1 禁用） |
 | type | Integer | 数据目的类型（枚举同 2.1） |
 | config | IotAbstractDataSinkConfig | 数据目的配置（多态对象，见 2.1） |
 | createTime | LocalDateTime | 创建时间 |
@@ -317,7 +340,7 @@
 | id | Long | 否 | - | 场景编号（新增不传，修改必传） |
 | name | String | 是 | @NotEmpty | 场景名称 |
 | description | String | 否 | - | 场景描述 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 场景状态（1 开启、0 禁用） |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 场景状态（0 开启、1 禁用） |
 | triggers | List\<Trigger\> | 是 | @NotEmpty | 触发器数组 |
 | actions | List\<Action\> | 是 | @NotEmpty | 执行器数组 |
 
@@ -327,7 +350,7 @@
 |---|---|---|---|---|
 | type | Integer | 是 | - | 触发类型：1 设备上下线（DEVICE_STATE_UPDATE）、2 属性上报（DEVICE_PROPERTY_POST）、3 事件上报（DEVICE_EVENT_POST）、4 服务调用（DEVICE_SERVICE_INVOKE）、100 定时（TIMER） |
 | productId | Long | 否 | - | 产品编号，关联 IotProductDO；定时触发器无需 |
-| deviceId | Long | 否 | - | 设备编号，关联 IotDeviceDO；DEVICE_ID_ALL（-1）表示全部设备；定时触发器无需 |
+| deviceId | Long | 否 | - | 设备编号，关联 IotDeviceDO；DEVICE_ID_ALL（0）表示全部设备；定时触发器无需 |
 | identifier | String | 否 | - | 物模型标识符，对应 IotThingModelDO.identifier |
 | operator | String | 否 | - | 操作符，枚举 IotSceneRuleConditionOperatorEnum（=、in、not in、between、not between、like、date_time_>、date_time_<、date_time_between、time_>、time_<、time_between） |
 | value | String | 否 | - | 参数（属性值/在线状态）；多个值用 "," 分隔（如 in、between） |
@@ -396,7 +419,7 @@
 | 字段 | 类型 | 必填 | 校验规则 | 说明 |
 |---|---|---|---|---|
 | id | Long | 是 | @NotNull | 场景联动编号 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 目标状态（1 开启、0 禁用） |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 目标状态（0 开启、1 禁用） |
 
 **响应**: CommonResult\<Boolean\> —— 固定返回 true
 
@@ -449,7 +472,7 @@
 | id | Long | 场景编号 |
 | name | String | 场景名称 |
 | description | String | 场景描述 |
-| status | Integer | 场景状态（1 开启、0 禁用） |
+| status | Integer | 场景状态（0 开启、1 禁用） |
 | triggers | List\<Trigger\> | 触发器数组（结构见 3.1） |
 | actions | List\<Action\> | 执行器数组（结构见 3.1） |
 | lastTriggerTime | LocalDateTime | 最后触发时间 |
@@ -516,4 +539,4 @@
 - 设备消息触发（executeSceneRuleByDevice）：通过设备缓存获取租户上下文 → 按产品/设备匹配启用中的场景（缓存）→ 逐个触发器调用 IotSceneRuleMatcherManager 匹配 + 评估条件组（组间"或"、组内"且"）→ 执行匹配到的 IotSceneRuleAction 动作 → 更新 lastTriggerTime
 - 定时触发（executeSceneRuleByTimer）：校验场景存在、启用且含 TIMER 触发器 → 评估条件组（无条件组直接执行）→ 在场景租户上下文中执行动作
 
-**错误码段说明**: 本域错误码位于 1-050-010 / 1-050-011 / 1-050-012 段；`yudao-module-iot-gateway` 的 ErrorCodeConstants（1-051-000-000 段）属于设备认证（DEVICE_AUTH_FAIL、DEVICE_TOKEN_EXPIRED）与设备信息（DEVICE_NOT_EXISTS），与本域接口无直接关联。
+**错误码段说明**: 本域错误码位于 1-050-010 / 1-050-011 / 1-050-012 段；`yudao-module-iot-gateway` 的 ErrorCodeConstants（1_051_000_000 段）包含设备认证（DEVICE_AUTH_FAIL、DEVICE_TOKEN_EXPIRED）、设备信息（DEVICE_NOT_EXISTS）与设备透传/数据解析脚本（1_051_003_000 段），与本域接口无直接关联。

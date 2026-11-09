@@ -166,7 +166,7 @@ CodegenColumnRespVO 字段：
 
 **业务逻辑**:
 1. 遍历表名数组，逐个表执行导入（事务内）。
-2. 从数据源获取表的 TableInfo 结构；校验表存在（CODEGEN_IMPORT_TABLE_NULL）、表注释非空、字段非空、每个字段注释非空。
+2. 从数据源获取表的 TableInfo 结构；解析阶段按数据源方言处理字段类型——数据源 URL 解析为神通 OSCAR（DbType.OSCAR）时注入自定义 ITypeConvertHandler，把 JDBC 类型为 OTHER 的 TEXT 字段按 String 处理（避免生成 Object 类型），其它类型沿用 MyBatis-Plus Generator 默认转换；随后校验表存在（CODEGEN_IMPORT_TABLE_NULL）、表注释非空、字段非空、每个字段注释非空。
 3. 校验同数据源下该表名未被导入过，否则抛出"表定义已经存在"。
 4. 通过 CodegenBuilder 将 TableInfo 构建为 CodegenTableDO（类名驼峰转换、模块/业务名推断等），设置数据源编号、默认生成场景为管理后台、前端类型取 CodegenProperties 配置、作者为当前登录用户昵称，插入 codegen_table。
 5. 通过 CodegenBuilder 构建字段列表 CodegenColumnDO（按字段名后缀推断查询条件与显示类型，如 name→LIKE、time/date→BETWEEN、status/sex→RADIO、image/file→上传控件、content/description→富文本等）；若无主键则将第一个字段视为主键，批量插入 codegen_column。
@@ -273,7 +273,7 @@ CodegenColumnSaveReqVO 字段：
 
 **业务逻辑**:
 1. 校验表定义存在，否则抛出"表定义不存在"。
-2. 从原数据源重新读取该表的最新 TableInfo 结构。
+2. 从原数据源重新读取该表的最新 TableInfo 结构（同样应用神通 OSCAR 的 TEXT→String 类型转换）。
 3. 校验表注释非空、字段非空、字段注释非空。
 4. 将数据库字段与已导入字段逐个对比（JDBC 类型、是否可空、是否主键、注释、字段位置），计算需要【修改】（删除后重建）的字段名集合。
 5. 计算【删除】的字段：数据库中已不存在、或属于需重建的字段。
@@ -358,7 +358,7 @@ CodegenColumnSaveReqVO 字段：
 1. 校验表定义存在，否则抛出"表定义不存在"；校验字段列表非空，否则抛出"字段义不存在"。
 2. 若模板类型为【主子表的主表】，查询其全部子表；无子表则抛出"主表生成代码失败，原因：它没有子表"。
 3. 逐个校验每个子表的关联字段（subJoinColumnId）存在，否则抛出"子表的字段(id={})不存在"。
-4. 根据数据源 URL 解析数据库类型 DbType。
+4. 根据数据源 URL 解析数据库类型 DbType（MySQL/OceanBase、Oracle、达梦 DM、神通 OSCAR、PostgreSQL、人大金仓 KingbaseES、SQL Server 等），菜单 SQL 模板按 DbType 输出对应方言分支（见 3.3）。
 5. 调用 CodegenEngine 执行生成：基于 Velocity 模板引擎，使用后端模板（Controller/VO/Service/Mapper/DO/错误码等）与前端模板渲染，填充表、字段、主子表等上下文变量，输出 Map&lt;文件路径, 代码&gt;。
 6. 转换为 CodegenPreviewRespVO 列表返回。
 
@@ -402,3 +402,17 @@ CodegenColumnSaveReqVO 字段：
 | 1_001_004_012 | 主表生成代码失败，原因：它没有子表 |
 | 1_001_004_013 | 主子表规范化类名({})重复，请调整主表或子表类名 |
 | 1_001_004_014 | 主子表属性名({})重复，请调整主表字段、子表类名或关联关系 |
+
+### 3.3 生成的菜单 SQL 与数据库方言
+
+生成的 `sql` 模板（`resources/codegen/sql/sql.vm`）按数据源 URL 解析出的 `DbType`（`JdbcUtils.getDbType(url)`）选择菜单 SQL 写法：
+
+| 数据库（DbType） | 菜单 SQL 分支 | 父菜单 ID 获取方式 |
+|------------------|--------------|-------------------|
+| MySQL / OceanBase（MYSQL、OCEAN_BASE） | MySQL 分支 | `LAST_INSERT_ID()` |
+| Oracle / 达梦 DM / 神通 OSCAR（ORACLE、DM、OSCAR） | 序列分支（PL/SQL 块） | `system_menu_seq.CURRVAL` |
+| PostgreSQL / 人大金仓 KingbaseES（POSTGRE_SQL、KINGBASE_ES；openGauss、GaussDB、瀚高由 `JdbcUtils.getDbType` 统一映射为 POSTGRE_SQL） | PostgreSQL 分支 | `lastval()` |
+| SQL Server（SQL_SERVER、SQL_SERVER2005） | SQL Server 分支 | `SCOPE_IDENTITY()` |
+| 其它 | 不支持分支 | 仅输出提示注释，需手工改为对应数据库语法 |
+
+> 神通（OSCAR）本次新增复用 Oracle/达梦的序列分支，并额外输出「`system_menu.id` 需默认使用 `system_menu_seq` 序列」的提示注释。使用前必须先执行 `ALTER TABLE system_menu ALTER COLUMN id SET DEFAULT nextval('system_menu_seq')`，否则生成的菜单 SQL（插入时不指定主键）会失败；数据库还需以 PG 兼容模式创建、`varchar(10240)` 改为 `text`，完整步骤见 `sql/tools/README.md` 的神通章节。神通下 TEXT 字段的 JDBC 类型为 OTHER，只有在数据源 URL 解析为 `DbType.OSCAR` 时才会走自定义类型转换按 String 处理，用其它方式接入会导致导入表结构时 TEXT 列被识别为 Object 类型。

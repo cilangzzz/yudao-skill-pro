@@ -13,7 +13,7 @@
 - `@PreAuthorize('@ss.hasPermission')`
 - `@Operation(summary = ...)`
 
-示例（支付提交接口使用 `@PermitAll` 允许匿名访问）：
+示例（支付提交接口仅要求登录，无 `@PreAuthorize` 资源权限；钱包支付时钱包编号由服务端注入）：
 
 ```java
 @RestController
@@ -22,14 +22,19 @@
 public class PayOrderController {
     @PostMapping("/submit")
     @Operation(summary = "提交支付订单")
-    @PermitAll  // 支付提交允许匿名访问
-    public CommonResult<PayOrderSubmitRespVO> submitOrder(
-            @RequestBody @Valid PayOrderSubmitReqVO reqVO,
-            HttpServletRequest request) {
-        return success(orderService.submitOrder(reqVO, getClientIP(request)));
+    public CommonResult<PayOrderSubmitRespVO> submitPayOrder(@RequestBody PayOrderSubmitReqVO reqVO) {
+        // 钱包支付时，服务端注入当前登录用户的钱包编号，不信任前端传入的 walletId
+        if (Objects.equals(reqVO.getChannelCode(), PayChannelEnum.WALLET.getCode())) {
+            PayWalletDO wallet = payWalletService.getOrCreateWallet(getLoginUserId(), getLoginUserType());
+            reqVO.getChannelExtras().put(WalletPayClient.WALLET_ID_KEY, String.valueOf(wallet.getId()));
+        }
+        PayOrderSubmitRespVO respVO = orderService.submitOrder(reqVO, getClientIP());
+        return success(respVO);
     }
 }
 ```
+
+> 该接口**没有** `@PermitAll`（必须登录），也**没有** `@PreAuthorize`（不需要资源权限标识），详见 [pitfalls.md](pitfalls.md) 的 5.2 节。
 
 ### Service 层规范
 
@@ -242,6 +247,10 @@ public PayClientFactoryImpl() {
 - 支付订单需要设置过期时间，定时任务关闭过期订单
 - 退款金额累计不能超过支付金额，在 Service 层进行校验
 - 客户端配置支持热刷新，通过 refresh 方法更新配置
+- 涉及资金变动的接口必须加 `@PreAuthorize` 权限校验（如钱包充值退款复用 `pay:wallet:update-balance`），不能只要求登录
+- 业务回调的第一道校验是「回调单号 = 业务单据绑定的单号」，再校验金额与状态，防止其它支付应用中相同商户订单号 + 相同金额的支付单串单
+- 钱包类资金操作要同时防并发：发起侧用 `selectOneForUpdate`（`SELECT ... FOR UPDATE`）加行锁串行化，回调侧用「以旧状态为条件的乐观更新（如 `updateByIdAndRefunded(id, WAITING, ...)`）→ 更新成功后再动资金」的顺序，更新数为 0 即视为并发重复处理直接返回
+- 支付通知的重试上限与间隔下标要成对维护：算上首次通知共 `NOTIFY_FREQUENCY.length + 1` 次，第 N 次失败取第 N 个间隔（下标 `N - 1`），第 9 次失败才置 `FAILURE`
 
 ## 模块依赖
 
@@ -249,17 +258,18 @@ public PayClientFactoryImpl() {
 
 | 模块 | 依赖 API | 用途 |
 |------|----------|------|
-| yudao-module-system | TenantApi | 获取租户信息 |
-| yudao-module-member | MemberUserApi | 获取用户信息（钱包支付） |
+| yudao-module-system | `SocialClientApi`（`cn.iocoder.yudao.module.system.api.social`） | 钱包充值成功后发送微信小程序订阅消息、上传虚拟物品发货信息（`PayWalletRechargeServiceImpl`） |
+
+> pay 模块的 pom 只依赖 `yudao-module-system`，未依赖 member 等其它业务模块；租户隔离通过 `TenantBaseDO` + `TenantUtils.execute` 实现，不直接调用 `TenantApi`。
 
 ### 外部依赖（第三方库）
 
 | 依赖 | 版本 | 用途 |
 |------|------|------|
-| alipay-sdk-java | 4.x | 支付宝支付 SDK |
-| weixin-java-pay | 4.x | 微信支付 SDK（WxJava） |
-| hutool-all | 5.x | Java 工具库 |
-| mybatis-plus | 3.x | ORM 框架 |
+| alipay-sdk-java | 4.40.607.ALL | 支付宝支付 SDK（pay 模块 pom 显式声明，覆盖依赖管理中的 4.40.1044.ALL） |
+| weixin-java-pay | 4.8.6-20261010.094603 | 微信支付 SDK（WxJava，版本取自 `weixin-java.version`） |
+| hutool-all | 5.8.48 | Java 工具库（`hutool-5.version`） |
+| mybatis-plus | 3.x | ORM 框架（由 `yudao-spring-boot-starter-mybatis` 统一管理） |
 
 > Framework starter（security、mybatis、redis、job、excel、tenant 等）与下游消费方（mall/trade）的整体依赖关系，参见 [README.md](README.md) 的「依赖关系」章节。
 

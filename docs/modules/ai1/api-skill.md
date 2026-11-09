@@ -199,7 +199,7 @@
 - **权限**: ai1:skill:query
 - **说明**: 获得 SKILL 分页
 
-**请求参数 (Ai1SkillPageReqVO)**: 字段见 [1.2](#12-ai1skillpagereqvosskill-分页请求)
+**请求参数 (Ai1SkillPageReqVO)**: 字段见 [1.2](#12-ai1skillpagereqvoskill-分页请求)
 
 **响应**: CommonResult&lt;PageResult&lt;Ai1SkillRespVO&gt;&gt;，字段见 [1.3](#13-ai1skillrespvoskill-响应)
 
@@ -434,7 +434,7 @@ ${yudao.ai1.skill.root}/            # 默认 {user.home}/yudao-ai1/skills
 
 ## 5. 错误码汇总
 
-ai1 模块错误码统一使用 1-041-000-000 段（`Ai1ErrorCodeConstants`），skill 域占 005/006 两个子段（相邻 004 为 MCP、007 为 Agent）：
+ai1 模块错误码统一使用 1_041_000_000 段（`Ai1ErrorCodeConstants`），skill 域占 005/006 两个子段（相邻 004 为 MCP、007 为 Agent）：
 
 | 错误码 | 常量 | 说明 |
 |-------|------|------|

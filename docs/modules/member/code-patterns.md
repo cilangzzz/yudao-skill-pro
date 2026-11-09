@@ -61,17 +61,27 @@ public class MemberPointRecordServiceImpl implements MemberPointRecordService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void createPointRecord(Long userId, Integer point, MemberPointBizTypeEnum bizType, String bizId) {
-        // 1. 校验用户积分余额
+        if (point == 0) {
+            return;
+        }
+        // 1. 校验用户积分余额（Java 预检，不足时仅记日志后跳过；用户不存在会 NPE）
         MemberUserDO user = memberUserService.getUser(userId);
         int totalPoint = ObjectUtil.defaultIfNull(user.getPoint(), 0) + point;
         if (totalPoint < 0) {
+            log.error("[createPointRecord][userId({}) point({}) ... {}]", userId, point, USER_POINT_NOT_ENOUGH);
+            return;
+        }
+        // 2. 更新用户积分（SQL 自增/自减；updatePointDecr 带余额条件，并发不足时返回 false）
+        boolean success = memberUserService.updateUserPoint(userId, point);
+        if (!success) {
             throw exception(USER_POINT_NOT_ENOUGH);
         }
-        // 2. 更新用户积分
-        memberUserService.updateUserPoint(userId, point);
-        // 3. 增加积分记录
+        // 重新读取变动后积分，避免并发下写入旧快照
+        totalPoint = memberUserService.getUser(userId).getPoint();
+        // 3. 增加积分记录（标题/描述来自枚举）
         MemberPointRecordDO record = new MemberPointRecordDO()
                 .setUserId(userId).setBizId(bizId).setBizType(bizType.getType())
+                .setTitle(bizType.getName()).setDescription(StrUtil.format(bizType.getDescription(), point))
                 .setPoint(point).setTotalPoint(totalPoint);
         memberPointRecordMapper.insert(record);
     }
@@ -88,12 +98,25 @@ public interface MemberUserMapper extends BaseMapperX<MemberUserDO> {
     default MemberUserDO selectByMobile(String mobile) {
         return selectOne(MemberUserDO::getMobile, mobile);
     }
-    default int updatePointIncr(Long id, Integer point) {
-        return update(new MemberUserDO().setPoint(point),
-                new LambdaQueryWrapper<MemberUserDO>().eq(MemberUserDO::getId, id));
+    // 增加积分：必须用 SQL 自增，不能 setPoint(旧值 + incr)，否则并发会丢失更新
+    default void updatePointIncr(Long id, Integer incrCount) {
+        Assert.isTrue(incrCount > 0);
+        update(null, new LambdaUpdateWrapper<MemberUserDO>()
+                .setSql(" point = point + " + incrCount)
+                .eq(MemberUserDO::getId, id));
+    }
+    // 减少积分：incrCount 传负数，额外加 point >= 扣减额 条件，并发下不会扣成负数（返回 0 行）
+    default int updatePointDecr(Long id, Integer incrCount) {
+        Assert.isTrue(incrCount < 0);
+        return update(null, new LambdaUpdateWrapper<MemberUserDO>()
+                .setSql(" point = point + " + incrCount) // 负数，所以用 + 号
+                .eq(MemberUserDO::getId, id)
+                .ge(MemberUserDO::getPoint, -(long) incrCount));
     }
 }
 ```
+
+> 注意：`updatePointIncr` / `updatePointDecr` 用字符串拼接 `setSql`，入参必须有 `Assert` 校验符号；`setSql` 直接拼进 SQL，不能接收未校验的外部字符串。
 
 ### 异常处理
 
@@ -118,23 +141,30 @@ public interface MemberUserMapper extends BaseMapperX<MemberUserDO> {
 
 积分与经验来源通过枚举定义（开闭原则：新增来源只需追加枚举值）：
 
-**MemberPointBizTypeEnum（积分业务类型）**
+**MemberPointBizTypeEnum（积分业务类型，`enums/point` 包）**
 
-| type | name | 说明 | 是否增加积分 |
+| type | name | 说明 | add（是否增加积分） |
 |-----|------|------|------------|
-| 1 | SIGN | 签到 | 是 |
-| 2 | ADMIN | 管理员修改 | 是 |
-| 11 | ORDER_USE | 订单积分抵扣 | 否 |
-| 21 | ORDER_GIVE | 订单积分奖励 | 是 |
+| 1 | SIGN | 签到 | true |
+| 2 | ADMIN | 管理员修改 | true |
+| 11 | ORDER_USE | 订单积分抵扣 | false |
+| 12 | ORDER_USE_CANCEL | 订单积分抵扣（整单取消） | true |
+| 13 | ORDER_USE_CANCEL_ITEM | 订单积分抵扣（单个退款） | true |
+| 21 | ORDER_GIVE | 订单积分奖励 | true |
+| 22 | ORDER_GIVE_CANCEL | 订单积分奖励（整单取消） | false |
+| 23 | ORDER_GIVE_CANCEL_ITEM | 订单积分奖励（单个退款） | false |
 
-**MemberExperienceBizTypeEnum（经验业务类型）**
+**MemberExperienceBizTypeEnum（经验业务类型，`enums` 包根目录）**
 
-| type | name | 说明 | 是否增加经验 |
+| type | name | 说明 | add（是否增加经验） |
 |-----|------|------|------------|
-| 0 | ADMIN | 管理员调整 | 是 |
-| 1 | INVITE_REGISTER | 邀新奖励 | 是 |
-| 4 | SIGN_IN | 签到奖励 | 是 |
-| 11 | ORDER_GIVE | 下单奖励 | 是 |
+| 0 | ADMIN | 管理员调整 | true |
+| 1 | INVITE_REGISTER | 邀新奖励 | true |
+| 4 | SIGN_IN | 签到奖励 | true |
+| 5 | LOTTERY | 抽奖奖励 | true |
+| 11 | ORDER_GIVE | 下单奖励 | true |
+| 12 | ORDER_GIVE_CANCEL | 下单奖励（整单取消） | false |
+| 13 | ORDER_GIVE_CANCEL_ITEM | 下单奖励（单个退款） | false |
 
 ## 扩展指南
 
@@ -166,7 +196,7 @@ public interface MemberUserMapper extends BaseMapperX<MemberUserDO> {
 
 - 积分变更使用 `MemberPointApi`，保证记录完整性；
 - 经验变更使用 `MemberLevelApi`，自动触发等级计算；
-- 用户创建后发送 MQ 消息，便于其他模块处理；
+- 用户创建后发布 `MemberUserCreateMessage`（Spring ApplicationEvent，事务提交后发布），便于其他模块监听处理；跨服务部署时应改为 MQ；
 - 等级经验配置需确保递增顺序，系统会自动校验；
 - 积分抵扣配置通过 `MemberConfigApi` 获取，支持动态调整；
 - 签到规则配置支持连续签到奖励递增；
@@ -210,9 +240,9 @@ controller 层（admin/app 双端）与 api 层已在 [README.md](README.md) 的
 |-----|------|------|
 | DTO 转换模式 | api/*/dto/*.java | API 层使用 DTO 隔离内部 DO，保护领域模型 |
 | 策略模式（枚举实现） | enums/point/MemberPointBizTypeEnum.java | 定义积分业务类型，支持多种积分来源 |
-| 模板方法 | service/level/MemberLevelServiceImpl.java | 等级变更流程：记录变更 → 更新经验 → 计算新等级 → 通知用户 |
+| 模板方法 | service/level/MemberLevelServiceImpl.java | 经验变更流程：写经验记录 → `calculateNewLevel` 匹配新等级 → 命中则写等级记录并更新用户等级/经验 → 通知用户 |
 | Facade 模式 | api/*ApiImpl.java | API 实现类封装 Service 调用，简化跨模块交互 |
-| 观察者模式（MQ） | mq/producer/user/MemberUserProducer.java | 用户创建后发送消息，解耦后续处理逻辑 |
+| 观察者模式（Spring 事件） | mq/producer/user/MemberUserProducer.java | 用户创建后发布 `MemberUserCreateMessage` ApplicationEvent（事务提交后），解耦后续处理 |
 
 ## 模块依赖
 
@@ -222,15 +252,16 @@ controller 层（admin/app 双端）与 api 层已在 [README.md](README.md) 的
 |-----|---------|------|
 | system | SmsCodeApi | 短信验证码校验（登录、修改手机、重置密码） |
 | system | SocialClientApi | 社交登录（微信、QQ 等）、微信小程序登录 |
-| infra | 文件存储 | 头像上传存储 |
+| system | LoginLogApi / OAuth2TokenCommonApi | 登录日志、令牌管理（登录/登出） |
+| infra | （pom 中声明依赖，当前源码未直接调用） | member 业务代码未引用 FileApi 等 infra 能力 |
 
 外部依赖（第三方库）：
 
 | 依赖 | 版本 | 用途 |
 |-----|------|------|
 | spring-security-crypto | Spring Boot 自带 | 密码加密（BCryptPasswordEncoder） |
-| mybatis-plus | 3.x | ORM 框架，数据访问增强 |
-| hutool | 5.x | 工具类库 |
+| mybatis-plus | 3.5.17 | ORM 框架，数据访问增强 |
+| hutool | 5.8.48 | 工具类库 |
 
 > 完整的依赖清单（framework starter、下游 mall 系列消费方）见 [README.md](README.md) 的「依赖关系」一节。
 

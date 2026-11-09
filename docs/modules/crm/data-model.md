@@ -406,7 +406,7 @@ CRM 产品表，被商机明细与合同明细引用。
 
 #### CrmProductCategoryDO (crm_product_category)
 
-产品分类表，parentId 自关联成树，源码常量限定层级为 2 级（`CATEGORY_LEVEL = 2`，根分类 `parentId = 0`）。
+产品分类表，parentId 自关联成树；根分类 `parentId = 0`（`CrmProductCategoryDO.PARENT_ID_NULL = 0L`）。层级限制（最多 2 级）由 Service 校验实现：父分类不能是二级分类（`PRODUCT_CATEGORY_PARENT_NOT_FIRST_LEVEL`），而非独立常量。
 
 | 字段 | 类型 | 数据库列 | 说明 |
 |-----|------|---------|-----|

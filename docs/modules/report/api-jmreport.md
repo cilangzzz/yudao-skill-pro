@@ -9,7 +9,7 @@
 
 **本域无 yudao 自研 Controller**。全部 HTTP 端点由 `JmReportConfiguration` 的 `@ComponentScan("org.jeecg.modules.jmreport")` 扫描积木包注册，端点明细定义在 starter 内部（不在本仓库源码中），故按端点组说明。本模块自身暴露给 starter 的是一组**认证/权限/租户桥接回调**（第 2、3 节），starter 在处理 HTTP 请求时回调它们完成适配。
 
-前置入口（system_menu）：`207 报表管理` 下挂 `208 报表设计器`（前端组件 `report/jmreport/index`）与 `919 仪表盘设计器`（前端组件 `report/jmreport/bi`），设计器页面内所有数据请求走上述路径前缀。
+前置入口（system_menu）：`207 报表管理` 下挂 `208 积木报表`（前端组件 `report/jmreport/index`）与 `919 积木仪表盘`（前端组件 `report/jmreport/bi`），设计器页面内所有数据请求走上述路径前缀。
 
 ## 1. Starter 暴露的端点组
 
@@ -27,12 +27,12 @@
 1. 请求进入后 Spring Security 因 `permitAll` 不做拦截，由 starter 回调 `JmReportTokenServiceImpl`（`JmReportTokenServiceI` 实现）完成认证。
 2. `verifyToken` 校验积木前端传递的 `X-Access-Token`（见 2.1），通过后 `LoginUser` 写入 Spring Security 上下文。
 3. 租户上下文通过 `getTenantId` 回调补齐（积木前端请求不携带 `tenant-id` Header）；`application.yaml` 中 `/jmreport/*` 已加入 `yudao.tenant.ignore-urls`。
-4. 设计器内数据源、数据集等管理操作按 `getPermissions` 返回的 drag 权限指令鉴权（见 2.5）。
+4. 设计器内数据源、数据集等管理操作按 `getPermissions` 返回的权限指令鉴权（见 2.5）。
 
 ### 1.2 积木仪表盘端点组 /drag/** 与 /jimubi/**
 
 - **路径**: `/drag/**`（设计器数据接口）、`/jimubi/**`（设计器前端资源）
-- **权限**: 已认证（同 1.1：Spring Security `permitAll` + 回调认证；drag 权限指令见 2.5）
+- **权限**: 已认证（同 1.1：Spring Security `permitAll` + 回调认证；drag、jmreport 权限指令见 2.5）
 - **说明**: JimuBI 大屏/仪表盘设计器能力，对应管理后台菜单「报表管理 → 仪表盘设计器」。
 
 **请求参数**: 无（同 1.1，端点由 starter 内部定义）
@@ -43,7 +43,7 @@
 1. 请求进入后由 starter 回调 `JmReportTokenServiceImpl` 完成 Token 校验与登录用户注入。
 2. 字典、分类树、用户/部门字典等扩展数据通过 `IOnlDragExternalService` 回调获取（见 3.1，当前为占位实现）。
 3. 设计器操作日志通过 `addLog` 回调记录（见 3.1，当前为空实现）。
-4. 超管用户获得全部 9 个 drag 权限指令（数据源/数据集/回收站等管理操作），普通用户由积木自身权限体系控制。
+4. 超管用户获得 `getPermissions` 返回的全部权限指令（drag 仪表盘 18 个 + jmreport 积木报表 33 个，共 51 个，见 2.5），普通用户由积木自身权限体系控制。
 
 ## 2. 认证桥接回调（JmReportTokenServiceImpl）
 
@@ -107,7 +107,7 @@
 **业务逻辑**:
 1. 从 Spring Security 上下文取 `LoginUser`，为 null 返回 null（`/jmreport/**` 纯前端地址不走 `buildLoginUserByToken` 逻辑）。
 2. 设置租户上下文 `TenantContextHolder.setTenantId(loginUser.getTenantId())`。
-3. 调用 `PermissionApi#hasAnyRoles(userId, RoleCodeEnum.SUPER_ADMIN.getCode())` 判断是否超管；是则返回 `{"admin"}`（映射为积木报表管理员），否则返回 null。
+3. 调用 `PermissionCommonApi#hasAnyRoles(userId, RoleCodeEnum.SUPER_ADMIN.getCode())` 判断是否超管；是则返回 `{"admin"}`（映射为积木报表管理员），否则返回 null。
 
 ### 2.4 租户编号回调 getTenantId
 
@@ -127,7 +127,7 @@
 
 - **路径**: 回调方法，无 HTTP 路径
 - **权限**: 已认证
-- **说明**: 将 yudao 超管映射为积木仪表盘（drag）的全部管理权限指令（适配 prodSafe 安全模式，不处理会导致设计器管理操作被拒）。
+- **说明**: 将 yudao 超管映射为积木报表/积木仪表盘的全部权限指令（适配 prodSafe 安全模式，不处理会导致设计器管理操作被拒）。
 
 **请求参数（方法入参）**:
 
@@ -139,7 +139,9 @@
 
 **业务逻辑**:
 1. 从 Spring Security 上下文取 `LoginUser`，为 null 返回 null；同时设置租户上下文。
-2. 若当前用户具有 `super_admin` 角色（`PermissionApi#hasAnyRoles`），返回全部 9 个 drag 权限指令：`drag:datasource:testConnection`（数据库连接测试）、`drag:datasource:saveOrUpate`（数据源保存）、`drag:datasource:delete`（数据源删除）、`drag:analysis:sql`（SQL 解析）、`drag:design:getTotalData`（展示 Online 表单数据）、`drag:dataset:save`（数据集保存）、`drag:dataset:delete`（数据集删除）、`onl:drag:clear:recovery`（清空回收站）、`onl:drag:page:delete`（数据删除）。
+2. 若当前用户具有 `super_admin` 角色（`PermissionCommonApi#hasAnyRoles`），返回 **51** 个权限指令（源码中逐条硬编码，非 9 个）：
+   - **大屏（仪表盘 BI）按钮权限 18 个**：`drag:datasource:testConnection`、`drag:datasource:saveOrUpate`、`drag:datasource:delete`、`drag:datasource:deleteBatch`、`drag:datasource:queryById`、`drag:dataset:save`、`drag:dataset:delete`、`drag:analysis:sql`、`drag:design:getTotalData`、`drag:iconlib:config`、`onl:drag:clear:recovery`、`onl:drag:page:delete`、`onl:drag:category:delete`、`onl:drag:comp:add`、`onl:drag:comp:edit`、`onl:drag:comp:delete`、`onl:drag:comp:deleteBatch`、`onl:drag:getRawTableData`
+   - **积木报表按钮权限 33 个**：`jmreport:exportJob:plugin`、`jmreport:exportJob:list`、`jmreport:exportJob:save`、`jmreport:exportJob:detail`、`jmreport:exportJob:delete`、`jmreport:exportJob:status`、`jmreport:exportJob:run`、`jmreport:exportJob:export`、`jmreport:map:add`、`jmreport:map:delete`、`jmreport:reportGroup:list`、`jmreport:reportGroup:detail`、`jmreport:reportGroup:save`、`jmreport:reportGroup:delete`、`jmreport:category:add`、`jmreport:category:edit`、`jmreport:category:delete`、`jmreport:category:reduction`、`jmreport:category:completelyDelete`、`jmreport:category:batchMove`、`jmreport:category:folderSort`、`jmreport:datasource:testConnection`、`jmreport:datasource:saveOrUpate`、`jmreport:datasource:delete`、`jmreport:datasource:query`、`jmreport:design:loadTableData`、`jmreport:design:parseField`、`jmreport:design:loadTable`、`jmreport:design:saveDb`、`jmreport:design:filesDataset`、`jmreport:design:editEnhance`、`jmreport:ai:tableMeta`、`jimu:chat2bi:permEdit`
 3. 非超管返回 null，由积木自身权限体系控制。
 
 ### 2.6 API 数据集请求头转换 customApiHeader
@@ -204,7 +206,15 @@ Report 模块安全配置，位于 `framework/security/config/`。
 **业务逻辑**:
 1. 对 `/jmreport/**`（积木报表）、`/drag/**` 与 `/jimubi/**`（积木仪表盘）在 Spring Security 层 `permitAll`。
 2. 认证职责由 `JmReportTokenServiceImpl` 的回调承担（见第 2 节），形成"放行 + 内部回调认证"的组合。
+3. UReport2 集成后新增一条放行规则：`GET /ureport/res/ureport-asserts/**` `permitAll`（UReport2 设计器/预览页静态资源免登录）；其它 `/ureport/**` 请求需要登录，由 `UReport2SecurityFilter` 校验租户与权限，详见 [api-ureport2.md](api-ureport2.md)。
 
 ## 错误码说明
 
-本域无自定义错误码。report 模块错误码段 `1-003-000-000` 仅定义 `GO_VIEW_PROJECT_NOT_EXISTS`（GoView 域，见 api-goview-project.md），积木报表集成域未定义错误码；Token 校验失败复用 yudao OAuth2 体系抛出的 `ServiceException`（如 accessToken 无效/过期），由 `GlobalExceptionHandler`（`@Order(0)`，优先于积木默认异常处理器）统一处理。
+本域无自定义错误码。report 模块的错误码按子域分段：
+
+| 错误码段 | 常量 | 消息 | 归属域 |
+|---------|------|------|--------|
+| 1_003_000_000 | GO_VIEW_PROJECT_NOT_EXISTS | GoView 项目不存在 | GoView 域，见 api-goview-project.md |
+| 1_003_001_000 | UREPORT2_FILE_NOT_EXISTS | UReport2 报表模板不存在 | UReport2 域，见 api-ureport2.md |
+
+积木报表集成域未定义错误码；Token 校验失败复用 yudao OAuth2 体系抛出的 `ServiceException`（如 accessToken 无效/过期），由 `GlobalExceptionHandler`（`@Order(0)`，优先于积木默认异常处理器）统一处理。

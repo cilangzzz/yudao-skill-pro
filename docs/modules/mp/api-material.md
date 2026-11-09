@@ -31,11 +31,11 @@
 
 **业务逻辑**:
 1. 通过 MpServiceFactory 根据 accountId 获取对应公众号的 WxMpService 实例。
-2. 将上传的文件写入服务器临时目录。
+2. 通过 `MpMaterialServiceImpl#createTempFile` 在系统临时目录（`java.io.tmpdir`）以 `mp-material-` 前缀 + 随机文件名（`Files.createTempFile`）独占创建临时文件，再将上传内容 `transferTo` 到该文件；仅当原始扩展名匹配 `^[a-zA-Z0-9]{1,16}$` 时保留该扩展名，否则向 `Files.createTempFile` 传 `null` 后缀（JDK 默认使用 `.tmp`）。不再拼接原始文件名，避免目录穿越覆盖/删除其它文件及并发同名互相影响。
 3. 调用微信 API（mediaUpload）上传临时素材，media_id 优先取 mediaId，否则取 thumbMediaId。
 4. 将文件内容上传到本地文件服务（FileApi），以「mediaId.文件类型」作为存储路径，得到 URL。
 5. 微信上传失败（WxErrorException）时抛出 MATERIAL_UPLOAD_FAIL 异常，并在 finally 中删除临时文件。
-6. 查询公众号账号信息，将 mediaId、类型、URL、账号、文件名写入数据库，permanent 置为 false。
+6. 查询公众号账号信息，将 mediaId、类型、URL、账号及素材名（取 `MultipartFile#getName()`，即 multipart 表单字段名，通常为 `file`，不是原始文件名）写入数据库，permanent 置为 false。
 
 **错误码**:
 
@@ -56,7 +56,7 @@
 | accountId | Long | 是 | @NotNull | 公众号账号的编号 |
 | type | String | 是 | @NotEmpty | 文件类型，参见 WxConsts.MediaFileType 枚举，如 image |
 | file | MultipartFile | 是 | @NotNull | 文件附件 |
-| name | String | 否 | - | 素材名字，为空时使用文件名 |
+| name | String | 否 | - | 素材名字，为空（或空白）时取 `MultipartFile#getName()`（表单字段名，通常为 `file`） |
 | title | String | 条件 | @AssertTrue（type 为 video 时必填） | 视频素材的标题 |
 | introduction | String | 条件 | @AssertTrue（type 为 video 时必填） | 视频素材的描述 |
 
@@ -69,7 +69,7 @@
 
 **业务逻辑**:
 1. 通过 MpServiceFactory 根据 accountId 获取对应公众号的 WxMpService 实例。
-2. 素材名字 name 为空时默认取上传文件名，随后将文件写入服务器临时目录。
+2. 素材名字 name 为空（或空白）时通过 `StrUtil.blankToDefault` 回退为 `MultipartFile#getName()`（multipart 表单字段名，通常为 `file`，不是原始文件名）；随后通过 `createTempFile` 在系统临时目录以随机文件名（`mp-material-` 前缀）独占创建临时文件，仅保留合法的扩展名（不合法时 `.tmp`），再将上传内容写入该文件。
 3. 调用微信 API（materialFileUpload）上传永久素材，视频类型需携带 title 与 introduction。
 4. 将文件内容上传到本地文件服务，得到 URL。
 5. 微信上传失败（WxErrorException）时抛出 MATERIAL_UPLOAD_FAIL 异常，并在 finally 中删除临时文件。
@@ -98,7 +98,7 @@
 
 **业务逻辑**:
 1. 通过 MpServiceFactory 根据 accountId 获取对应公众号的 WxMpService 实例。
-2. 将上传的文件写入服务器临时目录。
+2. 通过 `createTempFile` 在系统临时目录以随机文件名（`mp-material-` 前缀）独占创建临时文件，仅当原始扩展名匹配 `^[a-zA-Z0-9]{1,16}$` 时保留该扩展名，否则使用 `.tmp`，再将上传内容写入该文件。
 3. 调用微信 API（mediaImgUpload）上传图片，返回微信侧的 URL。
 4. 微信上传失败（WxErrorException）时抛出 MATERIAL_IMAGE_UPLOAD_FAIL 异常，并在 finally 中删除临时文件。
 5. 不写入数据库（区别于临时/永久素材）。
@@ -180,5 +180,6 @@
 
 ## 附注
 
+- 三个上传接口都通过 `MpMaterialServiceImpl#createTempFile` 生成临时文件：`Files.createTempFile("mp-material-", suffix)` 在系统临时目录（`java.io.tmpdir`，与 Hutool `FileUtil.getTmpDir()` 一致）随机命名、独占创建，`suffix` 仅在原始扩展名匹配 `^[a-zA-Z0-9]{1,16}$` 时为 `.扩展名`，否则为 `null`（JDK 默认 `.tmp`）；上传结束后统一在 `finally` 中 `FileUtil.del(file)` 删除。
 - Service 另有内部方法 `downloadMaterialUrl`（无对应 admin 端点）：优先从数据库按 accountId + mediaId 查询已下载素材直接返回 URL；未命中则调用微信 mediaDownload 下载媒体文件（最多重试 3 次，媒体文件在微信后台仅保存 3 天），上传到文件服务后以临时素材（permanent = false）落库，供消息收发等场景复用。
-- 错误码使用 mp 模块「公众号素材」段 1-006-004-000。
+- 错误码使用 mp 模块「公众号素材」段 1_006_004_000。

@@ -6,13 +6,14 @@
 
 - **模块路径**: `yudao-module-crm`（单模块布局，无子模块拆分）
 - **业务定位**: 面向销售团队的全流程 CRM 系统。以客户为核心资产，支持线索转化、商机推进（阶段管理）、合同签约（对接 BPM 审批流）、回款跟踪；通过「公海池」实现客户资源回收再分配，通过 `crm_permission` 表实现行级数据权限（只读/读写），并提供销售漏斗、排行榜、客户画像等多维统计。
-- **技术栈**: Spring Boot 2.7.18 / MyBatis-Plus / springdoc（Swagger v3）/ EasyExcel（导入导出）/ mzt-biz-log（操作日志注解）/ BPM 流程对接（yudao-module-bpm API）/ 租户能力（yudao-spring-boot-starter-biz-tenant）
+- **技术栈**: Spring Boot 2.7.18 / MyBatis-Plus / springdoc（Swagger v3）/ Apache FESOD（FastExcel，导入导出）/ mzt-biz-log（操作日志注解）/ BPM 流程对接（yudao-module-bpm API）/ 租户能力（yudao-spring-boot-starter-biz-tenant）
 
 ## 设计原则
 
 | 原则 | 说明 |
 |------|------|
-| 行级数据权限 | 所有业务数据通过 `CrmPermissionDO`（bizType + bizId + userId + level）控制，`@CrmPermission` 注解 + `CrmPermissionAspect` 切面在 Service 层统一校验（本人/只读/读写） |
+| 行级数据权限 | 所有业务数据通过 `CrmPermissionDO`（bizType + bizId + userId + level）控制，`@CrmPermission` 注解 + `CrmPermissionAspect` 切面在 Service 层统一校验（负责人/只读/读写）；提交合同/回款审批同样要求 WRITE（读写）级权限 |
+| 负责人转移语义 | 客户/线索/联系人/商机/合同的 transfer 端点共用 `CrmPermissionService#transferPermission`：操作人须为该数据负责人或 CRM 管理员；老负责人保留级别只能是 null（移除）、只读(2)、读写(3)；新负责人已在团队时直接提升为负责人 |
 | 客户公海机制 | 无负责人的客户进入公海，支持领取/分配/自动回收（`CrmCustomerAutoPutPoolJob`），回收规则由 `crm_customer_pool_config` 配置 |
 | 审批流解耦 | 合同、回款的审批通过 `BpmProcessInstanceApi` 发起 BPM 流程，审批结果经 `BpmProcessInstanceStatusEventListener` 子类回调更新 `auditStatus` |
 | 跟进状态统一 | 客户/线索/联系人统一维护 `followUpStatus`、`contactLastTime`、`contactNextTime`，跟进记录（`crm_follow_up_record`）按 bizType + bizId 关联任意业务对象 |
@@ -31,14 +32,16 @@
 | 回款管理 | 回款 CRUD、提交审批、回款计划（期数/提醒）、审批状态回调 | CrmReceivableDO、CrmReceivablePlanDO |
 | 产品管理 | CRM 产品与产品分类（树形）维护，供商机/合同关联计算金额 | CrmProductDO、CrmProductCategoryDO |
 | 跟进记录 | 按 bizType + bizId 记录跟进内容/图片/附件/下次联系时间，同步回写业务表 | CrmFollowUpRecordDO |
-| 数据权限 | 业务数据的团队成员授权（只读/读写）、退出团队、负责人变更记录 | CrmPermissionDO、CrmOwnerRecordDO |
+| 数据权限 | 业务数据的团队成员授权（只读/读写）、负责人转移（负责人或 CRM 管理员可操作）、退出团队、负责人变更记录 | CrmPermissionDO、CrmOwnerRecordDO |
 | 操作日志 | 基于 mzt-biz-log 记录客户/联系人/商机/合同等变更，分页查询走 system 模块 OperateLogApi | —（查询转发 system 模块） |
 | 业绩目标 | 按员工/部门（objectType）按年设定合同、回款月度目标 | CrmPerformanceConfigDO |
-| 数据统计 | 客户总量/跟进/公海/成交周期、销售漏斗、员工业绩、业绩目标完成度、客户画像、产品销售、排行榜 8 类统计 | —（只读聚合查询） |
+| 数据统计 | 客户总量/跟进/公海/成交周期、销售漏斗、员工业绩、业绩目标完成度、客户画像、产品销售、排行榜 7 类统计（7 个只读统计 Controller） | —（只读聚合查询） |
 
 ## API 接口索引
 
 > 端点总数 167（> 120），按域分节给出控制器级摘要与代表性端点；完整端点清单见各 `api-{key}.md`。
+>
+> 数据权限相关行为：客户/线索/联系人/商机/合同 5 个 transfer 端点共用 `CrmPermissionService#transferPermission`（详见 [api-permission.md](api-permission.md) 第 2 节）；合同提交（`PUT /crm/contract/submit`）与回款提交（`PUT /crm/receivable/submit`）要求 WRITE 级数据权限。
 
 ### 客户管理域（26 端点）
 
@@ -71,14 +74,14 @@
 
 | Controller | 说明 | 端点数 | 代表性端点 |
 |-----------|------|--------|-----------|
-| CrmContractController | 合同管理（/crm/contract） | 13 | POST /crm/contract/create（`crm:contract:create`）；PUT /crm/contract/submit（提交 BPM 审批，`crm:contract:update`）；GET /audit-count（待审核数量）；GET /remind-count（到期提醒数量） |
+| CrmContractController | 合同管理（/crm/contract） | 13 | POST /crm/contract/create（`crm:contract:create`）；PUT /crm/contract/submit（提交 BPM 审批，`crm:contract:update`，另需 WRITE 数据权限）；GET /audit-count（待审核数量）；GET /remind-count（到期提醒数量） |
 | CrmContractConfigController | 合同到期提醒配置（/crm/contract-config） | 2 | GET /get（`crm:contract-config:query`）；PUT /save |
 
 ### 回款管理域（18 端点）
 
 | Controller | 说明 | 端点数 | 代表性端点 |
 |-----------|------|--------|-----------|
-| CrmReceivableController | 回款管理（/crm/receivable） | 9 | POST /crm/receivable/create（`crm:receivable:create`）；PUT /submit（提交审批）；GET /audit-count |
+| CrmReceivableController | 回款管理（/crm/receivable） | 9 | POST /crm/receivable/create（`crm:receivable:create`）；PUT /submit（提交审批，另需 WRITE 数据权限）；GET /audit-count |
 | CrmReceivablePlanController | 回款计划管理（/crm/receivable-plan） | 9 | POST /crm/receivable-plan/create（`crm:receivable-plan:create`）；GET /remind-count（待回款提醒数量）；GET /simple-list（`crm:receivable-plan:query`） |
 
 ### 产品管理域（12 端点）
@@ -132,7 +135,7 @@
 | crm_customer_pool_config | 客户公海规则配置 | BaseDO | enabled、contactExpireDays、dealExpireDays、notifyEnabled、notifyDays |
 | crm_customer_limit_config | 客户拥有量限制配置 | BaseDO | type、userIds、deptIds、maxCount、dealCountEnabled |
 | crm_clue | 线索 | BaseDO | name、ownerUserId、transformStatus、customerId（转化后回写）、followUpStatus、mobile、industryId、level、source |
-| crm_contact | 联系人 | BaseDO | name、customerId、ownerUserId、mobile、master（是否主联系人）、parentId、email、areaId |
+| crm_contact | 联系人 | BaseDO | name、customerId、ownerUserId、mobile、master（是否关键决策人）、parentId、email、areaId |
 | crm_contact_business | 联系人-商机关联表 | BaseDO | contactId、businessId |
 | crm_business | 商机 | BaseDO | name、customerId、ownerUserId、statusTypeId、statusId、endStatus、totalProductPrice、discountPercent、totalPrice、dealTime |
 | crm_business_product | 商机-产品明细 | BaseDO | businessId、productId、productPrice、businessPrice、count、totalPrice |
@@ -146,7 +149,7 @@
 | crm_product | CRM 产品 | BaseDO | name、no、unit、price、status、categoryId、ownerUserId |
 | crm_product_category | 产品分类（树形） | BaseDO | name、parentId |
 | crm_follow_up_record | 跟进记录 | BaseDO | bizType、bizId、type、content、nextTime、picUrls、fileUrls、businessIds、contactIds |
-| crm_permission | 数据权限（团队成员） | BaseDO | bizType、bizId、userId、level（1 负责人/2 读写/3 只读） |
+| crm_permission | 数据权限（团队成员） | BaseDO | bizType、bizId、userId、level（1 负责人/2 只读/3 读写） |
 | crm_owner_record | 负责人变更记录 | BaseDO | bizType、bizId、preOwnerUserId、postOwnerUserId |
 | crm_performance_config | 业绩目标 | BaseDO | bizType、objectType、objectId、year、yearTargetPrice、januaryTargetPrice ~ decemberTargetPrice（12 个月度字段） |
 

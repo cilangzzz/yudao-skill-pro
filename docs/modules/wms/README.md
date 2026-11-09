@@ -13,9 +13,9 @@
 | 原则 | 说明 |
 |-----|------|
 | 单据驱动库存 | 库存余额（wms_inventory）不允许直接修改，只能由四类单据「完成」动作触发的 changeInventory/checkInventory 统一变更，并强制写入库存流水 |
-| 单据状态机 | 所有单据只有三个状态：草稿(0)、已完成(4)、已作废(5)；仅草稿可编辑/删除/完成/作废，完成与作废前均做状态前置校验 |
-| 并发安全优先 | 库存变更统一按库存行 ID 加 `SELECT ... FOR UPDATE` 悲观锁后再计算；新建库存行依赖 (sku_id, warehouse_id) 唯一索引，冲突时回查兜底 |
-| 明细整体维护 | 单据与明细（order + order_detail 两张表）同事务保存：单据更新时明细整单删除重建，删除单据时级联删除明细 |
+| 单据状态机 | 所有单据只有三个状态：草稿(0)、已完成(4)、已作废(5)；仅草稿可编辑/完成/作废（删除允许草稿与已作废），完成与作废前均做状态前置校验 |
+| 并发安全优先 | 库存变更统一按库存行 ID 加悲观锁（框架 `BaseMapperX#selectOneForUpdate / selectListForUpdate`，由 `WmsInventoryMapper#selectByIdForUpdate / selectListByIdsForUpdate` 封装）后再计算；新建库存行依赖 (sku_id, warehouse_id) 唯一索引，冲突时回查兜底 |
+| 明细增量维护 | 单据与明细（order + order_detail 两张表）同事务保存：单据更新时按 id 对比增量维护明细（新增/修改/删除），删除单据时级联删除明细 |
 | 只读统计分离 | 库存/流水/首页统计仅提供查询接口，不提供写接口；VO 拼接（SKU、商品、仓库名称等）统一在 Controller 私有 build 方法内完成 |
 
 ## 核心功能点
@@ -256,7 +256,7 @@
 | 模式 | 应用位置 | 用途 |
 |-----|---------|------|
 | 单据状态机（约定式模板） | 四类单据 Service（如 `WmsReceiptOrderServiceImpl` 的 validateXxxOrderPrepare / completeXxx / cancelXxx） | 四类单据共享「草稿 → 已完成/已作废」的同一套流转与校验骨架，仅库存动作不同 |
-| 悲观锁（行锁） | `WmsInventoryServiceImpl` + `WmsInventoryMapper.selectByIdForUpdate / selectListByIdsForUpdate` | 库存变更与盘库完成时锁定库存行后再计算前后数量，防止并发超卖/错算 |
+| 悲观锁（行锁） | `WmsInventoryServiceImpl` + `WmsInventoryMapper.selectByIdForUpdate / selectListByIdsForUpdate`（委托框架 `BaseMapperX` 锁定读，按方言生成锁定语义） | 库存变更与盘库完成时锁定库存行后再计算前后数量，防止并发超卖/错算 |
 | 唯一索引冲突兜底 | `WmsInventoryServiceImpl#createMissingInventoryList` | 并发创建同一 (skuId, warehouseId) 库存行时捕获 `DuplicateKeyException` 并回查已有行 |
 
 ## 依赖关系

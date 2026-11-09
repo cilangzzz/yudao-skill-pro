@@ -149,6 +149,22 @@
 | /member/tag/list | GET | 获得会员标签列表（按 ids） | member:tag:query |
 | /member/tag/page | GET | 获得会员标签分页 | member:tag:query |
 
+### App 端接口（AppXxxController，前缀 /app-api）
+
+> C 端用户接口，需登录（标注 `@PermitAll` 的除外）；用户编号一律取登录态。完整清单与业务逻辑见 [api-app.md](api-app.md)。
+
+| Controller | 前缀 | 接口数 | 说明 |
+|-----------|------|-------|------|
+| AppAuthController | /member/auth | 10 | 密码/验证码/社交登录、登出、刷新令牌、微信 JSAPI 签名（全部 @PermitAll） |
+| AppMemberUserController | /member/user | 6 | 基本信息、修改资料/手机/密码、重置密码 |
+| AppAddressController | /member/address | 6 | 收件地址增删改查、默认地址、列表 |
+| AppSocialUserController | /member/social-user | 5 | 社交绑定/解绑/查询、小程序码、订阅模板 |
+| AppMemberSignInConfigController | /member/sign-in/config | 1 | 启用状态的签到规则列表（@PermitAll） |
+| AppMemberSignInRecordController | /member/sign-in/record | 3 | 签到统计、签到动作、签到记录分页 |
+| AppMemberLevelController | /member/level | 1 | 启用状态的会员等级列表（@PermitAll） |
+| AppMemberExperienceRecordController | /member/experience-record | 1 | 当前用户经验记录分页 |
+| AppMemberPointRecordController | /member/point/record | 1 | 当前用户积分记录分页 |
+
 ## 数据模型
 
 | 表名 | 说明 | 继承基类 | 关键字段 |
@@ -158,7 +174,7 @@
 | member_config | 会员配置 | BaseDO | pointTradeDeductEnable、pointTradeDeductUnitPrice、pointTradeDeductMaxPrice、pointTradeGivePoint |
 | member_group | 用户分组 | BaseDO | name、remark、status |
 | member_level | 会员等级 | BaseDO | name、level、experience（升级经验）、discountPercent、icon、backgroundUrl、status |
-| member_level_record | 会员等级变更记录 | BaseDO | userId、levelId、level、discountPercent、experience（变动经验）、userExperience、description |
+| member_level_record | 会员等级变更记录 | BaseDO | userId、levelId、level、discountPercent、experience（升级经验快照/管理员调整路径为变动经验，见 pitfalls 5.3）、userExperience、description |
 | member_experience_record | 会员经验变动记录 | BaseDO | userId、bizType（MemberExperienceBizTypeEnum）、bizId、title、experience、totalExperience |
 | member_point_record | 用户积分变动记录 | BaseDO | userId、bizType（MemberPointBizTypeEnum）、bizId、point（正得负耗）、totalPoint |
 | member_sign_in_config | 签到规则（第 x 天奖励） | BaseDO | day、point、experience、status |
@@ -171,17 +187,17 @@
   - 业务模块：yudao-module-system（SmsCodeApi、SocialClientApi、SocialUserApi、LoginLogApi、OAuth2TokenCommonApi、SexEnum）、yudao-module-infra
   - framework starter：yudao-spring-boot-starter-biz-tenant、yudao-spring-boot-starter-security、yudao-spring-boot-starter-mybatis、yudao-spring-boot-starter-redis、yudao-spring-boot-starter-mq、yudao-spring-boot-starter-excel、yudao-spring-boot-starter-biz-ip（Area 地区）
 - **下游**（依赖本模块）:
-  - yudao-module-mall：yudao-module-product、yudao-module-trade（MemberUserApi/MemberAddressApi/MemberConfigApi/MemberLevelApi/MemberPointApi）、yudao-module-promotion、yudao-module-statistics
+  - yudao-module-mall：yudao-module-product、yudao-module-trade（MemberUserApi/MemberAddressApi/MemberConfigApi/MemberLevelApi/MemberPointApi）、yudao-module-promotion、yudao-module-statistics（不调 API，直接用 `MemberStatisticsMapper` 查 member 表做统计）
   - yudao-server（服务装配）
 
 ## 对外暴露的 API
 
 | API接口 | 方法 | 消费方 |
 |---------|------|-------|
-| MemberUserApi | getUser、getUserList 等 | mall-trade、mall-promotion、mall-statistics |
-| MemberAddressApi | getAddress（下单收货地址） | mall-trade |
-| MemberConfigApi | getMemberConfig（积分抵扣/赠送规则） | mall-trade |
-| MemberLevelApi | getMemberLevel（等级折扣） | mall-trade |
+| MemberUserApi | getUser、getUserList、getUserMap、getUserListByNickname、getUserByMobile、validateUser | mall-trade、mall-promotion、mall-product |
+| MemberAddressApi | getAddress（下单收货地址）、getDefaultAddress（默认收货地址） | mall-trade |
+| MemberConfigApi | getConfig（积分抵扣/赠送规则） | mall-trade |
+| MemberLevelApi | getMemberLevel（等级折扣）、addExperience / reduceExperience（订单加/减经验） | mall-trade |
 | MemberPointApi | reducePoint / addPoint（下单抵扣与奖励） | mall-trade |
 | MemberUserCreateMessage（Spring 事件） | 用户注册事件 | mall-promotion（CouponTakeByRegisterConsumer 注册发券） |
 
@@ -189,6 +205,7 @@
 
 - [api-user.md](api-user.md) - 会员用户
 - [api-address.md](api-address.md) - 收件地址
+- [api-app.md](api-app.md) - App 端接口（认证、个人中心、地址、社交、签到等）
 - [api-config.md](api-config.md) - 会员配置
 - [api-group.md](api-group.md) - 用户分组
 - [api-level.md](api-level.md) - 会员等级与经验

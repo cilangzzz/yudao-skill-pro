@@ -2,7 +2,7 @@
 
 > system 模块的核心数据模型，包括 DO、DTO、VO 及其之间的关系。作为全平台的后台管理基础设施，system 模块承载 RBAC 用户/角色/菜单权限、组织架构（部门/岗位）、多租户、字典主数据、认证登录（账号/短信/社交/OAuth2.0）、消息触达（短信/邮件/站内信）与日志审计，共 32 张数据表。
 >
-> 说明：当前仓库为 JDK8 分支（revision 2026.09-jdk8-SNAPSHOT，Spring Boot 2.7.x），文档中的类型与注解均以实际代码为准。所有 DO 均标注 `@KeySequence("{table}_seq")`，用于 Oracle/PostgreSQL/Kingbase/DB2/H2 等非自增数据库的主键序列，MySQL 下无实际作用。
+> 说明：当前仓库为 JDK8 分支（revision 2026.10-jdk8-SNAPSHOT，Spring Boot 2.7.x），文档中的类型与注解均以实际代码为准。所有 DO 均标注 `@KeySequence("{table}_seq")`，用于 Oracle/PostgreSQL/Kingbase/DB2/H2 等非自增数据库的主键序列，MySQL 下无实际作用。
 
 ## 1. 实体继承体系
 
@@ -320,6 +320,7 @@ OAuth2 客户端定义（接入方应用），全局唯一的一份配置。
 
 **继承**: TenantBaseDO
 **索引**: 主键 `id`；普通索引 `idx_access_token(access_token)`（每次请求鉴权的高频查询）、`idx_refresh_token(refresh_token)`（刷新令牌时反查）。
+**特性**: 与刷新令牌同属一个令牌链（`refresh_token` 相同）；刷新令牌时旧访问令牌**保留**至自身 `expiresTime` 自然失效，登出/吊销/强制下线时才按 `refresh_token` 级联清理。过期记录由定时任务清理，批量删除 SQL 由 `SqlDialectUtils.deleteBatchByLessThan` 按数据库方言生成（PostgreSQL 用 `IN(SELECT ... LIMIT)`、Oracle 用 `ROWNUM`、SQL Server 用 `TOP`、其余用 `LIMIT`）。
 
 #### OAuth2RefreshTokenDO (system_oauth2_refresh_token)
 
@@ -337,7 +338,7 @@ OAuth2 客户端定义（接入方应用），全局唯一的一份配置。
 
 **继承**: TenantBaseDO
 **索引**: 主键 `id`；普通索引 `idx_refresh_token(refresh_token)`。
-**特性**: `@KeySequence` 复用 `system_oauth2_access_token_seq`——Oracle 序列名长度受限，代码注释说明"反正也没啥问题"。
+**特性**: `@KeySequence` 复用 `system_oauth2_access_token_seq`——Oracle 序列名长度受限，代码注释说明"反正也没啥问题"。过期记录的批量删除与访问令牌一致，使用 `SqlDialectUtils.deleteBatchByLessThan` 按方言生成 SQL。
 
 #### OAuth2CodeDO (system_oauth2_code)
 
@@ -516,12 +517,13 @@ OAuth2 批准记录，用户在 SSO 授权页对 scope 的接受/拒绝结果。
 | scene | Integer | scene | 发送场景（1 管理后台登录 / 2 会员注册等） |
 | createIp | String | create_ip | 创建 IP（发送时的客户端 IP，限流依据） |
 | todayIndex | Integer | today_index | 今日发送的第几条（每日限流计数） |
-| used | Boolean | used | 是否使用 |
+| used | Boolean | used | 是否使用；显式绑定 `IntegerBooleanTypeHandler`，以 0/1 整数读写（写入 1/0，读取时 != 0 视为 true），适配 SQL Server 等不支持 bit 的数据库 |
 | usedTime | LocalDateTime | used_time | 使用时间 |
 | usedIp | String | used_ip | 使用 IP |
 
 **继承**: BaseDO，类上标注 `@TenantIgnore`
 **索引**: 主键 `id`；普通索引 `idx_mobile(mobile)` —— 按手机号查最新验证码校验（DO 注释显式说明该索引用途）。
+**特性**: `@TableName(value = "system_sms_code", autoResultMap = true)`，以启用 `used` 字段的自定义 TypeHandler 结果映射；对应 DDL 中 `used` 列在测试库建表脚本为 `tinyint NOT NULL DEFAULT 0`，SQL Server 全量脚本中 `used`/`scene`/`today_index` 均为 `smallint`（不用 bit，避免部分数据库不支持）。
 
 ### 2.8 邮件聚合（mail）
 
@@ -742,6 +744,8 @@ LoginLogDO / OperateLogDO.(userId, userType) ──→ AdminUserDO.id 或 Member
 - **多态用户引用**：`(userId, userType)` 组合是贯穿全模块的"弱外键"，userType=2 指向本模块 AdminUserDO，userType=1 指向 member 模块的 MemberUserDO（通过反射调用避免编译依赖）。
 - **模板-日志快照模式**：短信/邮件/站内信的 Log 表大量冗余模板字段（code/content/params 等），保证模板修改或删除后历史记录仍完整可读。
 - **JSON 列**：`postIds`、`dataScopeDeptIds`、`menuIds`、`websites`、`redirectUris`、`scopes`、`params`、`templateParams` 等集合/Map 字段经 JacksonTypeHandler/StringListTypeHandler 以 JSON 字符串落库（需要 `autoResultMap = true`）。
+- **布尔列跨库约定**：非 MySQL 数据库（如 SQL Server）不一定支持 `bit`，Boolean 列统一以整数 0/1 存储。需要显式控制的列（如 `SmsCodeDO.used`）通过 `@TableField(typeHandler = IntegerBooleanTypeHandler.class)` 绑定 `IntegerBooleanTypeHandler`，并在 `@TableName` 上开启 `autoResultMap = true` 以启用结果映射。
+- **SQL 方言兼容**：带 `LIMIT` 的批量删除/查询不能手写 MySQL 语法；`yudao-framework-mybatis` 的 `SqlDialectUtils.deleteBatchByLessThan` 会按数据库方言生成 SQL（PostgreSQL `IN(SELECT ... LIMIT)`、Oracle `ROWNUM`、SQL Server `TOP`、其余 `LIMIT`），OAuth2 访问/刷新令牌的过期清理即通过该工具实现。
 
 ## 4. 全部数据表清单
 

@@ -75,8 +75,9 @@
 **业务逻辑**:
 1. 校验示例订单存在，不存在则记录错误日志并抛出 DEMO_ORDER_NOT_FOUND。
 2. 若订单已支付：支付单编号相同视为重复回调，直接返回；不同则抛出 DEMO_ORDER_UPDATE_PAID_FAIL_PAY_ORDER_ID_ERROR。
-3. 校验支付单合法性（validatePayOrderPaid）：支付单必须存在（否则 PAY_ORDER_NOT_FOUND）、状态为支付成功、支付金额与订单金额一致、商户订单号与示例订单 id 一致（二次匹配校验）。
-4. 通过 updateByIdAndPayed 携带「未支付」状态条件，乐观更新为已支付（记录支付时间、支付渠道）；更新数为 0 则抛出 DEMO_ORDER_UPDATE_PAID_STATUS_NOT_UNPAID（并发保护）。
+3. 绑定校验：订单未支付时，回调的 payOrderId 必须与订单绑定的 payOrderId 一致，否则抛出 DEMO_ORDER_UPDATE_PAID_FAIL_PAY_ORDER_ID_ERROR（避免其它支付应用中「相同商户订单编号 + 相同金额」的支付单被用于串单）。
+4. 校验支付单合法性（validatePayOrderPaid）：支付单必须存在（否则 PAY_ORDER_NOT_FOUND）、状态为支付成功、支付金额与订单金额一致、商户订单号与示例订单 id 一致（二次匹配校验）。
+5. 通过 updateByIdAndPayed 携带「未支付」状态条件，乐观更新为已支付（记录支付时间、支付渠道）；更新数为 0 则抛出 DEMO_ORDER_UPDATE_PAID_STATUS_NOT_UNPAID（并发保护）。
 
 **错误码**:
 
@@ -233,8 +234,9 @@
 **业务逻辑**:
 1. 校验提现单存在，不存在则记录错误日志并抛出 DEMO_WITHDRAW_NOT_FOUND。
 2. 若提现单已结束（提现成功或提现关闭）：转账单编号相同视为重复回调，直接返回；不同则抛出 DEMO_WITHDRAW_UPDATE_STATUS_FAIL_PAY_TRANSFER_ID_ERROR。
-3. 校验转账单合法性（validateDemoTransferStatusCanUpdate）：转账单存在（否则 PAY_TRANSFER_NOT_FOUND）、状态为转账成功或转账失败、转账金额与提现金额一致、商户转账单号与提现单 id 一致（二次匹配校验）、转账渠道与提现单渠道一致。
-4. 按转账单结果通过带状态条件的更新：转账成功 → 提现状态更新为「提现成功」（10），转账失败 → 「提现关闭」（20），同时记录转账时间与渠道失败原因。
+3. 绑定校验：提现单未结束（非成功 / 关闭）时，回调的 payTransferId 必须与提现单绑定的 payTransferId 一致，否则抛出 DEMO_WITHDRAW_UPDATE_STATUS_FAIL_PAY_TRANSFER_ID_ERROR（避免其它支付应用、或重新转账前的旧转账单更新提现单状态）。
+4. 校验转账单合法性（validateDemoTransferStatusCanUpdate）：转账单存在（否则 PAY_TRANSFER_NOT_FOUND）、状态为转账成功或转账失败、转账金额与提现金额一致、商户转账单号与提现单 id 一致（二次匹配校验）、转账渠道与提现单渠道一致。
+5. 按转账单结果通过带状态条件的更新：转账成功 → 提现状态更新为「提现成功」（10），转账失败 → 「提现关闭」（20），同时记录转账时间与渠道失败原因。
 
 **错误码**:
 

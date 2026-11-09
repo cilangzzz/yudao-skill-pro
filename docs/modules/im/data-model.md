@@ -195,7 +195,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject，抽象基类）
 
 #### 2.3.4 消息类型枚举 ImContentTypeEnum
 
-消息表 `type` 字段与 WebSocket 通知 `contentType` 共用该枚举，编号复用 OpenIM 段位；`persistent` 决定是否落消息表（离线可拉），`normal` 决定是否计入未读数：
+消息表 `type` 字段与 WebSocket 通知 `contentType` 共用该枚举，编号复用 OpenIM 段位；`persistent` 决定是否落消息表（离线可拉），`normal` 决定是否为普通用户聊天消息（可被用户发送、可置顶、计入运营统计）：
 
 | 段位 | 编号 | 枚举 | 入库 | 说明 |
 |---|---|---|---|---|
@@ -207,7 +207,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject，抽象基类）
 | RTC 信令 | 1601-1603 | RTC_CALL / PARTICIPANT_CONNECTED / DISCONNECTED | 否 | 不入库，仅推参与方 |
 | RTC 历史 | 1610 / 1611 | RTC_CALL_START / RTC_CALL_END | 是 | 两段式配对，入私聊 / 群聊消息表渲染通话 tip |
 | 信号类 | 2101 | RECALL | 是 | 撤回提示 |
-| 信号类 | 2200 / 2201 | RECEIPT / READ | 否 | 回执 / 已读，已读走 Redis 游标 + im_conversation_read |
+| 信号类 | 2200 / 2201 | RECEIPT / READ | 否 | 回执 / 已读，不入消息表；已读位点持久化在 `im_conversation_read`（条件 UPDATE 只增不减） |
 
 #### 2.3.5 消息内容 JSON 结构（content 包，非数据表）
 

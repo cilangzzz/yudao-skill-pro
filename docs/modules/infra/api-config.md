@@ -136,7 +136,7 @@
 | name | String | 参数名称 |
 | key | String | 参数键名 |
 | value | String | 参数键值 |
-| type | Integer | 参数类型，参见 SysConfigTypeEnum 枚举（1=系统配置，2=自定义配置） |
+| type | Integer | 参数类型，参见 ConfigTypeEnum 枚举（1=系统配置，2=自定义配置） |
 | visible | Boolean | 是否可见 |
 | remark | String | 备注 |
 | createTime | LocalDateTime | 创建时间 |
@@ -185,7 +185,7 @@
 | pageSize | Integer | 是 | @NotNull、@Min(1)、@Max(200)（继承 PageParam，默认 10） | 每页条数 |
 | name | String | 否 | 无 | 参数名称，模糊匹配 |
 | key | String | 否 | 无 | 参数键名，模糊匹配 |
-| type | Integer | 否 | 无 | 参数类型，参见 SysConfigTypeEnum 枚举 |
+| type | Integer | 否 | 无 | 参数类型，参见 ConfigTypeEnum 枚举 |
 | createTime | LocalDateTime[] | 否 | @DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 创建时间区间 |
 
 **响应**: CommonResult&lt;PageResult&lt;ConfigRespVO&gt;&gt;（PageResult.list 为 ConfigRespVO 数组，字段同 [2.1 获得参数配置](#21-获得参数配置)）
@@ -214,7 +214,7 @@
 
 ## 附录：本域错误码汇总
 
-infra 模块错误码使用 1-001-000-000 段，参数配置相关错误码如下：
+infra 模块错误码使用 1_001_000_000 段，参数配置相关错误码如下：
 
 | 错误码 | 说明 |
 |-------|------|

@@ -23,7 +23,7 @@
 | name | String | 是 | @NotEmpty | 配置名称 |
 | description | String | 否 | | 配置描述 |
 | level | Integer | 是 | @NotNull | 告警级别 |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 配置状态（1 开启 / 2 禁用） |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 配置状态（0 开启 / 1 禁用） |
 | sceneRuleIds | List\<Long\> | 是 | @NotEmpty | 关联的场景联动规则编号数组 |
 | receiveUserIds | List\<Long\> | 是 | @NotEmpty | 接收的用户编号数组 |
 | receiveTypes | List\<Integer\> | 是 | @NotEmpty | 接收的类型数组（1 短信 / 2 邮件 / 3 站内信） |

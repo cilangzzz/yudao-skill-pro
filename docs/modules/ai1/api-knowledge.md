@@ -508,7 +508,7 @@ Agent 会话发消息时（`Ai1SessionStreamTool.generate`，经 Redis Stream �
 
 ## 附：本域错误码汇总（Ai1ErrorCodeConstants，1-041 段）
 
-**知识库段 1-041-002-000**
+**知识库段 1_041_002_000**
 
 | 错误码 | 常量 | 说明 |
 |-------|------|------|
@@ -517,7 +517,7 @@ Agent 会话发消息时（`Ai1SessionStreamTool.generate`，经 Redis Stream �
 | 1_041_002_002 | KNOWLEDGE_BASE_SEARCH_FAIL | 向量检索失败：{} |
 | 1_041_002_003 | KNOWLEDGE_BASE_USED_BY_AGENT | 知识库已被 Agent 使用，禁止删除 |
 
-**知识文档段 1-041-003-000**
+**知识文档段 1_041_003_000**
 
 | 错误码 | 常量 | 说明 |
 |-------|------|------|
@@ -528,7 +528,7 @@ Agent 会话发消息时（`Ai1SessionStreamTool.generate`，经 Redis Stream �
 | 1_041_003_004 | KNOWLEDGE_DOCUMENT_FILE_READ_FAIL | 文件读取失败：{} |
 | 1_041_003_005 | KNOWLEDGE_DOCUMENT_VECTORIZE_FAIL | 向量化失败：{} |
 
-**跨域引用（模型段 1-041-001-000）**
+**跨域引用（模型段 1_041_001_000）**
 
 | 错误码 | 常量 | 说明 | 触发场景 |
 |-------|------|------|---------|

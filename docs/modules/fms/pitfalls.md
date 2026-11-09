@@ -34,7 +34,7 @@
 
 ### 3.1 lockAccountSet 的 FOR UPDATE 行锁必须在事务内调用才有效
 
-**问题**: `FmsAccountSetServiceImpl#lockAccountSet` 底层是 `BaseMapperX#selectOneForUpdate`，即 `selectOne(queryWrapper.last("FOR UPDATE"))`。在无事务的方法里调用时，行锁随 auto-commit 立即释放，串行化完全失效。
+**问题**: `FmsAccountSetServiceImpl#lockAccountSet` 底层是 `BaseMapperX#selectOneForUpdate`（通过 `SelectForUpdateMethod` 内置查询 + `ForUpdateInnerInterceptor` 按方言生成锁定语句，SQL Server 改写为 `WITH (UPDLOCK, ROWLOCK)`，不再用 `.last("FOR UPDATE")` 拼接）。在无事务的方法里调用时，行锁随 auto-commit 立即释放，串行化完全失效。
 
 **原因**: 凭证创建/更新/删除/整理/移动（`FmsVoucherServiceImpl` 的 createVoucher、updateVoucher、deleteVoucherList、tidyVoucher、moveVoucher）以及结账/反结账（`FmsClosingPeriodServiceImpl#validateCloseTargetPeriod`、`cancelClosePeriod`）都依赖该行锁串行化同一账套的凭证号分配与结账状态变更。
 
@@ -50,7 +50,7 @@
 
 ### 3.3 账套初始化是一次性大事务且未加账套行锁
 
-**问题**: `FmsAccountSetServiceImpl#initializeAccountSet` 在一个事务里串行初始化 9 类基础数据（本位币、财务参数、默认凭证字、辅助核算类别、科目、结账模板、结账方案、财务指标，最后回写 `initialized=true`）；重复初始化抛 `ACCOUNT_SET_ALREADY_INITIALIZED`。但 `initialized` 状态是无锁读（`validateAccountSetWritePermission` 内 `selectById`），没有像结账那样调用 `lockAccountSet`。
+**问题**: `FmsAccountSetServiceImpl#initializeAccountSet` 在一个事务里串行初始化 8 类基础数据（本位币、财务参数、默认凭证字、辅助核算类别、科目、结账模板、结账方案、财务指标），最后回写 `initialized=true`；重复初始化抛 `ACCOUNT_SET_ALREADY_INITIALIZED`。但 `initialized` 状态是无锁读（`validateAccountSetWritePermission` 内 `selectById`），没有像结账那样调用 `lockAccountSet`。
 
 **原因**: 校验 `accountSet.getInitialized()` 与事务提交回写之间存在竞态窗口，两个并发请求可能都读到 `initialized=false`，各自执行一套初始化，造成重复预置数据或唯一键冲突。
 
@@ -112,12 +112,19 @@
 
 **解决**: 修改预置 JSON 或科目预置逻辑时保持两者科目编码一致；调整编码规则时注意 `FmsSubjectServiceImpl#expandSubjectCodes` 只扩展存量科目编码，不会同步模板表和预置 JSON 中的编码引用。
 
-## 8. 代码线索与待改进点
+**具体风险点（当前预置模板）**:
 
-### 8.1 科目树向上递归存在死循环隐患
+- 预置结账模板「报销电话费」（`presetCode = daily-telephone-expense`）的借方科目是 **560109（销售费用-通讯费）**，贷方是 1001（库存现金），借贷比例各 100%；「报销差旅费」借方为 560107（差旅费），两者编码不同不可混用。
+- 若账套科目体系（自定义导入或历史数据）中缺少 560109，账套初始化时 `initializeClosingTemplates` 抛 `CLOSING_TEMPLATE_PRESET_SUBJECT_NOT_EXISTS`（1_052_105_025，提示 "daily-telephone-expense"、"560109"），整个初始化事务回滚，且**不会回退**到 560101（办公用品）或 560107（差旅费）。
+- **存量账套不会自动迁移**：`initializeClosingTemplates` 只补齐"尚未初始化的预置编码"（已存在同 `presetCode` 的模板会被跳过），因此本次 JSON 调整只对之后新初始化的账套生效；已初始化的账套中「报销电话费」仍指向旧科目，需人工在结账模板中改科目，或删除该预置模板后重新导入。
+- 升级前先确认系统科目模板中存在 560109「通讯费」且编码与账套实际科目一致（`FmsSubjectServiceImpl#expandSubjectCodes` 不会同步预置 JSON 中的编码引用）。
 
-**问题**: `FmsLedgerServiceImpl#getDetailSubjectList` 从有发生额的科目向上补齐父级节点时使用 `while (parentId != null)` 循环（FmsLedgerServiceImpl 186 行有 TODO 标注"尽量不要 while true 死循环"）；若科目数据 `parentId` 成环，线程将永久自旋。
+## 8. 代码线索与历史修复记录
 
-**原因**: 科目层级靠 `parentId` 维护，常规写入路径有 `SUBJECT_PARENT_INVALID`（上级科目必须同账套、同类型同类别）等校验保护，但直接改库或异常导入数据可能造出环。对照实现 `FmsSubjectServiceImpl#getSubjectIdSetWithChildren` 用 `for (int i = 0; i < Short.MAX_VALUE; i++)` 设置了递归上限。
+### 8.1 科目树向上补齐已加层级上限（原死循环隐患已修复）
 
-**解决**: 科目写入始终走 Service 校验路径；在其他地方复制"向上递归找父级"逻辑时，参考 `getSubjectIdSetWithChildren` 加循环次数上限，或顺手把该 TODO 修复为带上限的循环。
+**现状**: `FmsLedgerServiceImpl#getDetailSubjectList`（约 186 行）从有发生额的科目向上补齐父级节点时，原先的无上限 `while (parentId != null && visibleSubjectIds.add(parentId))` 已改为 `for (int i = 0; i < Short.MAX_VALUE && parentId != null && visibleSubjectIds.add(parentId); i++)`，单条科目链最多向上补齐 **32767（Short.MAX_VALUE）层**父级，原 TODO 注释（"尽量不要 while true 死循环"）已删除。父级已补齐（环形数据）或父级在账套中不存在时，仍按原语义提前结束。根哨兵只有 `parentId = 0`（`FmsSubjectDO.PARENT_ID_ROOT`，不存在 -1）；`parentId` 为 null 时循环结束，为 0 时会作为一次普通迭代加入可见集合后结束（账套中无 id=0 的科目，不影响结果）。
+
+**超限语义**: 达到层级上限后，若仍存在"真实存在但尚未补齐"的父级（`context.subjectMap` 中存在该 id），不再静默丢弃祖先科目，而是抛 `IllegalStateException("科目({id}) 的父级科目超过 32767 层")`。该异常不是 fms 业务错误码（未走 `ErrorCodeConstants`），对外表现为 **HTTP 500**，调用方不要按 1_052_xxx 错误码做兜底处理。
+
+**通用告诫**: 科目层级靠 `parentId` 维护，直接改库或异常导入可能造出环或超长链；其他位置复制"向上递归找父级"逻辑时同样要加循环次数上限，可对照 `FmsSubjectServiceImpl#getSubjectIdSetWithChildren`（`for (int i = 0; i < Short.MAX_VALUE; i++)`）与本次修复后的实现。

@@ -350,7 +350,7 @@
 ### 1.15 转移客户
 
 - **路径**: PUT /crm/customer/transfer
-- **权限**: crm:customer:update（服务层要求 OWNER 级数据权限）
+- **权限**: crm:customer:update（服务层要求 OWNER 级数据权限；CRM 管理员亦可转移）
 - **说明**: 将客户转移给新负责人，可同时转移名下联系人、商机、合同。
 
 **请求参数 (CrmCustomerTransferReqVO)**:
@@ -359,7 +359,7 @@
 |-----|-----|-----|---------|-----|
 | id | Long | 是 | @NotNull | 客户编号 |
 | newOwnerUserId | Long | 是 | @NotNull | 新负责人的用户编号 |
-| oldOwnerPermissionLevel | Integer | 否 | | 老负责人加入团队后的权限级别（null 表示移除），关联 CrmPermissionLevelEnum |
+| oldOwnerPermissionLevel | Integer | 否 | | 老负责人保留的权限级别（CrmPermissionLevelEnum）：null 表示移除，只读(2) 或读写(3)；传负责人(1) 或其它值报错 |
 | toBizTypes | List&lt;Integer&gt; | 否 | | 同时转移的业务类型（联系人/商机/合同） |
 
 **响应**: CommonResult&lt;Boolean&gt;
@@ -367,7 +367,7 @@
 **业务逻辑**:
 1. 校验客户存在。
 2. 校验新负责人的拥有客户数量上限（超限抛 `CUSTOMER_OWNER_EXCEED_LIMIT`）。
-3. 数据权限转移：按老负责人保留级别转移 OWNER 权限，并更新客户负责人与负责人时间。
+3. 数据权限转移（`transferPermission`，详见 [api-permission.md](api-permission.md) 第 2 节）：操作人须为负责人或 CRM 管理员；新负责人获得 OWNER 权限（已在团队时直接提升）；老负责人按 `oldOwnerPermissionLevel` 保留只读/读写或移除；最后更新客户负责人与负责人时间。
 4. toBizTypes 非空时，逐个将当前老负责人名下的联系人、商机、合同转移给新负责人。
 5. 记录转移操作日志。
 
@@ -377,6 +377,10 @@
 |-------|-----|
 | 1_020_006_000 | 客户不存在 |
 | 1_020_006_010 | 操作失败，超出客户数拥有上限 |
+| 1_020_007_000 | 数据权限不存在（该数据缺少负责人权限记录） |
+| 1_020_007_001 | 操作失败，原因：没有权限 |
+| 1_020_007_003 | 操作失败，原因：转移对象已经是该负责人 |
+| 1_020_007_010 | 操作失败，原因：老负责人的权限级别只能是只读或读写 |
 
 ### 1.16 锁定/解锁客户
 

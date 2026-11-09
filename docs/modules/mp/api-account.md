@@ -275,5 +275,5 @@
 
 MpAccountServiceImpl 内部维护 `volatile Map<String, MpAccountDO> accountCache`（key 为 appId）：
 
-1. **初始化**：@PostConstruct 时执行 initLocalCache()，忽略多租户（TenantUtils.executeIgnore）查询全部账号，构建缓存并调用 MpServiceFactory.init(accounts) 创建各账号的 WxMpService 客户端。若表不存在（表结构未导入），仅记录 error 日志并跳过，避免启动失败。
+1. **初始化**：@PostConstruct 时执行 initLocalCache()，忽略多租户（TenantUtils.executeIgnore）查询全部账号，构建缓存并调用 MpServiceFactory.init(accounts) 创建各账号的 WxMpService 客户端。查询异常时用 `JdbcExceptionUtils#isTableNotExists(ex)` 判断是否为「表不存在」：沿 cause 链与 `SQLException#getNextException` 链，优先按 SQLState（`42S02`/`S0002`/`42P01`）和 Oracle 错误码 `942`（SQLState `42000`）识别，仅在整条链都无有效 SQLState 时兜底匹配消息含 `doesn't exist`；识别为未建表（表结构未导入）时仅记录 error 日志并跳过，避免启动失败。列不存在、权限不足等其它异常会原样抛出，仍会导致启动失败。
 2. **定时刷新**：@Scheduled 每 60 秒执行 refreshLocalCache()：缓存为空时直接重建；否则取缓存中最大 updateTime，若存在更新时间更晚的记录则触发 initLocalCache() 全量刷新，用于多节点部署下的最终一致。

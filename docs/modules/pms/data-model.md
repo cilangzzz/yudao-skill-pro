@@ -12,7 +12,7 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO
 │   ├── updateTime   LocalDateTime   最后更新时间（INSERT_UPDATE 填充）
 │   └── deleted      Boolean         逻辑删除标记（@TableLogic）
 │
-├── pm 域（9 个 DO，全部直接继承 BaseDO）
+├── pm 域（17 个 DO，全部直接继承 BaseDO）
 │   ├── PmsProjectDO / PmsProjectTemplateDO / PmsProjectMemberDO
 │   ├── PmsProjectGroupDO / PmsProjectGroupRelationDO
 │   ├── PmsProjectFavoriteDO / PmsProjectAnnouncementDO
@@ -309,7 +309,7 @@ cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO（BaseDO + tenantId）
 | sort | Integer | sort | 显示顺序（个人视角） |
 
 **继承**: BaseDO
-**索引**: 仅主键索引
+**索引**: 唯一约束 uk_tenant_project_work_item_user_deleted（tenant_id, project_id, work_item_id, user_id, deleted）——保证同一租户同一用户对同一工作项仅一条排序记录
 保存每个用户对看板/列表的个人拖拽排序，与公共 sort 字段隔离。无独立 Controller，由工作项排序端点内部调用。
 
 #### PmsWorkItemWorkLogDO (pms_work_item_work_log)
@@ -370,7 +370,7 @@ kb 域聚合根；成员、文件夹、文档、协作权限、分组关系、�
 | coverUrl | String | cover_url | 模板封面地址 |
 | status | Integer | status | 模板状态（CommonStatusEnum：0 开启、1 禁用） |
 | sort | Integer | sort | 显示顺序 |
-| documents | List\<Document\> | documents | 模板文档列表，JSON 存储（text，最大 varchar(1000000)） |
+| documents | List\<Document\> | documents | 模板文档列表，JSON 存储（varchar(1000000)） |
 
 **继承**: BaseDO
 **索引**: 仅主键索引
@@ -387,7 +387,7 @@ kb 域聚合根；成员、文件夹、文档、协作权限、分组关系、�
 | type | Integer | type | 分组类型：1 全部知识库、2 未分组、3 自定义分组（PmsKnowledgeGroupTypeEnum） |
 
 **继承**: BaseDO
-**索引**: idx_tenant_user_type（tenant_id, user_id, type）、idx_tenant_user_sort（tenant_id, user_id, sort）——按归属人取分组并排序
+**索引**: idx_group_tenant_user_type（tenant_id, user_id, type）、idx_group_tenant_user_sort（tenant_id, user_id, sort）——按归属人取分组并排序
 个人知识库分组，语义同项目分组。
 
 #### PmsKnowledgeGroupRelationDO (pms_knowledge_group_relation)
@@ -401,7 +401,7 @@ kb 域聚合根；成员、文件夹、文档、协作权限、分组关系、�
 | sort | Integer | sort | 显示顺序 |
 
 **继承**: BaseDO
-**索引**: idx_tenant_user_group_library（tenant_id, user_id, group_id, library_id）、idx_tenant_user_library（tenant_id, user_id, library_id）、idx_tenant_library（tenant_id, library_id）——支撑「按分组取库」「库是否已分组」「删库清关系」三类查询
+**索引**: idx_group_relation_tenant_user_group_library（tenant_id, user_id, group_id, library_id）、idx_group_relation_tenant_user_library（tenant_id, user_id, library_id）、idx_group_relation_tenant_library（tenant_id, library_id）——支撑「按分组取库」「库是否已分组」「删库清关系」三类查询
 
 #### PmsKnowledgeFolderDO (pms_knowledge_folder)
 
@@ -506,7 +506,7 @@ kb 域核心内容表：树形文档（parentId）+ 文件夹归类（folderId�
 | userId | Long | user_id | 点赞人用户编号，关联 AdminUserDO |
 
 **继承**: BaseDO
-**索引**: idx_tenant_document_create_time（tenant_id, document_id, create_time，按文档统计点赞）、idx_tenant_user_document（tenant_id, user_id, document_id，判断是否已点赞/取消）
+**索引**: idx_like_tenant_document_create_time（tenant_id, document_id, create_time，按文档统计点赞）、idx_like_tenant_user_document（tenant_id, user_id, document_id，判断是否已点赞/取消）
 
 #### PmsKnowledgeDocumentShareDO (pms_knowledge_document_share)
 
@@ -521,7 +521,7 @@ kb 域核心内容表：树形文档（parentId）+ 文件夹归类（folderId�
 | closeTime | LocalDateTime | close_time | 关闭时间 |
 
 **继承**: BaseDO
-**索引**: 唯一索引 uk_token（token）——令牌直链访问；idx_tenant_document（tenant_id, document_id）——按文档查分享
+**索引**: 唯一约束 `UNIQUE (token)`（测试 DDL 未命名约束，库内索引名由数据库生成）——令牌直链访问；idx_share_tenant_document（tenant_id, document_id）——按文档查分享
 令牌访问端点 `/pms/kb/document-share/get-by-token` 为 @PermitAll + @TenantIgnore（公开链接场景），配合 token 唯一索引实现免登录查看。
 
 #### PmsKnowledgeFavoriteDO (pms_knowledge_favorite)
@@ -535,7 +535,7 @@ kb 域核心内容表：树形文档（parentId）+ 文件夹归类（folderId�
 | userId | Long | user_id | 收藏人用户编号，关联 AdminUserDO |
 
 **继承**: BaseDO
-**索引**: idx_tenant_user_create_time_id（tenant_id, user_id, create_time, id）、idx_tenant_user_library_create_time_id、idx_tenant_user_type_entity（tenant_id, user_id, type, entity_id，判重）、idx_tenant_library、idx_tenant_type_entity（tenant_id, type, entity_id，按对象统计）
+**索引**: idx_favorite_tenant_user_create_time_id（tenant_id, user_id, create_time, id）、idx_favorite_tenant_user_library_create_time_id（tenant_id, user_id, library_id, create_time, id）、idx_favorite_tenant_user_type_entity（tenant_id, user_id, type, entity_id，判重）、idx_favorite_tenant_library（tenant_id, library_id）、idx_favorite_tenant_type_entity（tenant_id, type, entity_id，按对象统计）
 「关注」功能多态关联表（type + entityId），覆盖关注分页、判重与对象统计三类查询。
 
 #### PmsKnowledgeViewRecordDO (pms_knowledge_view_record)
@@ -549,7 +549,7 @@ kb 域核心内容表：树形文档（parentId）+ 文件夹归类（folderId�
 | userId | Long | user_id | 浏览人用户编号，关联 AdminUserDO |
 
 **继承**: BaseDO
-**索引**: idx_tenant_user_create_time_id、idx_tenant_user_type_entity、idx_tenant_library_create_time_id、idx_tenant_type_entity —— 支撑「最近浏览列表」按用户倒序与对象维度查询
+**索引**: idx_view_tenant_user_create_time_id（tenant_id, user_id, create_time, id）、idx_view_tenant_user_type_entity（tenant_id, user_id, type, entity_id）、idx_view_tenant_library_create_time_id（tenant_id, library_id, create_time, id）、idx_view_tenant_type_entity（tenant_id, type, entity_id）—— 支撑「最近浏览列表」按用户倒序与对象维度查询
 
 #### PmsKnowledgeRecycleRecordDO (pms_knowledge_recycle_record)
 

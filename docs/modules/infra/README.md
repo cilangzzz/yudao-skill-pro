@@ -6,7 +6,7 @@
 
 - **模块路径**: `yudao-module-infra`（单模块布局，无子模块）
 - **业务定位**: 一方面承载基础设施的运维与管理，支撑上层通用与核心业务，例如参数配置、文件存储、定时任务、API 访问/错误日志；另一方面提供研发工具提升效率与质量，例如代码生成器、数据库表结构浏览、多数据源配置。
-- **技术栈**: Spring Boot 2.7.18（JDK8 分支，`javax.*` 命名空间）/ MyBatis-Plus + mybatis-plus-generator（解析表结构）/ Quartz（定时任务）/ Velocity（代码生成模板）/ AWS S3 SDK（S3 文件存储）/ commons-net + jsch（FTP/SFTP）/ Spring Boot Admin（监控）/ Redis
+- **技术栈**: Spring Boot 2.7.18（JDK8 分支，`javax.*` 命名空间）/ MyBatis-Plus + mybatis-plus-generator（解析表结构）/ Quartz（定时任务）/ Velocity（代码生成模板）/ AWS S3 SDK（S3 文件存储：MinIO、RustFS、阿里云、腾讯云等）/ commons-net + jsch（FTP/SFTP）/ Spring Boot Admin（监控）/ Redis
 
 ## 设计原则
 
@@ -16,18 +16,19 @@
 | 存储器可插拔 | 文件客户端抽象为 `FileClient` 接口，DB/本地/FTP/SFTP/S3 五种实现经工厂按配置创建，支持 Master 主配置热切换 |
 | 模板驱动生成 | 代码生成器以数据库真实表结构为输入，经 `CodegenBuilder` 构建、`CodegenEngine` 用 Velocity 渲染，覆盖后端 + Vue 前端 + SQL |
 | DB 与调度器双写 | 定时任务同时维护 `infra_job` 表与 Quartz Scheduler，提供 `sync` 接口全量对齐两者 |
-| 日志双轨 + 自动清理 | API 访问日志与错误日志分离，通过 `traceId` 串联排错；内置 `AccessLogCleanJob`、`ErrorLogCleanJob`、`JobLogCleanJob` 定期清理 |
+| 日志双轨 + 自动清理 | API 访问日志与错误日志分离，通过 `traceId` 串联排错；内置 `AccessLogCleanJob`、`ErrorLogCleanJob`、`JobLogCleanJob` 定期清理，清理 SQL 由 `SqlDialectUtils` 按当前数据源方言动态生成（MySQL/PostgreSQL/Oracle/SQL Server） |
+| 多库方言适配 | 代码生成按数据源 URL 解析 `DbType`，菜单 SQL 模板输出对应方言（MySQL/OceanBase、Oracle/达梦 DM/神通 OSCAR、PostgreSQL/人大金仓、SQL Server）；表结构解析对神通的 TEXT 字段按 String 处理 |
 | 能力单向输出 | 对外仅通过 `api` 包（`FileApi`/`ConfigApi`/`WebSocketSenderApi`）暴露能力，自身不反向依赖任何业务模块 |
 
 ## 核心功能点
 
 | 功能域 | 说明 | 关键实体 |
 |--------|------|----------|
-| 代码生成 | 导入数据库表结构 → 编辑表/字段定义 → 预览/下载生成代码（后端、前端、SQL），支持单表/树表/主子表模板 | CodegenTableDO、CodegenColumnDO |
+| 代码生成 | 导入数据库表结构 → 编辑表/字段定义 → 预览/下载生成代码（后端、前端、SQL），支持单表/树表/主子表模板与多数据库方言菜单 SQL（含神通 OSCAR） | CodegenTableDO、CodegenColumnDO |
 | 参数配置 | 系统参数的键值管理，支持系统内置/自定义类型、可见性控制、按 key 查询 | ConfigDO |
 | 数据源配置 | 多数据源连接配置（密码加密存储），供代码生成器读取任意库的表结构 | DataSourceConfigDO |
 | 代码生成示例 | 生成器的标准产物示例：单表（demo01）、树表（demo02）、主子表（demo03 的 normal/inner/erp 三种关联方式） | Demo01ContactDO、Demo02CategoryDO、Demo03StudentDO 等 |
-| 文件服务 | 文件上传/下载/预签名上传，存储配置管理（DB/本地/FTP/SFTP/S3），文件内容可落库 | FileDO、FileConfigDO、FileContentDO |
+| 文件服务 | 文件上传/下载/预签名上传，存储配置管理（DB/本地/FTP/SFTP/S3，S3 兼容 MinIO、RustFS 等），类型白名单含 `.bin` 二进制固件通道，文件内容可落库 | FileDO、FileConfigDO、FileContentDO |
 | 定时任务 | Quartz 任务管理（创建/启停/触发/同步）、执行日志查询与导出 | JobDO、JobLogDO |
 | API 日志 | API 访问日志与错误日志的查询、错误处理状态流转、Excel 导出 | ApiAccessLogDO、ApiErrorLogDO |
 | Redis 监控 | 读取 Redis INFO 统计与命令统计，返回监控视图数据 | 无（直连 RedisTemplate） |
@@ -94,6 +95,18 @@
 | /infra/file/delete-list | DELETE | 批量删除文件 | infra:file:delete |
 | /infra/file/{configId}/get/** | GET | 下载文件（按存储配置 + 路径） | @PermitAll（另 @TenantIgnore，SecurityConfiguration 中放行） |
 | /infra/file/page | GET | 获得文件分页 | infra:file:query |
+
+### 文件存储 - 用户 App 端 (AppFileController)
+
+前缀：`/app-api/infra/file`（框架按 `**.controller.app.**` 包自动加 `/app-api` 前缀；仅需登录，未加 @PreAuthorize）
+
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|----------|----------|------|----------|
+| /app-api/infra/file/upload | POST | 上传文件（模式一：后端上传） | 已认证 |
+| /app-api/infra/file/presigned-url | GET | 获取文件预签名上传地址（模式二：前端直传 OSS） | 已认证 |
+| /app-api/infra/file/create | POST | 创建文件记录（配合预签名接口） | 已认证 |
+
+> App 端与 Admin 端共用 `FileService`，上传/直传/登记的逻辑与校验完全一致，差异仅在请求前缀与调用入口（[api-file.md](api-file.md) 第 3 节）。
 
 ### 文件配置 (FileConfigController)
 
@@ -257,14 +270,14 @@
 | 表名 | 说明 | 继承基类 | 关键字段 |
 |------|------|----------|----------|
 | infra_codegen_table | 代码生成的表定义 | BaseDO（@TenantIgnore） | data_source_config_id, table_name, table_comment, scene, template_type, front_type |
-| infra_codegen_column | 代码生成的字段定义 | BaseDO（@TenantIgnore） | table_id, column_name, data_type, column_comment, html_type, query_condition |
+| infra_codegen_column | 代码生成的字段定义 | BaseDO（@TenantIgnore） | table_id, column_name, data_type, column_comment, html_type, list_operation_condition |
 | infra_config | 参数配置表 | BaseDO（@TenantIgnore） | category, name, config_key, value, type, visible |
 | infra_data_source_config | 数据源配置 | BaseDO（@TenantIgnore） | name, url, username, password（EncryptTypeHandler 加密存储） |
-| infra_file | 文件信息 | BaseDO | config_id, name, path, url, type, size |
-| infra_file_config | 文件存储配置 | BaseDO | name, storage（FileStorageEnum）, master, config（FileClientConfig JSON，autoResultMap） |
-| infra_file_content | 文件内容（DB 存储模式专用） | BaseDO | config_id, path, content（byte[]） |
-| infra_job | 定时任务 | BaseDO | name, status, handler_name, handler_param, cron_expression, retry_count, retry_interval, monitor_timeout |
-| infra_job_log | 定时任务执行日志 | BaseDO | job_id, handler_name, handler_param, execute_index, begin_time, duration, status, result |
+| infra_file | 文件信息 | BaseDO（@TenantIgnore） | config_id, name, path, url, type, size |
+| infra_file_config | 文件存储配置 | BaseDO（@TenantIgnore） | name, storage（FileStorageEnum）, master, config（FileClientConfig JSON，autoResultMap） |
+| infra_file_content | 文件内容（DB 存储模式专用） | BaseDO（@TenantIgnore） | config_id, path, content（byte[]） |
+| infra_job | 定时任务 | BaseDO（@TenantIgnore） | name, status, handler_name, handler_param, cron_expression, retry_count, retry_interval, monitor_timeout |
+| infra_job_log | 定时任务执行日志 | BaseDO（@TenantIgnore） | job_id, handler_name, handler_param, execute_index, begin_time, duration, status, result |
 | infra_api_access_log | API 访问日志 | BaseDO | trace_id, user_id, user_type, request_url, request_params, operate_module, operate_type, duration, result_code |
 | infra_api_error_log | API 错误日志 | BaseDO | trace_id, user_id, request_url, exception_name, exception_stack_trace, process_status, process_user_id |
 | yudao_demo01_contact | 示例联系人（单表代码生成示例） | BaseDO | name, sex, birthday, description |
@@ -285,11 +298,11 @@
 
 - **上游**（本模块依赖）:
   - framework starters: `yudao-spring-boot-starter-biz-tenant`（多租户）、`yudao-spring-boot-starter-security`、`yudao-spring-boot-starter-websocket`、`yudao-spring-boot-starter-mybatis`（+ `mybatis-plus-generator` 解析表结构）、`yudao-spring-boot-starter-redis`、`yudao-spring-boot-starter-job`（Quartz）、`yudao-spring-boot-starter-mq`、`yudao-spring-boot-starter-excel`、`yudao-spring-boot-starter-monitor`（+ spring-boot-admin-server）、`yudao-spring-boot-starter-test`（test）
-  - 三方库: `velocity-engine-core`（代码生成模板）、`commons-net`（FTP）、`jsch`（SFTP）、`software.amazon.awssdk:s3`（S3/OSS/MinIO）、`tika-core`（文件类型识别）
+  - 三方库: `velocity-engine-core`（代码生成模板）、`commons-net`（FTP）、`jsch`（SFTP）、`software.amazon.awssdk:s3`（S3/OSS/MinIO/RustFS）、`tika-core`（文件类型识别）
   - 业务模块: 无（不依赖任何其他业务模块）
 
 - **下游**（依赖本模块）:
-  - pom 依赖 `yudao-module-infra`: `yudao-module-system`、`yudao-module-member`、`yudao-module-mall/yudao-module-promotion`、`yudao-module-crm`、`yudao-module-mp`、`yudao-module-im`、`yudao-module-ai`、`yudao-module-oa`、`yudao-module-pms`、`yudao-module-fms`、`yudao-server`
+  - pom 依赖 `yudao-module-infra`: `yudao-module-system`、`yudao-module-member`、`yudao-module-mall/yudao-module-promotion`、`yudao-module-crm`、`yudao-module-mp`、`yudao-module-im`、`yudao-module-ai`、`yudao-module-ai1-springai`、`yudao-module-oa`、`yudao-module-pms`、`yudao-module-fms`、`yudao-server`
 
 ## 对外暴露的 API
 

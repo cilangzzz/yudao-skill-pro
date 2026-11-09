@@ -272,7 +272,7 @@
 
 - **路径**: PUT /crm/business/transfer
 - **权限**: crm:business:update
-- **说明**: 将商机负责人转移给新负责人，原负责人可按权限级别留在团队或被移除，需 OWNER 级数据权限。
+- **说明**: 将商机负责人转移给新负责人，原负责人可按权限级别留在团队或被移除，需 OWNER 级数据权限或 CRM 管理员。
 
 **请求参数 (CrmBusinessTransferReqVO)**:
 
@@ -280,19 +280,21 @@
 |-----|------|-----|---------|------|
 | id | Long | 是 | @NotNull | 商机编号 |
 | newOwnerUserId | Long | 是 | @NotNull | 新负责人的用户编号 |
-| oldOwnerPermissionLevel | Integer | 否 | 无 | 老负责人加入团队后的权限级别（CrmPermissionLevelEnum，null 表示移除） |
+| oldOwnerPermissionLevel | Integer | 否 | 无 | 老负责人保留的权限级别（CrmPermissionLevelEnum，null 表示移除，只能为只读(2) 或读写(3)） |
 
 **响应**: CommonResult&lt;Boolean&gt;
 
-**业务逻辑**: 1. 校验商机存在（需 OWNER 数据权限）。 2. 执行数据权限转移（新负责人成为 OWNER，老负责人按 oldOwnerPermissionLevel 调整）。 3. 更新商机的负责人字段。 4. 记录操作日志。
+**业务逻辑**: 1. 校验商机存在（需 OWNER 数据权限或 CRM 管理员）。 2. 执行数据权限转移（`transferPermission`，详见 [api-permission.md](api-permission.md) 第 2 节）：新负责人成为 OWNER（已在团队时直接提升），老负责人按 oldOwnerPermissionLevel 调整，老负责人保留级别仅允许 null/只读/读写。 3. 更新商机的负责人字段。 4. 记录操作日志。
 
 **错误码**:
 
 | 错误码 | 说明 |
 |-------|------|
 | 1_020_002_000 | 商机不存在 |
+| 1_020_007_000 | 数据权限不存在（该数据缺少负责人权限记录） |
 | 1_020_007_001 | 操作失败，原因：没有权限 |
 | 1_020_007_003 | 操作失败，原因：转移对象已经是该负责人 |
+| 1_020_007_010 | 操作失败，原因：老负责人的权限级别只能是只读或读写 |
 
 ---
 

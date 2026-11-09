@@ -37,7 +37,7 @@
 
 **问题**: 删除公众号后，其它节点缓存里该账号长期残留，回调仍会路由到已删除账号；新环境忘了导入 mp 表结构时，启动不报错，但所有回调报 `公众号 appId(xxx) 不存在`。
 
-**原因**: 两个盲区都在 `MpAccountServiceImpl`：其一，`refreshLocalCache` 用 `selectCountByUpdateTimeGt`（裸 SQL `WHERE update_time > #{maxUpdateTime}`）判断变更，而 `deleteById` 是逻辑删除、不更新 `update_time`，删除动作不会触发其它节点刷新；其二，`initLocalCache` 捕获 `Throwable` 且仅当消息包含 `doesn't exist` 时只打 error 日志（提示参考 https://doc.iocoder.cn/mp/build/ ），表未建时缓存静默为空。
+**原因**: 两个盲区都在 `MpAccountServiceImpl`：其一，`refreshLocalCache` 用 `selectCountByUpdateTimeGt`（裸 SQL `WHERE update_time > #{maxUpdateTime}`）判断变更，而 `deleteById` 是逻辑删除、不更新 `update_time`，删除动作不会触发其它节点刷新；其二，`initLocalCache` 捕获 `Throwable` 后用 `JdbcExceptionUtils#isTableNotExists(ex)` 判断是否为「表不存在」：沿 cause 链与 `SQLException#getNextException` 链，优先按 SQLState（`42S02`/`S0002`/`42P01`）和 Oracle 错误码 `942`（SQLState `42000`）识别，只有整条链都没有有效 SQLState 时才兜底匹配消息含 `doesn't exist`。识别为未建表时只打 error 日志（提示参考 https://doc.iocoder.cn/mp/build/ ），表未建时缓存静默为空；列不存在、权限不足等其它异常会原样抛出，从而启动失败。
 
 **解决**: 删除账号后建议同步调用 `mpServiceFactory` 重建或直接清理对应缓存条目；新环境部署先按官方文档执行 mp 模块建表 SQL，再用 `/mp/open/{appId}` 联调回调。
 
@@ -91,7 +91,7 @@
 
 **问题**: 微信服务器 5 秒内未收到 XML 响应会重试推送（最多 3 次），粉丝收到重复的欢迎语/自动回复，`mp_message` 出现重复记录。
 
-**原因**: `MpMessageDO` 只把 `msgId` 作为普通字段存储，全模块没有任何按 `msgId` 的查重逻辑或唯一索引；`MessageReceiveHandler` 收到重推消息会再次走 `receiveMessage` 落库，`MessageAutoReplyHandler` 会再次触发 `replyForMessage` 回复。
+**原因**: `MpMessageDO` 只把 `msgId` 作为普通字段存储，全模块没有任何按 `msgId` 的查重逻辑（仓库无 mp 建表 DDL，也无法确认是否存在 `msg_id` 唯一索引）；`MessageReceiveHandler` 收到重推消息会再次走 `receiveMessage` 落库，`MessageAutoReplyHandler` 会再次触发 `replyForMessage` 回复。
 
 **解决**: 给 `mp_message` 增加 `(appId, msg_id)` 唯一索引，或在 `receiveMessage`/`replyForMessage` 入口先按 `wxMessage.getMsgId()` 查重；事件类消息（无 msgId）可按 `createTime + fromUser + event` 组合近似判重。
 
@@ -109,7 +109,7 @@
 
 **问题**: 只授予 `mp:tag:query` 权限的角色无法使用标签下拉框（`GET /mp/tag/list-all-simple`），反而需要 `mp:account:query` 权限。
 
-**原因**: `MpTagController#listAllSimple` 标注 `@PreAuthorize("@ss.hasPermission('mp:account:query')")`，且 `@Operation(summary = "获取公众号账号精简信息列表")`——从 `MpAccountController` 复制后权限和描述都忘了改，返回的实际是标签列表（`convertList02`）。源码保持原样，此处如实标注。
+**原因**: `MpTagController#getSimpleTags` 标注 `@PreAuthorize("@ss.hasPermission('mp:account:query')")`，且 `@Operation(summary = "获取公众号账号精简信息列表")`——从 `MpAccountController` 复制后权限和描述都忘了改，返回的实际是标签列表（`convertList02`）。源码保持原样，此处如实标注。
 
 **解决**: 给角色分配权限时按现状授予 `mp:account:query`；改造时建议改为 `mp:tag:query` 并同步修正 summary 文案（注意前端菜单权限标识配套调整）。
 
@@ -130,3 +130,29 @@
 **原因**: `MpMessageDO.Article` 同时被 `MpMenuDO#replyArticles` 和 `MpAutoReplyDO#responseArticles` 以 `@TableField(typeHandler = JacksonTypeHandler.class)` 存储（三张表的 DO 均已开 `autoResultMap = true`），JSON 结构与 Java 类强耦合。
 
 **解决**: 对 `Article` 只做加字段（可空兼容）演进，禁止改字段名/类型；确需破坏性变更时，先写数据迁移脚本刷三张表的 JSON 列。新增图文类场景应复用 `MpMessageDO.Article` 而不是另造一个结构。
+
+## 8. 素材上传
+
+### 8.1 临时文件用随机名独占创建，扩展时不要回退到「原始文件名拼接」
+
+**问题**: 旧实现 `FileUtil.newFile(FileUtil.getTmpDirPath() + originalFilename)` 直接把用户上传的原始文件名拼进临时目录：恶意文件名（含 `../` 的目录穿越、绝对路径等）可覆盖甚至删除临时目录之外的任意文件；并发上传同名文件还会互相覆盖、在 `finally` 删除时误删对方的文件。
+
+**原因**: `MpMaterialServiceImpl#createTempFile` 现在统一用 `Files.createTempFile(TEMP_FILE_PREFIX, suffix)` 在系统临时目录（`java.io.tmpdir`，与 Hutool `FileUtil.getTmpDir()` 指向同一目录，目录本身未变化）创建带随机文件名的临时文件，前缀 `mp-material-`，由 JDK 保证独占创建；上传结束后在 `finally` 中 `FileUtil.del(file)` 删除。三个上传接口（upload-temporary / upload-permanent / upload-news-image）都走该方法。
+
+**解决**: 二次开发如需在素材上传链路新增临时文件处理，必须复用 `createTempFile`（或同样使用 `Files.createTempFile`），不要重新按原始文件名落盘；运维若对 `java.io.tmpdir` 做定时清理/挂载/安全策略，需知悉临时文件为 `mp-material-*`，进程异常退出时 `finally` 不会执行，可能残留。
+
+### 8.2 原始扩展名不合法时，临时文件后缀退化为 .tmp
+
+**问题**: 上传文件名扩展名含特殊字符（如 `file.jpg.p%ng`、空格、`#` 等）时，临时文件后缀变成 `.tmp`，微信侧是按扩展名识别文件类型的（源码注释即为此保留扩展名），识别不到类型时上传会失败或返回微信错误。
+
+**原因**: `createTempFile` 只保留匹配 `^[a-zA-Z0-9]{1,16}$` 的扩展名；不匹配时向 `Files.createTempFile` 传 `null` 后缀，JDK 默认使用 `.tmp`。
+
+**解决**: 上传素材使用规范扩展名（如 `.jpg`/`.png`/`.mp3`/`.mp4`）；排查素材上传失败时，先确认临时文件名后缀是否被退化成 `.tmp`。
+
+### 8.3 素材 name 缺省取的是 MultipartFile#getName()，不是原始文件名
+
+**问题**: 不传 `name` 上传永久素材，或上传临时素材时，`mp_material.name` 落库的是 `file` 之类的 multipart 表单字段名，而不是用户选择的上传文件名，前端展示的「素材名」看起来不对。
+
+**原因**: `uploadTemporaryMaterial` 直接把 `reqVO.getFile().getName()` 作为素材名；`uploadPermanentMaterial` 用 `StrUtil.blankToDefault(reqVO.getName(), reqVO.getFile().getName())`，仅在 `name` 非空白时使用入参。Spring `MultipartFile#getName()` 返回 multipart 表单字段名（通常为 `file`），原始文件名是 `getOriginalFilename()`，源码未用于落库。
+
+**解决**: 需要可读素材名时，调用方显式传 `name`；需要原始文件名时自行取 `MultipartFile#getOriginalFilename()` 并做清洗，不要依赖缺省值。

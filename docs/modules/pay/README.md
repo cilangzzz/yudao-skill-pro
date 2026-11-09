@@ -106,8 +106,8 @@
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |----------|----------|------|----------|
 | /pay/wallet-recharge/update-paid | POST | 更新钱包充值为已充值（内部回调） | @PermitAll（内部校验） |
-| /pay/wallet-recharge/refund | POST | 发起钱包充值退款 | 已认证 |
-| /pay/wallet-recharge/update-refunded | POST | 更新钱包充值为已退款（内部回调） | @PermitAll（内部校验） |
+| /pay/wallet-recharge/refund | POST | 发起钱包充值退款（先 `FOR UPDATE` 锁定充值记录，串行化并发退款） | pay:wallet:update-balance（复用「用户余额修改」，菜单 451） |
+| /pay/wallet-recharge/update-refunded | POST | 更新钱包充值为已退款（内部回调，幂等 + 乐观锁） | @PermitAll（内部校验） |
 
 ### 钱包充值套餐 (PayWalletRechargePackageController)
 
@@ -119,11 +119,14 @@
 | /pay/wallet-recharge-package/get | GET | 获得钱包充值套餐 | pay:wallet-recharge-package:query |
 | /pay/wallet-recharge-package/page | GET | 获得钱包充值套餐分页 | pay:wallet-recharge-package:query |
 
-### 钱包余额明细 (PayWalletTransactionController)
+### 钱包余额明细 (PayWalletTransactionController / AppPayWalletTransactionController)
 
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |----------|----------|------|----------|
 | /pay/wallet-transaction/page | GET | 获得钱包流水分页 | pay:wallet:query |
+| /pay/wallet-transaction/get-summary | GET | 获得钱包流水统计（累计支出返回正值） | 已认证（用户 APP） |
+
+> `/pay/wallet-transaction/get-summary` 属于用户 APP 端 `AppPayWalletTransactionController`，按当前登录用户统计指定时间段内的累计收入 / 累计支出，两者均为正值。
 
 ### 示例订单 (PayDemoOrderController)
 
@@ -143,6 +146,23 @@
 | /pay/demo-withdraw/transfer | POST | 提现单转账 | 已认证 |
 | /pay/demo-withdraw/page | GET | 获得示例提现单分页 | 已认证 |
 | /pay/demo-withdraw/update-transferred | POST | 更新示例提现单的转账状态（内部回调） | @PermitAll（内部校验） |
+
+### 用户 APP 端接口（AppPay*Controller，前缀 /app-api）
+
+> 以下接口路径在 `/app-api` 前缀下（与 admin 端同名路径因前缀不同互不冲突），详细说明见 [api-app-client.md](api-app-client.md)。
+
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|----------|----------|------|----------|
+| /pay/channel/get-enable-code-list | GET | 获得指定应用的开启的支付渠道编码列表 | 已认证 |
+| /pay/order/get | GET | 获得支付订单（校验订单归属当前用户） | 已认证 |
+| /pay/order/submit | POST | 提交支付订单（校验订单归属当前用户） | 已认证 |
+| /pay/transfer/sync | GET | 同步转账单（主动查询渠道转账结果） | 已认证 |
+| /pay/wallet/get | GET | 获取当前会员钱包 | 已认证 |
+| /pay/wallet-recharge/create | POST | 创建钱包充值记录（发起充值） | 已认证 |
+| /pay/wallet-recharge/page | GET | 获得当前会员已支付的钱包充值记录分页 | 已认证 |
+| /pay/wallet-recharge-package/list | GET | 获得钱包充值套餐列表 | 已认证 |
+| /pay/wallet-transaction/page | GET | 获得当前会员钱包流水分页 | 已认证 |
+| /pay/wallet-transaction/get-summary | GET | 获得钱包流水统计 | 已认证 |
 
 ## 数据模型
 
@@ -178,7 +198,8 @@
   - 业务模块: yudao-module-system（SocialClientApi：微信小程序发货信息录入、订阅消息发送）
   - 三方 SDK: alipay-sdk-java、weixin-java-pay
 - **下游**（依赖本模块）:
-  - yudao-module-mall（yudao-module-trade：支付/退款/转账/钱包 API 的主要消费方）
+  - yudao-module-mall/yudao-module-trade（支付/退款/转账/钱包 API 的主要消费方）
+  - yudao-module-mall/yudao-module-statistics（支付/退款/钱包统计，直接依赖 pay 模块的枚举）
 
 ## 对外暴露的 API
 
@@ -191,9 +212,37 @@
 
 > 另有 5 个内部定时任务：PayNotifyJob（回调重试）、PayOrderExpireJob（订单过期）、PayOrderSyncJob / PayRefundSyncJob / PayTransferSyncJob（状态同步）。
 
+## 模块特定配置
+
+### yudao.pay（PayProperties）
+
+配置前缀 `yudao.pay`，绑定类 `cn.iocoder.yudao.module.pay.framework.pay.config.PayProperties`，由 `PayConfiguration` 通过 `@EnableConfigurationProperties` 注册。
+
+| 配置项 | 类型 | 默认值 | 校验 | 说明 |
+|--------|------|--------|------|------|
+| order-notify-url | String | 无 | @NotEmpty + @URL（必填） | 支付渠道回调到本模块的【支付】地址，对应 `PayNotifyController#notifyOrder`；回调链路：支付渠道 => 本模块 order-notify-url => 业务的 `PayAppDO.orderNotifyUrl` |
+| refund-notify-url | String | 无 | @NotEmpty + @URL（必填） | 【退款】回调地址，对应 `PayNotifyController#notifyRefund` |
+| transfer-notify-url | String | 无 | 无 | 【转账】回调地址，对应 `PayNotifyController#notifyTransfer` |
+| order-no-prefix | String | P | @NotEmpty | 支付订单 no 前缀（`noRedisDAO.generate` 生成，形如 P202110132239124200055） |
+| refund-no-prefix | String | R | @NotEmpty | 退款订单 no 前缀 |
+| walletPayAppKey | String | wallet | @NotEmpty | 钱包充值使用的支付应用 appKey，对应 `pay_app` 表中 wallet 渠道的 `app_key` |
+
+配置示例（见 `yudao-server/src/main/resources/application-dev.yaml` / `application-local.yaml`）：
+
+```yaml
+yudao:
+  pay:
+    order-notify-url: https://your-domain/admin-api/pay/notify/order    # 支付渠道的【支付】回调地址
+    refund-notify-url: https://your-domain/admin-api/pay/notify/refund   # 支付渠道的【退款】回调地址
+    transfer-notify-url: https://your-domain/admin-api/pay/notify/transfer # 支付渠道的【转账】回调地址
+```
+
+> `order-notify-url` / `refund-notify-url` 缺失或不是合法 URL 时，`@Validated` 校验失败会导致应用启动报错。
+
 ## 详细文档
 
 - [api-app.md](api-app.md) - 支付应用
+- [api-app-client.md](api-app-client.md) - 用户 APP 端接口
 - [api-channel.md](api-channel.md) - 支付渠道
 - [api-order.md](api-order.md) - 支付订单
 - [api-refund.md](api-refund.md) - 退款订单

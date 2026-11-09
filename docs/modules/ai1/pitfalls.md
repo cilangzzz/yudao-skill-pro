@@ -10,7 +10,7 @@
 
 **问题**: 部分接口的参数校验形同虚设——消息内容非空、Agent 状态非空、首页 days 的 1~30 范围、MCP config 的 @AssertTrue 校验等在运行时都不生效，但代码里明明写了注解。
 
-**原因**: 本仓库是 JDK8 + Spring Boot 2.7.18（根 `pom.xml`：`revision` 2026.09-jdk8-SNAPSHOT、`spring.boot.version` 2.7.18），运行时验证器是 hibernate-validator 6（javax.validation 体系）。而模块内 32 个文件 import 了 `jakarta.validation`（共 54 处：其中 `jakarta.validation.constraints` 19 个文件 40 处，另有 `jakarta.validation.Valid` 14 处；javax.validation 15 处）：Spring AI 1.x 依赖把 jakarta.validation-api 3.x 带进了编译期 classpath，所以 jakarta 注解能编译通过，但 javax 验证器根本看不到它们，校验被**静默跳过**。注意 Controller 方法参数上的 jakarta `@Valid` 同样不被 Spring MVC 5.x 识别，批量替换时需连同 `@Valid` 一起换回 javax。典型受害文件：
+**原因**: 本仓库是 JDK8 + Spring Boot 2.7.18（根 `pom.xml`：`revision` 2026.10-jdk8-SNAPSHOT、`spring.boot.version` 2.7.18），运行时验证器是 hibernate-validator 6（javax.validation 体系）。而模块内 32 个文件 import 了 `jakarta.validation`（共 54 处：其中 `jakarta.validation.constraints` 19 个文件 40 处，另有 `jakarta.validation.Valid` 14 处；javax.validation 15 处）：Spring AI 1.x 依赖把 jakarta.validation-api 3.x 带进了编译期 classpath，所以 jakarta 注解能编译通过，但 javax 验证器根本看不到它们，校验被**静默跳过**。注意 Controller 方法参数上的 jakarta `@Valid` 同样不被 Spring MVC 5.x 识别，批量替换时需连同 `@Valid` 一起换回 javax。典型受害文件：
 
 - `controller/admin/session/vo/message/Ai1SessionMessageSendReqVO.java` —— content 的 `@NotBlank`（send-stream 消息内容非空校验失效）；
 - `controller/admin/agent/vo/Ai1AgentUpdateStatusReqVO.java` —— `@NotNull`；
@@ -55,6 +55,14 @@
 
 **解决**: 扩展生成流程时保持「先回填 DB、再写结果流、最后 XACK」的顺序与补偿入口；XACK 放在成功路径末尾；任何接管场景都走 `completeTaskResult` 补齐缺失终态，不要重跑生成。
 
+### 2.5 会话消息的限量查询必须走 BaseMapperX.selectListLimitN，不能拼字面 LIMIT
+
+**问题**: 把会话消息查询从 MySQL 迁到 PostgreSQL / Oracle / SQL Server 后报语法错误（`LIMIT` 不被支持），或 SQL Server 下因缺 `ORDER BY` 直接报错。
+
+**原因**: `dal/mysql/session/Ai1SessionMessageMapper.java` 的三处限量查询（L50-78）原先用 `QueryWrapperX.limitN` 拼字面 `LIMIT`，只有 MySQL 能跑。现统一改为 `LambdaQueryWrapperX` + `BaseMapperX.selectListLimitN(wrapper, limit)` / `selectFirstOne(wrapper)`，由 MyBatis-Plus 分页插件按执行时数据库生成 `LIMIT`（PostgreSQL）/ `FETCH FIRST`（Oracle）/ `OFFSET FETCH`（SQL Server），且不执行 COUNT 查询。三处用途分别是：构造对话上下文的历史窗口（`selectListBySessionIdAndIdLessThan`，按编号倒序取最近 N 条，见 `Ai1SessionStreamTool#generate`）、归档安全前缀的「第一条 GENERATING 消息」（`selectFirstBySessionIdsAndStatusAndIdGt`）、记忆归档水位线后的已完成消息（`selectListBySessionIdsAndStatusAndIdBetween`）。`selectListLimitN` 的边界语义：`limit=0` 直接返回空列表、负数抛 `IllegalArgumentException`（否则分页插件会当成不分页而查全表）；SQL Server 的分页语句要求 `ORDER BY`，三处当前都显式 `orderByAsc/Desc`，满足要求。
+
+**解决**: 新增限量查询沿用 `selectListLimitN` / `selectFirstOne` 并显式排序；不要用 `QueryWrapperX.limitN`、也不要再往 wrapper 上 `last("LIMIT ...")` 追加行数限制。
+
 ## 3. 事务与 AOP 相关
 
 ### 3.1 同类内部调用 @Transactional 失效，需 getSelf() 自代理
@@ -67,18 +75,18 @@
 
 ## 4. 多节点部署与缓存相关
 
-### 4.1 各类运行时缓存的 evict 只作用于本节点，跨节点靠 TTL/指纹兜底
+### 4.1 各类运行时缓存的 evict 只作用于本节点，跨节点靠配置指纹在下次调用时生效
 
 **问题**: 修改了 Provider 地址/密钥、MCP 配置、嵌入模型或 SKILL 内容后，集群部分节点的行为迟迟不变，误以为改动没生效。
 
 **原因**: 四处运行时缓存的失效接口都只清当前 JVM：
 
-- 模型实例：`harness/llm/Ai1LlmModelFactory.java` 的 `evictByProviderId/evictByModelId` 只对本节点两个 Guava Cache `removeIf`，`CACHE_EXPIRE = 10 分钟`（L53-55）注释明确「修改 Provider / 模型时只能失效本节点，其他节点最迟在该时间后按新配置重建」；
+- 模型实例：`harness/llm/Ai1LlmModelFactory.java` 的 `evictByProviderId/evictByModelId`（L108-124）只对本节点两个 Guava Cache（容量 500，L51）`removeIf`。缓存 key 含配置指纹（`providerId:modelId:Objects.hash(baseUrl, apiKey, model, modelType, headers)[:sessionKey]`，L179-182），配置变化后其他节点**下一次调用即按新配置计算新 key 并重建模型**，不存在「最长 10 分钟才生效」的延迟；`CACHE_EXPIRE = 10 分钟`（L54-58）只负责回收配置变化后不再命中的旧 key；
 - MCP 客户端：`harness/mcp/Ai1McpClientTool.java` `CACHE_EXPIRE_AFTER_ACCESS = 30 分钟`（L62-66），其他节点的旧客户端（含 stdio 子进程）等闲置过期或按配置指纹（`#buildCacheKey`）自然 miss 重建；
 - 向量存储：`harness/rag/Ai1RagTool.java#evict` 注释「只作用于当前节点；其他节点在嵌入模型变更后，会因嵌入模型实例不一致自然重建」（L201-207）；
 - SKILL 快照：`harness/skill/Ai1SkillToolFactory.java` `snapshotCache` 为 JVM 内对象，靠每次使用前按「编号:更新时间」指纹校验自动重建。
 
-**解决**: 排查「改了配置不生效」先确认多节点延迟（模型最长 10 分钟、MCP 最长 30 分钟）；对时效敏感的变更，重启节点或运维上保证配置变更落在单一节点验证。
+**解决**: 排查「改了配置不生效」先确认配置是否真正变更（如 apiKey 被脱敏值覆盖）与请求是否落在同一节点；模型缓存跨节点无延迟，其他节点下次请求即生效；MCP 客户端最长 30 分钟，对时效敏感的变更可重启节点或运维上保证配置变更落在单一节点验证。
 
 ## 5. 长期记忆归档相关
 
@@ -152,6 +160,14 @@
 
 **问题**: 消息趋势把失败消息和「生成中」占位消息都计入；按 Agent 排行里出现 agentName 为空的行；统计 SQL 被搬到 Job/异步线程后跨租户。
 
-**原因**: `dal/mysql/home/Ai1HomeMapper.java` 三条 `@Select` 是手写原生 SQL（L21-48）：① 不带 role/status 条件，`Ai1SessionMessageRoleEnum`、`Ai1SessionMessageStatusEnum` 的状态都参与 COUNT；② 只手写 `deleted = FALSE`（原生 SQL 不走 MyBatis-Plus 逻辑删除拼接），且未写 tenant_id——租户隔离完全依赖 `TenantLineInnerInterceptor` 对 @Select 的自动改写，DO 均继承 TenantBaseDO；③ 按 Agent 统计仅 INNER JOIN `ai1_session` 并过滤 `c.deleted = FALSE`，已删除 Agent 名下的未删除消息仍计入，Controller 回填名称用 `MapUtils.findAndThen`，Agent 已删除（`getAgentMap` 查不到）时跳过，`agentName` 保持 null（`Ai1HomeMessageSummaryByAgentRespVO` 注释「Agent 已删除时为空」）。另外统计无 `@Cacheable`、无预聚合，`GROUP BY CAST(create_time AS DATE)` 在大消息量下可能触发临时表/filesort。
+**原因**: `dal/mysql/home/Ai1HomeMapper.java` 三条 `@Select` 是手写原生 SQL（L23-53）：① 不带 role/status 条件，`Ai1SessionMessageRoleEnum`、`Ai1SessionMessageStatusEnum` 的状态都参与 COUNT；② 只手写 `deleted = 0`（原生 SQL 不走 MyBatis-Plus 逻辑删除拼接；用 0/1 而非 `FALSE`，避免 Oracle / SQL Server 不接受布尔字面量），且未写 tenant_id——租户隔离完全依赖 `TenantLineInnerInterceptor` 对 @Select 的自动改写，DO 均继承 TenantBaseDO；③ 按 Agent 统计仅 INNER JOIN `ai1_session` 并过滤 `c.deleted = 0`，已删除 Agent 名下的未删除消息仍计入，Controller 回填名称用 `MapUtils.findAndThen`，Agent 已删除（`getAgentMap` 查不到）时跳过，`agentName` 保持 null（`Ai1HomeMessageSummaryByAgentRespVO` 注释「Agent 已删除时为空」）。另外统计无 `@Cacheable`、无预聚合，按方言日期表达式（`castDateText`，MySQL / H2 为 `CAST(create_time AS DATE)`）分组在大消息量下可能触发临时表/filesort。
 
 **解决**: 调整统计口径必须改 `Ai1HomeMapper` 的 SQL，而非枚举判断；前端需容忍 `agentName` 为空的行；把统计复用到无租户上下文的场景（定时 Job、异步线程、工具调用）前，先评估租户改写是否仍然生效。
+
+### 10.2 统计 SQL 的方言片段由 SqlDialectUtils 生成，数据库产品未登记会直接 500
+
+**问题**: 把 ai1 模块部署到未登记的数据库（或 PostgreSQL 兼容产品）后，首页统计接口返回 500，且错误信息里只有一句「SQL 方言不支持的数据库产品：xxx」。
+
+**原因**: `Ai1HomeMapper` 的按天统计用 `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@castDateText('create_time')}`、总量统计用 `${@...SqlDialectUtils@fromDual()}` 生成方言片段（运行期按 JDBC 元数据识别产品名：MySQL / H2 → `CAST(... AS DATE)`，PostgreSQL / Oracle → `TO_CHAR(...)`，SQL Server → `CONVERT(...)`；Oracle 顶层汇总补 `FROM DUAL`）。`SqlDialectUtils.resolveDialect` 识别不到产品名时抛 `IllegalStateException("SQL 方言不支持的数据库产品：" + productName)`（SqlDialectUtils L912-960），异常向上抛出表现为 500。此外 `${}` 是 MyBatis 字符串替换，静态方法参数只能传代码中固定并通过 `checkColumn` 白名单校验的列名（L967-971）；业务值必须继续用 `#{}` 绑定，否则引入 SQL 注入风险。
+
+**解决**: 部署到新数据库前确认产品名在 `SqlDialectUtils` 支持列表内；复制统计 SQL 时保持 `${}` 只包裹方言表达式、`#{}` 绑定全部业务参数，不要把业务值拼进 `${}`。

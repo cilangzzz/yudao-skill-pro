@@ -29,7 +29,7 @@
 | sliderPicUrls | List&lt;String&gt; | 否 | - | 商品轮播图 |
 | sort | Integer | 是 | @NotNull | 排序字段 |
 | specType | Boolean | 是 | @NotNull | 规格类型（true 多规格 / false 单规格） |
-| deliveryTypes | List&lt;Integer&gt; | 是 | @NotEmpty | 配送方式数组 |
+| deliveryTypes | List&lt;Integer&gt; | 是 | @NotEmpty、@InEnum(DeliveryTypeEnum) | 配送方式数组，取值限 1 快递发货 / 2 用户自提；非法值在参数校验阶段即返回 HTTP 400「配送方式不正确」，不落库 |
 | deliveryTemplateId | Long | 否 | - | 物流配置模板编号 |
 | giveIntegral | Integer | 是 | @NotNull | 赠送积分 |
 | subCommissionType | Boolean | 是 | @NotNull | 分销类型 |
@@ -63,6 +63,8 @@
 3. 校验 SKU 列表（`productSkuService.validateSkuList`）：SKU 不能为空；单规格自动补充默认属性（默认属性项/属性值）；多规格依次校验属性项存在、单个 SKU 内属性不重复、每个 SKU 属性数量一致、SKU 之间属性组合不重复。
 4. VO 转 `ProductSpuDO` 后基于 SKU 初始化冗余字段：price/marketPrice/costPrice 取所有 SKU 最低值，stock 取所有 SKU 合计；status 为空时默认上架，销量、浏览量默认 0。
 5. 插入 SPU，随后批量插入关联 SKU（`createSkuList`，初始销量 0），整体事务回滚，返回 SPU 编号。
+
+> 参数校验说明：`deliveryTypes` 在进入 Service 前由 `@InEnum(DeliveryTypeEnum.class)` 校验，仅接受 1（快递发货）/ 2（用户自提），非法值直接返回 HTTP 400「配送方式不正确」，不会再被静默写入数据库。创建与更新接口共用同一 VO，规则一致（product 子模块为此新增对 `yudao-module-trade-api` 的依赖）。
 
 **错误码**:
 

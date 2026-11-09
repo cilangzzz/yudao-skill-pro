@@ -87,6 +87,30 @@ TenantUtils.execute(channel.getTenantId(), () -> getSelf().notifyOrder(channel, 
 
 **解决**: 新增钱包资金操作时，先确认它扣的是 `balance` 还是 `freeze_price`，再决定流水 `afterBalance` 的算法；不要把 `RECHARGE_REFUND` 改成通用的减余额逻辑。另外注意 `freezePrice`/`unfreezePrice` 失败分别抛 `WALLET_BALANCE_NOT_ENOUGH` / `WALLET_FREEZE_PRICE_NOT_ENOUGH`，两个错误码不要混用。
 
+### 3.4 钱包充值退款的并发防重依赖 FOR UPDATE 行锁，事务边界不能动
+
+**问题**: `PayWalletRechargeServiceImpl.refundWalletRecharge` 用 `walletRechargeMapper.selectOneForUpdate(...)`（`SELECT ... FOR UPDATE`）读取充值记录再冻结余额。若有人"优化"成普通 `selectById`，并发发起退款时两个请求都会读到 `payRefundId` 为空的旧记录，各自冻结一次余额，导致**重复冻结**（资损）。
+
+**原因**: 行锁只在事务内有效，且只有持锁的串行化执行才能让后到的请求读到前一个事务提交后的 `payRefundId`，从而命中 `WALLET_RECHARGE_REFUND_FAIL_REFUNDED` 拒绝重复退款。
+
+**解决**: `refundWalletRecharge` 必须保留 `@Transactional(rollbackFor = Exception.class)`，且加锁读取的写法不能改回普通查询。若后续把该方法改为非事务调用或去掉事务注解，锁会立即释放，并发重复退款的防护随之失效。
+
+### 3.5 退款回调必须「先乐观锁更新、再操作钱包」，顺序不能颠倒
+
+**问题**: `PayWalletRechargeServiceImpl.updateWalletRechargeRefunded` 的处理顺序是：① 校验 payRefundId 与充值记录绑定一致；② 已是退款终态（SUCCESS/FAILURE）则幂等直接返回；③ payRefund 状态未结束（如 WAITING）则直接返回（既不更新退款状态，也不操作钱包）；④ 先用 `updateByIdAndRefunded(id, WAITING, updateObj)` 以 `refund_status = WAITING` 为条件乐观更新，更新数为 0 说明被并发处理、直接返回；⑤ 只有抢到更新的这一次调用，才在同一事务内执行钱包扣减（退款成功）或解冻（退款失败）。
+
+**原因**: 若把顺序改回「先操作钱包、再更新退款状态」，并发重复回调下会对同一笔退款重复扣减 / 重复解冻。而"未结束直接返回"是为了避免把处理中的退款误置为 FAILURE。
+
+**解决**: 保持"乐观锁更新 → 钱包操作"的顺序，钱包操作失败时依靠同一事务回滚已写入的退款字段。排查"退款回调后充值记录状态不变"时，先看 `pay_refund.status` 是否仍处于处理中（WAITING），而不是直接怀疑回调没到。
+
+### 3.6 业务回调必须校验「回调单号 = 业务单据绑定的单号」
+
+**问题**: 支付通知只回传商户单号 + 支付侧单号。如果业务侧只校验"单据存在 + 金额一致"，那么其它支付应用中**商户订单号与金额都相同**的另一笔支付单，可能被用来串单，把业务单据置为已支付 / 已退款。
+
+**原因**: `merchantOrderId` 是业务方自定义的，不同支付应用之间不保证全局唯一（示例模块中 demo 应用的商户订单号就是纯数字 id）。
+
+**解决**: 业务回调处理的第一道校验就是"回调单号必须等于业务单据已绑定的单号"：钱包充值支付回调比 `payOrderId`、钱包充值退款回调比 `payRefundId`、示例订单支付回调比 `payOrderId`、示例提现转账回调比 `payTransferId`，不一致分别抛 `WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_ID_ERROR`、`WALLET_RECHARGE_REFUND_FAIL_REFUND_ORDER_ID_ERROR`、`DEMO_ORDER_UPDATE_PAID_FAIL_PAY_ORDER_ID_ERROR`、`DEMO_WITHDRAW_UPDATE_STATUS_FAIL_PAY_TRANSFER_ID_ERROR`。新增业务回调接口时照此实现；历史脏数据或跨应用同号支付单会直接抛错，需要人工核对单据绑定关系。
+
 ## 4. 缓存与客户端相关
 
 ### 4.1 PayClient 是 JVM 本地缓存对象，删除渠道不清理、配置热更新靠 equals 比对
@@ -115,6 +139,14 @@ TenantUtils.execute(channel.getTenantId(), () -> getSelf().notifyOrder(channel, 
 
 **解决**: 不要给该接口补上资源级权限（会导致普通用户无法支付）；也不要信任前端传入的 `walletId`——保持服务端覆盖 `channelExtras` 的写法。接入新的"账户类"支付渠道时，参照钱包模式在 Controller 层注入当前用户身份。
 
+### 5.3 钱包充值退款接口已收紧为 pay:wallet:update-balance 权限
+
+**问题**: `POST /pay/wallet-recharge/refund` 原先没有 `@PreAuthorize`，任何已登录的后台账号都能发起退款（退款会冻结并最终扣减用户钱包余额）。现已加上 `@PreAuthorize("@ss.hasPermission('pay:wallet:update-balance')")`，复用「用户余额修改」权限（菜单 451「用户余额修改」），未新增菜单 / 按钮。
+
+**原因**: 退款属于资金操作，权限口径应与「更新会员用户余额」保持一致，避免普通运营账号误操作造成资损。
+
+**解决**: 升级后，缺少该权限的角色调用会返回 403。需给运营 / 客服角色补授权 `pay:wallet:update-balance`，前端退款按钮按该权限标识（`v-hasPermi`）控制显示；不要为了兼容旧行为而把权限注解去掉。
+
 ## 6. 错误码与通知重试相关
 
 ### 6.1 钱包等业务异常以"渠道错误码"形式透传，最终被包装成 PAY_ORDER_SUBMIT_CHANNEL_ERROR
@@ -127,8 +159,16 @@ TenantUtils.execute(channel.getTenantId(), () -> getSelf().notifyOrder(channel, 
 
 ### 6.2 支付通知最多重试 9 次，之后置 FAILURE 需人工补偿
 
-**问题**: `PayNotifyTaskDO.NOTIFY_FREQUENCY` 定义了 8 个间隔（15、15、30、180、1800、1800、1800、3600 秒），`maxNotifyTimes = NOTIFY_FREQUENCY.length + 1` 即最多 9 次。`PayNotifyServiceImpl.processNotifyResult` 中通知次数达到上限后任务置为 `FAILURE`，`selectListByNotify()` 只扫描 `WAITING`/`REQUEST_SUCCESS`/`REQUEST_FAILURE` 三种状态，FAILURE 任务不会再被投递，业务方将永远收不到这笔支付/退款通知。
+**问题**: `PayNotifyTaskDO.NOTIFY_FREQUENCY` 定义了 8 个间隔（15、15、30、180、1800、1800、1800、3600 秒），`maxNotifyTimes = NOTIFY_FREQUENCY.length + 1` 即最多 9 次。`PayNotifyServiceImpl.processNotifyResult` 的失败上限判断是 `notifyTimes >= NOTIFY_FREQUENCY.length + 1`（第 9 次通知失败才置 `FAILURE`），重试间隔取 `NOTIFY_FREQUENCY[notifyTimes - 1]`（第 N 次失败用第 N 个间隔，下标从 0 开始，因此第 1 次失败用 15s、第 8 次失败用 3600s）。上限后的任务置为 `FAILURE`，`selectListByNotify()` 只扫描 `WAITING`/`REQUEST_SUCCESS`/`REQUEST_FAILURE` 三种状态，FAILURE 任务不会再被投递，业务方将永远收不到这笔支付/退款通知。
 
 **原因**: 重试梯度最终拉长到 1 小时，总计约 2.5 小时；设计上认为超过该窗口的失败需要人工介入，避免无限重试。
 
-**解决**: 运营上要监控 `pay_notify_task` 中 `status = FAILURE` 的记录并及时手工补偿（可通过管理后台"回调通知"菜单 `getNotifyTaskDetail` 查看每次通知的响应日志定位原因）。业务方回调接口务必保证幂等（以 `merchantOrderId` 为键），因为同一任务可能被并发投递两次——`executeNotify` 虽有 `PayNotifyLockRedisDAO` 分布式锁 + `notifyTimes` 比对兜底，但极端情况下仍可能重复通知。
+**解决**: 运营上要监控 `pay_notify_task` 中 `status = FAILURE` 的记录并及时手工补偿（可通过管理后台"回调通知"菜单 `getNotifyTaskDetail` 查看每次通知的响应日志定位原因）。业务方回调接口务必保证幂等（以 `merchantOrderId` 为键），因为同一任务可能被并发投递两次——`executeNotify` 虽有 `PayNotifyLockRedisDAO` 分布式锁 + `notifyTimes` 比对兜底，但极端情况下仍可能重复通知。修改重试逻辑时务必保证"第 1 次失败取第 0 个间隔"，且失败上限与 `maxNotifyTimes`（9）保持一致，否则会重现"少通知一次 / 间隔整体偏移"的旧缺陷。
+
+### 6.3 钱包流水统计的累计支出返回正值
+
+**问题**: `PayWalletTransactionMapper.selectPriceSum` 对支出类型使用 `SUM(-price)` 汇总（支出流水的 `price` 为负值，取反后为正），收入类型使用 `SUM(price)`。因此 `GET /pay/wallet-transaction/get-summary` 返回的 `totalExpense` 与 `totalIncome` **都是正值**，与 `pay_wallet.total_expense` 的正值语义一致。
+
+**原因**: 早期实现对两种类型都用 `SUM(price)`，`totalExpense` 返回负数，与钱包表 `total_expense`（正数）不一致，前端展示会出现符号错乱。
+
+**解决**: 前端与其它调用方按正值展示，不要再对 `totalExpense` 取反；若新增统计维度，请沿用"支出取反、收入不取反"的口径。

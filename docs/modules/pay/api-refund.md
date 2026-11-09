@@ -32,7 +32,7 @@
 | merchantOrderId | String | 商户订单编号 |
 | merchantRefundId | String | 商户退款订单号 |
 | notifyUrl | String | 异步通知地址 |
-| status | Integer | 退款状态（0-未退款/等待 1-成功 2-失败，见 PayRefundStatusEnum） |
+| status | Integer | 退款状态（0 未退款 / 10 退款成功 / 20 退款失败，见 PayRefundStatusEnum） |
 | payPrice | Long | 支付金额（单位分） |
 | refundPrice | Long | 退款金额（单位分） |
 | reason | String | 退款原因 |
@@ -42,7 +42,7 @@
 | successTime | LocalDateTime | 退款成功时间 |
 | channelErrorCode | String | 调用渠道的错误码 |
 | channelErrorMsg | String | 调用渠道的错误提示 |
-| channelNotifyData | String | 支付渠道的额外参数 |
+| channelNotifyData | String | 支付渠道的同步/异步通知原始内容（对应 PayRefundRespDTO#rawData） |
 | order.subject | String | 支付订单商品标题（嵌套 Order 对象） |
 | createTime | LocalDateTime | 创建时间 |
 | updateTime | LocalDateTime | 更新时间 |
@@ -92,7 +92,7 @@
 | successTime | LocalDateTime | 退款成功时间 |
 | channelErrorCode | String | 调用渠道的错误码 |
 | channelErrorMsg | String | 调用渠道的错误提示 |
-| channelNotifyData | String | 支付渠道的额外参数 |
+| channelNotifyData | String | 支付渠道的同步/异步通知原始内容（对应 PayRefundRespDTO#rawData） |
 | createTime | LocalDateTime | 创建时间 |
 
 （字段继承自 PayRefundBaseVO）
@@ -147,7 +147,7 @@
 2. **退款结果通知 notifyRefund**：校验渠道有效性后按渠道租户上下文更新退款单；成功则更新退款单为「成功」（记录成功时间、渠道退款单号、渠道通知原文），并更新支付订单已退款金额、插入退款通知任务（PayNotifyTypeEnum.REFUND）；失败则更新退款单为「失败」（记录渠道错误码/错误信息），同样插入退款通知任务。更新采用乐观锁（updateByIdAndStatus，仅允许从「等待」状态变更，重复通知幂等返回）。
 3. **退款状态轮询补偿 syncRefund**：定时任务查询指定创建时间内仍处于「等待」状态的退款单，逐个通过渠道 PayClient.getRefund 查询渠道侧结果，并复用 notifyRefund 更新状态，返回同步成功的条数。
 
-**错误码**: 该域相关错误码（pay 模块 1-007-000-000 段，主要在退款创建与回调流程中抛出）：
+**错误码**: 该域相关错误码（pay 模块 1_007_000_000 段，主要在退款创建与回调流程中抛出）：
 
 | 错误码 | 说明 |
 |---|---|

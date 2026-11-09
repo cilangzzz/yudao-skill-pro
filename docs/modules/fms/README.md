@@ -56,7 +56,7 @@
 | /fms/config/account-set/initialize | PUT | 初始化账套 | fms:config:account-set:initialize |
 | /fms/config/account-set/list | GET | 获得当前用户账套列表 | fms:config:account-set:query |
 | /fms/config/account-user/update | PUT | 更新账套用户列表 | fms:config:account-set:authorize |
-| /fms/config/subject/page 等 | - | 科目查询/增删改/导入导出 | fms:config:subject:* |
+| /fms/config/subject/list 等 | - | 科目查询/增删改/导入导出 | fms:config:subject:* |
 | /fms/config/initial-balance/trial-balance | GET | 获得试算平衡结果 | fms:config:initial-balance:query |
 | /fms/config/finance-parameter/get | GET | 获得财务参数 | fms:config:finance-parameter:query |
 
@@ -112,7 +112,7 @@
 ### 期末结账 (closing)
 | Controller | 说明 | 端点数 |
 |-----|------|-------|
-| FmsClosingPeriodController | 会计期间查询、结账/反账 | 4 |
+| FmsClosingPeriodController | 会计期间查询、结账/反结账 | 4 |
 | FmsClosingTemplateController | 结账模板增删改查 | 4 |
 | FmsClosingSchemeController | 结账方案增删改查与损益/专用结转设置 | 6 |
 | FmsClosingVoucherController | 结转损益/方案/批量结转凭证生成 | 3 |
@@ -143,36 +143,36 @@
 
 | 表名 | 说明 | 继承基类 | 关键字段 |
 |-----|------|--------|---------|
-| fms_account_set | FMS 账套 | BaseDO | company_code、company_name、industry、legal_rep、start_time、accounting_standard |
+| fms_account_set | FMS 账套 | BaseDO | company_code、company_name、industry、legal_representative、start_time、standard |
 | fms_account_user | FMS 账套用户 | BaseDO | account_set_id、user_id、default_status、founder、level（成员权限级别） |
 | fms_subject | FMS 会计科目 | BaseDO | code、name、parent_id、type、category、balance_direction、quantity_accounting、auxiliary_type_ids |
 | fms_subject_template | FMS 科目模板（系统预置科目结构） | BaseDO | 与 fms_subject 同构：code、name、parent_id、type、category |
-| fms_auxiliary_type | FMS 辅助核算类别 | BaseDO | name、preset（系统预置）、account_set_id、type |
-| fms_auxiliary_item | FMS 辅助核算项目 | BaseDO | code、name、type_id、status、account_set_id、specification、unit |
+| fms_auxiliary_type | FMS 辅助核算类别 | BaseDO | name、system_preset（系统预置）、account_set_id、type |
+| fms_auxiliary_item | FMS 辅助核算项目 | BaseDO | code、name、auxiliary_type_id、status、account_set_id、specification、unit |
 | fms_assist_combination | FMS 辅助核算组合（科目 + 辅助项目组合） | BaseDO | subject_id、account_set_id、items（辅助核算项目数组） |
 | fms_currency | FMS 币别 | BaseDO | code、name、exchange_rate、standard（是否本位币）、account_set_id |
 | fms_digest | FMS 常用摘要 | BaseDO | content、account_set_id |
 | fms_voucher_word | FMS 凭证字 | BaseDO | name、print_title、default_status、sort、account_set_id |
 | fms_voucher_template | FMS 凭证模板 | BaseDO | name、category_id、entries（分录数组）、account_set_id |
 | fms_voucher_template_category | FMS 凭证模板分类 | BaseDO | name、account_set_id |
-| fms_finance_parameter | FMS 财务参数 | BaseDO | account_set_id、subject_level、科目编码规则、账簿余额方向模式、结账校验开关 |
-| fms_finance_indicator | FMS 首页财务指标 | BaseDO | account_set_id、name、code、report_type、formula、sort、status |
-| fms_initial_balance | FMS 科目期初余额 | BaseDO | subject_id、auxiliary 启用、期初/本年累计借贷金额与数量、年初金额、auxiliaries |
-| fms_voucher | FMS 凭证 | BaseDO | voucher_word_id、voucher_number、voucher_time、attachment、debit/credit/total_amount、status、reviewer_user_id |
+| fms_finance_parameter | FMS 财务参数 | BaseDO | account_set_id、level、subject_code_rule、ledger_balance_mode、voucher_review_required、deficit_check |
+| fms_finance_indicator | FMS 首页财务指标 | BaseDO | account_set_id、name、code、type、formula、sort、status |
+| fms_initial_balance | FMS 科目期初余额 | BaseDO | subject_id、auxiliary_accounting、opening_amount/quantity、year_debit_*、year_credit_*、year_opening_*、profit_loss_*、assist_balances |
+| fms_voucher | FMS 凭证 | BaseDO | voucher_word_id、voucher_number、voucher_time、attachment_urls、attachment_count、debit_amount、credit_amount、total、status、reviewer_user_id |
 | fms_voucher_entry | FMS 凭证分录 | BaseDO | voucher_id、digest、subject_id、subject_code/name（快照）、debit_amount、credit_amount、auxiliaries |
-| fms_closing_period | FMS 结账期间 | BaseDO | close_time、account_set_id |
+| fms_closing_period | FMS 结账期间 | BaseDO | closing_time、account_set_id |
 | fms_closing | FMS 结账方案（注意表名无 scheme 后缀） | BaseDO | name、subject_id、formula_rule、time_type、voucher_word_id、digest、voucher_type |
 | fms_closing_template | FMS 结账模板 | BaseDO | account_set_id、preset_code、name、category、subject_id、formula_rule |
-| fms_closing_voucher | FMS 结账凭证 | BaseDO | scheme_id、voucher_id、voucher_time、amount、closed、account_set_id |
-| fms_report_template | FMS 报表模板（预置报表行结构） | BaseDO | name、row_no、formula、type、cash_flow_category、level、editable |
+| fms_closing_voucher | FMS 结账凭证 | BaseDO | closing_id、voucher_id、voucher_time、amount、closed、account_set_id |
+| fms_report_template | FMS 报表模板（预置报表行结构） | BaseDO | name、row_no、formula、type、category、level、editable |
 | fms_balance_sheet_config | FMS 资产负债表配置 | BaseDO | name、row_no、formula、editable、sort、account_set_id、level |
-| fms_balance_sheet_report | FMS 资产负债表数据（按期间快照公式） | BaseDO | start/end_period、period_type、名称/行次/公式/层级快照 |
+| fms_balance_sheet_report | FMS 资产负债表数据（按期间快照公式） | BaseDO | from_period、to_period、type、名称/行次/公式/层级/期初/期末金额快照 |
 | fms_income_statement_config | FMS 利润表配置 | BaseDO | name、row_no、formula、sort、editable、account_set_id、level |
-| fms_income_statement_report | FMS 利润表数据（按期间快照公式） | BaseDO | period_type、start/end_period、名称/行次/公式/显示顺序/层级快照 |
-| fms_cash_flow_statement_config | FMS 现金流量表配置 | BaseDO | name、row_no、formula、editable、sort、cash_flow_category、account_set_id |
-| fms_cash_flow_statement_report | FMS 现金流量表数据（按期间快照公式） | BaseDO | start_period、名称/行次/公式/是否可编辑/层级快照、本期金额 |
-| fms_cash_flow_extend_config | FMS 现金流量表扩展配置（补充表） | BaseDO | name、row_no、formula、table_key、extend_type、account_set_id |
-| fms_cash_flow_extend_data | FMS 现金流量表扩展数据 | BaseDO | name、row_no、formula、cash_flow_category、本期/本年累计金额、account_set_id |
+| fms_income_statement_report | FMS 利润表数据（按期间快照公式） | BaseDO | type、from_period、to_period、名称/行次/公式/显示顺序/层级/本期/本年累计金额快照 |
+| fms_cash_flow_statement_config | FMS 现金流量表配置 | BaseDO | name、row_no、formula、editable、sort、category、account_set_id |
+| fms_cash_flow_statement_report | FMS 现金流量表数据（按期间快照公式） | BaseDO | from_period、to_period、名称/行次/公式/是否可编辑/层级/本期/本年累计金额快照 |
+| fms_cash_flow_extend_config | FMS 现金流量表扩展配置（补充表） | BaseDO | name、row_no、formula、category、type、current_amount、year_amount、account_set_id |
+| fms_cash_flow_extend_data | FMS 现金流量表扩展数据 | BaseDO | name、row_no、formula、category、current_amount、year_amount、from_period、to_period、account_set_id |
 
 ## 设计模式
 | 模式 | 应用位置 | 用途 |

@@ -2,7 +2,7 @@
 
 > 使用 infra 模块时的常见问题、易踩坑点和最佳实践。
 
-> 版本提示：当前仓库为 JDK8 分支（revision `2026.09-jdk8-SNAPSHOT`，Spring Boot 2.7.18），代码使用 `javax.servlet` / `javax.annotation` 而非 `jakarta`，阅读源码与二次开发时注意与 Spring Boot 3.x 版本区分。
+> 版本提示：当前仓库为 JDK8 分支（revision `2026.10-jdk8-SNAPSHOT`，Spring Boot 2.7.18），代码使用 `javax.servlet` / `javax.annotation` 而非 `jakarta`，阅读源码与二次开发时注意与 Spring Boot 3.x 版本区分。
 
 infra 模块的特殊性：它既是「平台基础设施」（配置、文件、定时任务、日志、代码生成），又被几乎所有业务模块依赖（`FileApi` 被 system/ai/mp/oa/pms/fms 消费，`ConfigApi` 被 system 消费，`WebSocketSenderApi` 被 system/im/promotion 消费）。因此 infra 出问题的影响面是全局的。
 
@@ -115,7 +115,7 @@ infra 模块的特殊性：它既是「平台基础设施」（配置、文件�
 
 **问题**: 走后端 `/infra/file/upload` 传伪造类型的文件会被拒；走 `/infra/file/presigned-url` + `/infra/file/create`（前端直传 OSS）时，恶意内容有机会绕过类型检查。
 
-**原因**: `FileServiceImpl.createFile(byte[]...)` 不信任客户端传入的 type，用 `FileTypeUtils.getMineType(content, name)` 基于内容重新嗅探，再校验 `ALLOWED_FILE_TYPES` 白名单，图片还要求扩展名类型与内容类型一致；而 `presignPutUrl` / `createFile(FileCreateReqVO)` 拿不到文件内容，只能按文件名校验 MIME（`validateFileType(name)`）。
+**原因**: `FileServiceImpl.createFile(byte[]...)` 不信任客户端传入的 type，用 `FileTypeUtils.getMineType(content, name)` 基于内容重新嗅探，再校验 `ALLOWED_FILE_TYPES` 白名单（或 `.bin` 二进制通道，见 5.3），图片与 `.bin` 还要求扩展名类型与内容类型一致；而 `presignPutUrl` / `createFile(FileCreateReqVO)` 拿不到文件内容，只能按文件名校验 MIME（`validateFileType(name)`），`.bin` 在直传链路是按后缀放行的。
 
 **解决**:
 - 安全敏感场景优先走后端上传模式；必须直传时，在存储端（OSS 回源校验、CDN 防护）或业务侧做二次内容校验。
@@ -130,6 +130,16 @@ infra 模块的特殊性：它既是「平台基础设施」（配置、文件�
 **解决**:
 - 删除文件配置前，先确认该配置下没有存量文件（可按 `FileDO.configId` 查询）；`FILE_CONFIG_DELETE_FAIL_MASTER` 只拦主配置，不拦「有历史文件的非主配置」。
 - 二次开发时不要把 `Assert.notNull` 当业务校验用，对外抛业务错误请用 `ServiceExceptionUtil.exception(ERROR_CODE)`。
+
+### 5.3 `.bin` 固件上传是「后缀 + 内容类型」双条件，直传链路无内容校验
+
+**问题**: 为支持 IoT OTA 固件新增了 `.bin` 上传通道，误以为只要后缀是 `.bin` 就能上传；或误以为直传 `.bin` 与后端上传同等安全。
+
+**原因**: `FileServiceImpl` 的放行条件是 `isAllowedFileType(type, name)`：内容嗅探类型命中 `ALLOWED_FILE_TYPES`，或「内容嗅探类型为 `application/octet-stream` 且文件名后缀为 `bin`（大小写不敏感，`ALLOWED_BINARY_EXTENSIONS` 当前仅含 `bin`）」。后端上传还会额外要求 `.bin` 的内容嗅探类型必须等于后缀推断类型，因此把 ELF/PE 可执行文件、脚本、HTML、SVG、图片改名为 `.bin` 仍会被 `FILE_TYPE_NOT_ALLOWED`（1_001_003_004）拒绝；反之内容是未知二进制但后缀是 `.so`/`.dump`/`.unknown`/无后缀，同样被拒。直传模式（`/infra/file/presigned-url` + `/infra/file/create`）拿不到文件内容，`.bin` 仅按文件名/路径后缀放行。
+
+**解决**:
+- 需要支持 `.hex`/`.ota` 等新固件后缀时，同时修改 `ALLOWED_BINARY_EXTENSIONS` 并确认校验逻辑；不能直接放行 `application/octet-stream`，否则等于不限制类型。
+- 直传 `.bin` 的内容安全需在存储端或业务侧补齐；`infra_file.type` 会落库为 `application/octet-stream`，前端渲染或后端设置响应头时按二进制处理，不要当成已知的可下载类型。
 
 ## 6. 代码生成器相关
 
@@ -148,3 +158,37 @@ infra 模块的特殊性：它既是「平台基础设施」（配置、文件�
 - 多子表场景给子表起不同业务名（如 `ErpStudent` / `InnerStudent`），或调整 `moduleName` 前缀，避免归一化后撞名。
 - 无主键的表导入时框架取第一个字段当主键（`createCodegen0` 中 `columns.get(0).setPrimaryKey(true)`），业务表务必显式定义主键。
 - demo 域（`Demo01Contact` 单表 / `Demo02Category` 树表 / `Demo03Student` 主子表 normal、inner、erp 三种风格）是代码生成器的标准产物示例，注意其表前缀是 `yudao_demo01_*` 而非 `infra_`，三个 Student Controller 权限统一为 `infra:demo03-student:*`，可作为新模块生成结果的对照参考。
+
+## 7. 多数据库方言相关
+
+### 7.1 日志清理 SQL 依赖运行时方言识别，未登记数据库会运行时报错
+
+**问题**: 在非 MySQL 数据库上，访问日志/错误日志/任务日志的清理任务报 SQL 语法错误；或接入新的国产数据库后清理任务直接失败。
+
+**原因**: 三张表的「按时间限量物理删除」SQL 改为在 MyBatis 注解中用 SpEL 调用 `SqlDialectUtils.deleteBatchByLessThan(...)`，按当前执行数据源方言动态生成：MySQL/OceanBase/H2/达梦/神通/人大金仓/openGauss 等保持 `DELETE ... LIMIT`，PostgreSQL 用 `id IN (SELECT ... LIMIT)`，Oracle 用 `ROWNUM`，SQL Server 2012+ 用 `TOP`。原实现硬编码 `DELETE ... LIMIT`，只能在 MySQL 系工作。方言按数据源实例缓存，完全未登记的产品名会在执行时抛 `IllegalStateException("SQL 方言不支持的数据库产品：...")`。
+
+**解决**:
+- 新增国产数据库接入时，确认其产品名已在 MyBatis-Plus `DbType` / `DbTypeEnum` 登记，否则清理 Job 及使用 `SqlDialectUtils` 的统计查询都会失败。
+- 识别为 ORIGINAL 方言的库（达梦、神通、人大金仓、openGauss、GaussDB、瀚高、MogDB 等）仍走 MySQL 的 `LIMIT` 语法，接入前确认目标库支持（PG 兼容模式通常支持）。
+- 清理任务本身用 `@TenantIgnore` 且循环分批（访问/错误/任务日志默认保留 14 天、每批 100 条），排查时注意租户上下文与分批上限。
+
+### 7.2 神通（OSCAR）代码生成有两个前置条件
+
+**问题**: 用神通数据源导入表后，TEXT 列生成的 DO 字段类型是 Object；生成的菜单 SQL 插入失败。
+
+**原因**: 神通的 TEXT 字段 JDBC 类型为 OTHER，只有数据源 URL 解析为 `DbType.OSCAR` 时 `DatabaseTableServiceImpl` 才会注入自定义 `ITypeConvertHandler` 把 TEXT 按 String 处理；菜单 SQL 模板把 OSCAR 归入 Oracle/达梦分支，用 `system_menu_seq.CURRVAL` 取父菜单 ID，插入时不指定主键，依赖 `system_menu.id` 默认使用该序列。
+
+**解决**:
+- 使用神通 JDBC URL（`jdbc:oscar:...`）配置数据源，不要用其它方式接入，否则导入表结构时 TEXT 列会被识别为 Object 类型。
+- 初始化时执行 `ALTER TABLE system_menu ALTER COLUMN id SET DEFAULT nextval('system_menu_seq')`；数据库以 PG 兼容模式创建、`varchar(10240)` 改为 `text`，详见 `sql/tools/README.md` 神通章节。
+
+### 7.3 RustFS 的 S3 配置易错点
+
+**问题**: 按 MinIO 习惯配置 RustFS 后上传报签名错误、访问 404 或客户端无法访问文件。
+
+**原因**: RustFS 的 endpoint 是 S3 API 端口 9000（控制台为 9001）；PathStyle 访问时 domain 需带 `/bucket`；region 必须与服务端 `RUSTFS_REGION` 一致（默认 `us-east-1`），否则签名校验失败。
+
+**解决**:
+- `endpoint` 填 `http://127.0.0.1:9000` 这类 S3 API 地址；`domain` 填写时形如 `http://127.0.0.1:9000/ruoyi-vue-pro`，并保证前端可访问。
+- `enablePathStyleAccess=true`（RustFS 默认 PathStyle）；虚拟主机风格需服务端配置 `RUSTFS_SERVER_DOMAINS`。
+- `accessKey`/`accessSecret` 取服务端启动时配置的 `RUSTFS_ACCESS_KEY` 与密钥；初始化脚本已内置 `id=36`「RustFS 存储（示例）」，替换地址密钥即可。

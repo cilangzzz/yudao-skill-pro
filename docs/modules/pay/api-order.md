@@ -37,7 +37,7 @@
 | price | Long | 支付金额，单位：分 |
 | channelFeeRate | Double | 渠道手续费，单位：百分比 |
 | channelFeePrice | Integer | 渠道手续金额，单位：分 |
-| status | Integer | 支付状态（0 待支付 / 1 成功 / 2 失败关闭 / 3 已退款，见 PayOrderStatusEnum） |
+| status | Integer | 支付状态（0 未支付 / 10 支付成功 / 20 已退款 / 30 支付关闭，见 PayOrderStatusEnum） |
 | userIp | String | 用户 IP |
 | expireTime | LocalDateTime | 订单失效时间 |
 | successTime | LocalDateTime | 订单支付成功时间 |

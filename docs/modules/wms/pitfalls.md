@@ -28,9 +28,9 @@ public class WmsXxxGlobalDO extends BaseDO { ... }
 
 ### 2.1 库存并发安全依赖"FOR UPDATE + 唯一索引"双保险，建表缺唯一索引会静默分裂库存
 
-**问题**: 库存行 `(sku_id, warehouse_id)` 的并发首次创建依赖唯一索引兜底。如果自建的 `wms_inventory` 表没有这个唯一索引，两个并发单据同时给同一 SKU + 仓库首次建库存行时会插入两条重复行，之后 `findInventory` 只随机取一条，库存被分裂，且不报任何错。
+**问题**: 库存行 `(sku_id, warehouse_id)` 的并发首次创建依赖唯一索引兜底。如果自建的 `wms_inventory` 表没有这个唯一索引，两个并发单据同时给同一 SKU + 仓库首次建库存行时会插入两条重复行，之后 `findInventory`（`CollUtil.findOne`）只取到其中一条，库存被分裂，且不报任何错。
 
-**原因**: `WmsInventoryServiceImpl#createMissingInventoryList` 的设计是：INSERT 撞唯一索引抛 `DuplicateKeyException` 后回查 `selectBySkuIdAndWarehouseId` 拿回已存在的行；变更前再统一用 `WmsInventoryMapper#selectListByIdsForUpdate`（`.last("FOR UPDATE")`）按 ID 批量加悲观锁。测试 DDL 中对应约束为 `CONSTRAINT "uk_sku_id_warehouse_id" UNIQUE ("sku_id", "warehouse_id")`。但该 DDL 仅存在于测试资源中，生产建表语句不在仓库内，需自行保证。
+**原因**: `WmsInventoryServiceImpl#createMissingInventoryList` 的设计是：INSERT 撞唯一索引抛 `DuplicateKeyException` 后回查 `selectBySkuIdAndWarehouseId` 拿回已存在的行；变更前再统一用 `WmsInventoryMapper#selectListByIdsForUpdate`（框架 `BaseMapperX#selectListForUpdate`，按当前方言生成锁定语义）按 ID 批量加悲观锁。测试 DDL 中对应约束为 `CONSTRAINT "uk_sku_id_warehouse_id" UNIQUE ("sku_id", "warehouse_id")`。但该 DDL 仅存在于测试资源中，生产建表语句不在仓库内，需自行保证。
 
 **解决**: 生产建表必须带上唯一索引；并发首次建行撞锁的一方若回查仍拿不到行，代码会原样抛出 `DuplicateKeyException`（事务回滚），调用方按"重试即可"处理。
 
@@ -54,13 +54,21 @@ CONSTRAINT "uk_sku_id_warehouse_id" UNIQUE ("sku_id", "warehouse_id")
 
 **解决**: 完成失败后重新加载盘库单（明细的账面数量/库存 ID 会刷新）再完成；不要试图绕过该校验，它防止的是把过期快照覆盖到最新库存上。统计盘亏盘盈时注意零盈亏明细没有流水记录。
 
+### 2.4 库存行锁统一走框架 selectOneForUpdate / selectListForUpdate，自行拼接 .last("FOR UPDATE") 已过时
+
+**问题**: 在 Mapper 里自行拼接 `.last("FOR UPDATE")` 的写法无法适配不同数据库（如 SQL Server 不支持 `FOR UPDATE`，Oracle 不支持 `LIMIT 1 FOR UPDATE`），跨库迁移时会失效；而且不在事务内调用时锁会随语句结束立即释放，起不到并发保护作用。
+
+**原因**: `WmsInventoryMapper#selectByIdForUpdate` / `selectListByIdsForUpdate`（`WmsInventoryMapper.java:68-70、96-98`）已改为委托框架 `BaseMapperX#selectOneForUpdate` / `selectListForUpdate`：内部按当前方言生成锁定语义（标准数据库为 `FOR UPDATE`；SQL Server 不支持 `FOR UPDATE`/`LIMIT`，由 `ForUpdateInnerInterceptor` 改写；Oracle 的「先查候选主键再加锁」多次查询兜底只用于 `selectFirstOneForUpdate`，本模块的两个方法不使用），空集合入参直接返回空列表（`selectListForUpdate` 内做 `CollUtil.isEmpty` 判断）；`selectOneForUpdate` 命中超过 1 条会抛 `TooManyResultsException`。库存变更（`changeInventoryList`）与盘库完成（`getOrCreateCheckInventory`）都依赖这两个方法加锁。
+
+**解决**: 新增需要加锁的查询时复用框架方法，不要自行拼 `.last("FOR UPDATE")`；务必在 `@Transactional` 事务方法内调用，否则锁随语句结束释放；单条锁定查询要保证条件能唯一定位一行，避免抛 `TooManyResultsException`。
+
 ## 3. 状态机相关
 
-### 3.1 三值状态机：只有草稿可改/删/完成/作废，已完成是终态、没有红冲接口
+### 3.1 三值状态机：只有草稿可改/完成/作废、删除限草稿与已作废，已完成是终态、没有红冲接口
 
 **问题**: 单据状态只有 `WmsOrderStatusEnum` 的 `PREPARE(0)/FINISHED(4)/CANCELED(5)` 三值。已完成单据不能改、不能删、不能作废，也没有"反完成/红冲"接口——出库多发、入库多收后无法把原单退回草稿。
 
-**原因**: 四类单据的 `update*/delete*/complete*/cancel*` 全部先走 `validateXxxOrderPrepare`（仅 `PREPARE` 放行），删除走 `validateXxxOrderExists` + 状态属于 `PREPARE/CANCELED` 的判断（对应 `*_ORDER_STATUS_NOT_DELETABLE`）；状态流转靠 `updateByIdAndStatus` 的 CAS 保证。库存模块 `WmsInventoryService` 只提供 `changeInventory/checkInventory` 两个正向入口，没有反向冲销。
+**原因**: 四类单据的 `update*/complete*/cancel*` 先走 `validateXxxOrderPrepare`（仅 `PREPARE` 放行）；`delete*` 走 `validateXxxOrderExists` + 状态属于 `PREPARE/CANCELED` 的判断（对应 `*_ORDER_STATUS_NOT_DELETABLE`）；状态流转靠 `updateByIdAndStatus` 的 CAS 保证。库存模块 `WmsInventoryService` 只提供 `changeInventory/checkInventory` 两个正向入口，没有反向冲销。
 
 **解决**: 已完成单据的错误只能用"再建一张反向单据"修正（多发库存建入库单、多收建出库单，或用盘库单校正）；设计对接逻辑时不要假设可以撤销已完成单据。
 
@@ -102,13 +110,13 @@ CONSTRAINT "uk_sku_id_warehouse_id" UNIQUE ("sku_id", "warehouse_id")
 
 ## 6. 查询与统计相关
 
-### 6.1 首页统计是 MySQL 方言手写 SQL，逻辑删除要手动写 deleted = 0
+### 6.1 首页统计 SQL 已方言自适应，但逻辑删除仍需手写 deleted = 0
 
-**问题**: `WmsHomeStatisticsMapper.xml` 的 5 条统计语句是手写 SQL，直接照搬到 Oracle/PostgreSQL/SQL Server 等方言会报错（`DATE_FORMAT(order_time, '%Y-%m-%d')`、`IFNULL`、`LIMIT #{limit}` 均为 MySQL 语法）；另外自己新增统计语句时漏写 `deleted = 0` 会把已删除数据统计进去——MyBatis-Plus 的逻辑删除只对 BaseMapper 生成的 SQL 自动生效，不会改写 XML 手写 SQL。
+**问题**: `WmsHomeStatisticsMapper.xml` 的 5 条统计语句中，4 条已改为方言自适应（趋势查询用 `SqlDialectUtils.formatDate` 替换 `DATE_FORMAT`、两条排行用 `SqlDialectUtils.limitParam` 替换 `LIMIT`、三处 `IFNULL` 改为标准 `COALESCE`），可在 MySQL/PostgreSQL/Oracle/SQL Server 2012+ 等运行，MySQL 下输出与旧 SQL 等价；但自己新增手写统计 SQL 时若仍直接写 MySQL 专有语法（`DATE_FORMAT`、`IFNULL`、`LIMIT #{limit}`），在其它方言仍会报错。另外，漏写 `deleted = 0` 会把已删除数据统计进去——MyBatis-Plus 的逻辑删除只对 BaseMapper 生成的 SQL 自动生效，不会改写 XML 手写 SQL。
 
-**原因**: 统计结果以 `Map<String, Object>` 返回，key 依赖 SQL 别名（`date`/`orderType`/`count`），`WmsHomeStatisticsServiceImpl#buildInventoryItemRankList` 甚至做了 `id`/`itemId` 双读兜底；单据枚举值通过 OGNL 内联（`${@cn.iocoder.yudao.module.wms.enums.order.WmsOrderTypeEnum@RECEIPT.type}`）。还有统计口径问题：移库单按 `source_warehouse_id = ? OR target_warehouse_id = ?` 计数，同一单在两个仓库的过滤结果里各计一次，跨仓库汇总时会重复。租户条件不用手写，由多租户拦截器自动追加（见 1.1）。
+**原因**: `SqlDialectUtils` 按当前执行时路由到的数据源动态判定方言并按数据源实例缓存（同一应用多数据源下可能得到不同片段），只对明确识别的数据库输出新片段，完全未识别会抛异常；`limitParam('limit', true)` 的 `limit` 必须是 Mapper 方法里真实存在的 `@Param` 参数，否则运行期绑定失败。统计结果以 `Map<String, Object>` 返回，key 依赖 SQL 别名：趋势查询的日期列别名已由 `date` 改为 `statDate`（`date` 在部分方言为保留字），Service 用 `MapUtil.getStr(row, "statDate")` 读取；`WmsHomeStatisticsServiceImpl#buildInventoryItemRankList` 还做了 `id`/`itemId` 双读兜底；单据枚举值通过 OGNL 内联（`${@cn.iocoder.yudao.module.wms.enums.order.WmsOrderTypeEnum@RECEIPT.type}`）。还有统计口径问题：移库单按 `source_warehouse_id = ? OR target_warehouse_id = ?` 计数，同一单在两个仓库的过滤结果里各计一次，跨仓库汇总时会重复。租户条件不用手写，由多租户拦截器自动追加（见 1.1）。
 
-**解决**: 切换数据库方言时优先改写这 5 条 XML；新增手写统计 SQL 时记得带 `deleted = 0`、注意别名字符串与 `MapUtil.getInt(row, "orderType")` 的 key 一致；跨仓库汇总趋势数据时对移库单做去重口径说明。
+**解决**: 新增/改写手写统计 SQL 时，日期聚合用 `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@formatDate('列名')}`、行数限制用 `${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@limitParam('limit', true)}`、空值兜底用 `COALESCE`，不要直写 MySQL 专有语法；记得带 `deleted = 0`，别名字符串与 `MapUtil.getInt(row, "orderType")`、`MapUtil.getStr(row, "statDate")` 的 key 保持一致；跨仓库汇总趋势数据时对移库单做去重口径说明。
 
 ## 7. 错误码与异常相关
 
@@ -116,7 +124,7 @@ CONSTRAINT "uk_sku_id_warehouse_id" UNIQUE ("sku_id", "warehouse_id")
 
 **问题**: ① `ErrorCodeConstants` 段内有空洞（仓库 `1_060_100_003` 未用、入库单 `1_060_200_004/006` 未用），新错误码按分段续号时不要误以为连续；② 库存变更中有一类错误不走错误码体系——`WmsInventoryServiceImpl#changeInventoryList` 里"库存行不存在"抛的是 `IllegalStateException`，前端会收到 500 而非业务错误码。
 
-**原因**: wms 独占 `1-060-000-000` 段（已全仓 grep 确认无其它模块使用）：仓库 1_060_100_x、商品分类 1_060_102_x、品牌 1_060_103_x、商品 1_060_104_x、往来企业 1_060_105_x、入库 1_060_200_x、出库 1_060_201_x、移库 1_060_202_x、盘库 1_060_203_x、库存 1_060_300_x。`IllegalStateException` 是内部不变式兜底（加锁回查后行仍缺失），设计上按"不可能发生"处理。另外 `INVENTORY_QUANTITY_NOT_ENOUGH` 的消息里拼的是 `warehouseId` 原始 ID 而非仓库名，排查时需自行换算。
+**原因**: wms 独占 `1_060_000_000` 段（已全仓 grep 确认无其它模块使用）：仓库 1_060_100_x、商品分类 1_060_102_x、品牌 1_060_103_x、商品 1_060_104_x、往来企业 1_060_105_x、入库 1_060_200_x、出库 1_060_201_x、移库 1_060_202_x、盘库 1_060_203_x、库存 1_060_300_x。`IllegalStateException` 是内部不变式兜底（加锁回查后行仍缺失），设计上按"不可能发生"处理。另外 `INVENTORY_QUANTITY_NOT_ENOUGH` 的消息里拼的是 `warehouseId` 原始 ID 而非仓库名，排查时需自行换算。
 
 **解决**: 新增错误码沿用 `1_060_{域}_{序号}` 分段；遇到"库存行不存在"的 500 优先排查是否绕过 `WmsInventoryService` 直接操作了 `wms_inventory` 表或数据库缺唯一索引（见 2.1）。
 

@@ -16,7 +16,7 @@
 | 草稿-提交两段式单据 | 审批类 Service 统一遵循 `create/update（草稿）→ submit（发起流程）→ cancel（撤回）` 生命周期，复用 `APPLY_*` 通用错误码 |
 | 非多租户设计 | 全部 48 张表 DO 继承 `BaseDO` 而非 `TenantBaseDO`，数据按"创建人/部门/共享接收人"维度做权限隔离 |
 | 个人视角与共享视角分离 | 日程、笔记、任务、公告、联系人等均拆分 `my-page/published-page`（我发出的）与 `received-page`（发给我的）两组接口，配套 `xxx_receiver/share` 关系表与 `update-read-status` 已读标记 |
-| 权限标识统一前缀 | 权限串统一为 `oa:{域}:{操作}`（如 `oa:leave-apply:create`）；出差/差旅报销使用 `:save` 覆盖新增与修改；纯个人操作（打卡、我的分页等）不挂权限仅要求登录 |
+| 权限标识统一前缀 | 权限串统一为 `oa:{域}:{操作}`（如 `oa:leave-apply:create`）；出差/差旅报销使用 `:save` 覆盖新增与修改；个人域端点权限并不统一，考勤打卡、联系人分享、公告转发、任务反馈、各 `simple-list` 等仅需登录，而 `my-page`/`received-page` 多数仍要求 `oa:*:query` |
 | 配置外置 | `OaProperties`（前缀 `yudao.oa`）集中配置考勤打卡时段/应出勤天数、日程提前提醒小时数、云盘默认容量（5GB）与下载地址有效期 |
 | 邮箱"本地索引"模型 | 邮件只存索引（UID + folder），远端 IMAP/SMTP 操作不可回滚，失败后通过再次同步恢复；同步与写操作按账号加锁 |
 
@@ -31,7 +31,7 @@
 | 企业云盘 (file) | 树形文件节点（上传/复制/移动/重命名/回收站）、共享权限、收藏、容量统计 | OaFileNodeDO、OaFilePermissionDO、OaFileFavoriteDO |
 | 请假申请 (leave) | 请假单草稿/提交/查询，BPM 审批 | OaLeaveApplyDO |
 | 企业邮箱 (mail) | 服务商配置、账号管理、文件夹、邮件索引同步/收发/草稿/附件 | OaMailProviderDO、OaMailAccountDO、OaMailFolderDO、OaMailMessageDO |
-| 会议室管理 (meetingroom) | 会议室台账、可预定查询、预定审批/开始/结束、日程与提醒 Job | OaMeetingRoomDO、OaMeetingRoomBookingDO |
+| 会议室管理 (meetingroom) | 会议室台账、可预定查询、预定审批/开始/结束、日程、提醒与过期取消 Job | OaMeetingRoomDO、OaMeetingRoomBookingDO |
 | OA 笔记 (note) | 笔记目录、收藏、共享接收人、收到共享分页 | OaNoteDO、OaNoteCategoryDO、OaNoteReceiverDO |
 | 公文管理 (officialdoc) | 套红模板、发文审批、收文签收（claim），发文字号/收发编号防重 | OaOfficialDocTemplateDO、OaOfficialDocSendDO、OaOfficialDocReceiveDO |
 | 加班申请 (overtime) | 加班单草稿/提交/查询，BPM 审批 | OaOvertimeApplyDO |
@@ -461,10 +461,14 @@
 
 ## 定时任务
 
-| Job | 说明 |
-|-----|------|
-| OaScheduleReminderJob | 日程提醒：按 `yudao.oa.schedule.remind-before-hours` 提前向参与人发送站内信 |
-| OaMeetingRoomBookingReminderJob | 会议开始提醒与过期未开始预定自动取消 |
+> 均为 Quartz 系统定时任务，标注 `@TenantJob` 按租户逐个执行；需在后台「定时任务」中按 `handler_name` 配置后才生效（`infra_job.handler_name` 取 JobHandler 的 Spring Bean 名）。
+
+| Job | handler_name | 说明 |
+|-----|--------------|------|
+| OaScheduleReminderJob | oaScheduleReminderJob | 日程提醒：按 `yudao.oa.schedule.remind-before-hours` 提前向参与人发送站内信 |
+| OaMeetingRoomBookingCancelExpiredJob | oaMeetingRoomBookingCancelExpiredJob | 取消过期预定：审批通过、使用状态为待使用且 `end_time` 已过的预定，使用状态置为已取消（审批结果保留），返回「取消过期未开始会议 N 条」 |
+| OaMeetingRoomBookingSendReminderJob | oaMeetingRoomBookingSendReminderJob | 会议开始提醒：审批通过、待使用、未提醒且进入提醒窗口的会议，逐条发送站内信（单个会议独立事务，单条失败不影响其他会议、下轮重试），返回「发送会议提醒 N 条」 |
+| OaMeetingRoomBookingReminderJob | oaMeetingRoomBookingReminderJob | **兼容入口（待迁移）**：仍按原顺序「先取消过期预定、再发送会议提醒」执行；新配置请改用上面两个 Job，迁移时先停用本 Job 再启用两个新 Job，新旧 Job 不能同时启用 |
 
 ## 详细文档
 

@@ -8,7 +8,7 @@
 
 **问题**: 在 `yudao.tenant.enable: true`（yudao-server 默认配置）的部署下，访问 OA 模块接口可能直接报 `Unknown column 'tenant_id'` 之类的 SQL 错误。
 
-**原因**: 本模块 48 张表对应的 DO（如 `OaLeaveApplyDO`、`OaAttendanceDO`）全部继承 `BaseDO`，既没有 tenantId 字段，也没有类级 `@TenantIgnore` 注解。而框架的 `TenantDatabaseInterceptor#computeIgnoreTable`（yudao-spring-boot-starter-biz-tenant）只对 `TenantBaseDO` 子类或标注 `@TenantIgnore` 的实体返回"忽略"，其余注册过的表一律追加 `tenant_id = ?` 条件。
+**原因**: 本模块 48 张表对应的 DO（如 `OaLeaveApplyDO`、`OaAttendanceDO`）全部继承 `BaseDO`，既没有 tenantId 字段，也没有类级 `@TenantIgnore` 注解。而框架的 `TenantDatabaseInterceptor#computeIgnoreTable`（yudao-spring-boot-starter-biz-tenant）只对标注 `@TenantIgnore` 的实体、以及不在 MyBatis-Plus `TableInfo` 注册表中的表返回"忽略"；继承 `TenantBaseDO` 的表与其余已注册的表一律追加 `tenant_id = ?` 条件。OA 的 DO 属于"已注册但非 TenantBaseDO、也未标注 @TenantIgnore"的第三类，因此仍会被拼上 `tenant_id`。
 
 **解决**: 二选一：给 OA 全部 DO 类补类级 `@TenantIgnore`（参考 infra 模块 `DataSourceConfigDO` 的写法），或在 `yudao.tenant.ignore-tables` 配置中登记全部 oa_* 表名。新增 OA 表时务必同步处理，否则一上线就报错。
 
@@ -16,7 +16,7 @@
 
 **问题**: 仿写 OA 的 Quartz Job 时漏掉 `@TenantJob`，日程/会议提醒会发送失败或查不到跨模块数据。
 
-**原因**: `OaScheduleReminderJob` 与 `OaMeetingRoomBookingReminderJob` 都标注了 `@TenantJob`，按租户逐个执行。虽然 OA 表本身不参与租户过滤，但 Job 内部调用的 `NotifyMessageSendApi`（日程/会议提醒站内信模板）、`AdminUserApi` 等走的是 system 模块的租户隔离表，必须持有租户上下文才能执行。
+**原因**: `OaScheduleReminderJob`、`OaMeetingRoomBookingCancelExpiredJob`、`OaMeetingRoomBookingSendReminderJob`（以及兼容入口 `OaMeetingRoomBookingReminderJob`）都标注了 `@TenantJob`，按租户逐个执行。虽然 OA 表本身不参与租户过滤，但 Job 内部调用的 `NotifyMessageSendApi`（日程/会议提醒站内信模板）、`AdminUserApi` 等走的是 system 模块的租户隔离表，必须持有租户上下文才能执行。
 
 **解决**: 新增 Job 必须保留 `@TenantJob` 注解；提醒模板编码（`MessageTemplateConstants.SCHEDULE_REMINDER`、`MEETING_ROOM_BOOKING_REMINDER`）需要在对应租户的站内信模板中预置，否则发送环节报错。
 
@@ -46,13 +46,13 @@
 
 **原因**: 草稿阶段刻意不校验时段占用（`OaVehicleApplyServiceImpl#createVehicleApply` 注释"草稿不占用预约时段"）；`submitVehicleApply` / `submitMeetingRoomBooking` 提交时才用 `selectCountByVehicleIdAndTimeOverlap`、`selectListByRoomIdAndTimeOverlap` 检查冲突，普通 SELECT 不加锁，两个并发事务都能通过检查后各自占用。
 
-**解决**: 提交事务内先对资源行加 `FOR UPDATE`（参考 `OaFileNodeServiceImpl#lockFileNode` 的 `selectByIdForUpdate` 做法）再查冲突，或依赖数据库层排他约束；前端做提交按钮防重。
+**解决**: 提交事务内先用框架锁定读（`selectByIdForUpdate` / `selectListForUpdate`，参考 `OaFileNodeServiceImpl#lockFileNode`）锁定资源行再查冲突，或依赖数据库层排他约束；前端做提交按钮防重。
 
 ### 3.3 邮箱账号行锁依赖调用方事务，且锁内执行慢速 IMAP 网络 IO
 
 **问题**: 在无事务方法里调用 `lockMailAccount` 以为已串行化，实际锁立即释放；或多个同步请求长时间互相阻塞。
 
-**原因**: `OaMailAccountServiceImpl#lockMailAccount` 自身没有 `@Transactional`，仅靠 `selectByIdForUpdate`（`OaMailAccountMapper` 中 `last("FOR UPDATE")`）加行锁，调用方无事务时按自动提交执行、锁即刻失效。而 `OaMailMessageServiceImpl#syncMailMessageList` 在 `@Transactional` 内全程持锁抓取远端邮件（单文件夹上限 `MAX_MESSAGES = 100000`、每批 100 条），邮箱慢时数据库事务和行锁都被长时间持有。
+**原因**: `OaMailAccountServiceImpl#lockMailAccount` 自身没有 `@Transactional`，仅靠 `selectByIdForUpdate`（`OaMailAccountMapper` 中基于框架 `BaseMapperX#selectOneForUpdate`，锁定语法由 `ForUpdateInnerInterceptor` 按数据库方言生成）加行锁，调用方无事务时按自动提交执行、锁即刻失效。而 `OaMailMessageServiceImpl#syncMailMessageList` 在 `@Transactional` 内全程持锁抓取远端邮件（单文件夹上限 `MAX_MESSAGES = 100000`、每批 100 条），邮箱慢时数据库事务和行锁都被长时间持有。
 
 **解决**: 邮件的读详情/同步/写操作入口必须保持 `@Transactional`（现有 `OaMailMessageServiceImpl` 各方法已满足），新增入口照抄该模式；`lockMailAccount` 之后应像 `getMailMessage` 一样在锁内重查索引（`selectByIdForUpdate`），避免使用已失效的旧数据。
 
@@ -106,6 +106,42 @@
 
 **问题**: 按通用的 `:create`/`:update` 命名给角色配权限后，出差保存接口仍然 403；或误以为所有 OA 接口都有按钮级权限校验。
 
-**原因**: travel/travel-reimbursement 的 create/update 使用自定义权限 `oa:travel-apply:save`（见 `OaTravelApplyController`），不是 `:create`/`:update`；`OaMailMessageController` 把 `@PreAuthorize("@ss.hasPermission('oa:mail-account:query')")` 标在类级，方法级不再重复标注；另有打卡 `/clock`、各 `my-page`/`received-page`、`share/handle-share`、`forward`、`feedback`、`simple-list` 等个人域端点没有 `@PreAuthorize`，登录即可访问。
+**原因**: travel/travel-reimbursement 的 create/update 使用自定义权限 `oa:travel-apply:save`（见 `OaTravelApplyController`），不是 `:create`/`:update`；`OaMailMessageController` 把 `@PreAuthorize("@ss.hasPermission('oa:mail-account:query')")` 标在类级，方法级不再重复标注；个人域端点的权限并不统一：考勤 `POST /oa/attendance/clock`、`GET /oa/attendance/my-page`、`GET /oa/attendance/my-today-list`、联系人 `POST /oa/contact/share`/`PUT /oa/contact/handle-share`、公告 `POST /oa/announcement/forward`、任务 `POST /oa/task/feedback`、会议室 `GET /oa/meeting-room/bookable-page`、笔记 `PUT /oa/note/update-favorite`、各域的 `DELETE .../delete-received`，以及各 `simple-list`（联系人分类/笔记目录/邮箱账号/邮箱服务配置/公文模板）确实没有 `@PreAuthorize`，登录即可访问；但联系人、笔记、日程、任务、公告的 `my-page`/`received-page`（以及联系人 `shared-page`）仍要求对应域的 `oa:*:query`，笔记 `PUT /oa/note/update-share` 要求 `oa:note:update`。
 
 **解决**: 配置角色菜单权限时以 Controller 注解为准，出差/差旅报销要单独授权 `:save`；个人域接口的数据隔离依赖 Service 层归属校验（如 `validateBookingOwner`、`validateAttendanceExists` 将越界记录与不存在记录统一返回 `*_NOT_EXISTS` 防泄露），新增此类接口不要漏写 owner 校验。
+
+## 7. 定时任务与多数据库兼容相关
+
+### 7.1 新旧会议室定时任务不能同时启用
+
+**问题**: 同时启用 `OaMeetingRoomBookingReminderJob` 与 `OaMeetingRoomBookingCancelExpiredJob` / `OaMeetingRoomBookingSendReminderJob` 后，过期取消与会议提醒被重复执行，用户收到重复站内信。
+
+**原因**: 旧的 `OaMeetingRoomBookingReminderJob` 本身已包含「先取消过期预定、再发送会议提醒」两步；两个新 Job 分别调用 `cancelExpiredMeetingRoomBookings` 与 `sendMeetingRoomBookingReminders`。若新旧同时调度，提醒步骤会并发扫描同一批 `reminded = false` 的会议，存在 `reminded` 标记竞态，导致重复发送。
+
+**解决**: 新部署只配置两个新 Job（`handler_name` 分别为 `oaMeetingRoomBookingCancelExpiredJob`、`oaMeetingRoomBookingSendReminderJob`）。已有旧 Job 的环境按「先停用旧 Job，再启用两个新 Job」迁移，不要为了平滑过渡让两者并存。
+
+### 7.2 新增 SQL 不要硬编码 MySQL 专有函数与锁语法
+
+**问题**: 新写的 Mapper 在 MySQL 下正常，切到 PostgreSQL / Oracle / SQL Server / H2 时报语法错误或函数不存在。
+
+**原因**: OA 模块已开始适配多数据库：会议可预定成员判断由硬编码 `JSON_CONTAINS(booking_user_ids, ?)` 改为 `SqlDialectUtils.jsonArrayContains("booking_user_ids", false)`（`OaMeetingRoomMapper`）；文件节点与邮箱账号的锁定读由 `.last("FOR UPDATE")` 改为框架 `selectListForUpdate`（`OaFileNodeMapper`、`OaMailAccountMapper`）；云盘容量统计去掉了 SQL 层 `COALESCE`，改为 `SUM(size)` + Java 侧空值兜底（`OaFileNodeMapper#selectSumSizeByCreatorAndType`）。
+
+**解决**: 新增 SQL 时避免硬编码 `JSON_CONTAINS`、`COALESCE`、`.last("FOR UPDATE")` 等 MySQL 专有写法；JSON 数组包含判断用 `SqlDialectUtils`（如 `jsonArrayContains`），锁定读用 `BaseMapperX` 的 `selectOneForUpdate` / `selectListForUpdate`（配合 `SelectForUpdateMethod` / `ForUpdateInnerInterceptor` 按方言生成锁定语法），空值兜底放在 Java 侧。
+
+### 7.3 逻辑删除列 deleted 比较统一用数值 0
+
+**问题**: 自定义联表查询里写 `.eq(...::getDeleted, false)`，在部分数据库或 MyBatis-Plus 版本下出现布尔与数值类型不匹配。
+
+**原因**: `BaseDO#deleted` 声明为 `Boolean`，但数据库列是数值型。OA 模块现有查询已统一写成 `.eq(OaAnnouncementReceiverDO::getDeleted, 0)`（`OaAnnouncementMapper`）、`.eq(OaContactDO::getDeleted, 0)`（`OaContactShareMapper`）。
+
+**解决**: 新增联表/自定义查询时沿用 `deleted = 0` 写法，与模块现有 Mapper 保持一致。
+
+## 8. 接口入参相关
+
+### 8.1 联系人分类、笔记目录创建会忽略请求体中的 id
+
+**问题**: 前端在「新增分类/目录」时若沿用编辑页的表单对象并带上 `id`，旧代码会把该 id 一并插入，造成主键冲突或覆盖；改造后该 id 会被静默忽略，前端不能再依赖 create 接口指定主键。
+
+**原因**: `OaContactCategoryServiceImpl#createContactCategory`、`OaNoteCategoryServiceImpl#createNoteCategory` 在 `BeanUtils.toBean` 后增加了 `.setId(null)`，然后才 `insert`。
+
+**解决**: 新增接口按「新增不传 id」的约定实现（本模块既有文档已如此描述）；若确实需要指定主键，应使用独立的导入/迁移接口，不要复用 create。

@@ -9,9 +9,9 @@
   - `yudao-module-promotion`：营销中心（优惠劵、秒杀、拼团、砍价、限时折扣、满减送、积分商城、装修、文章、Banner、客服）
   - `yudao-module-trade`：交易中心（订单、售后、配送、分销、交易配置、购物车）
   - `yudao-module-statistics`：统计中心（交易/商品/会员/支付统计）
-  - `yudao-module-trade-api`：纯 API 骨架包（仅 `TradeOrderApi` + DTO + 错误码，无业务实现）
+  - `yudao-module-trade-api`：纯 API 骨架包（无业务实现），对外提供 `TradeOrderApi` + DTO + `ErrorCodeConstants` 错误码，并内置订单 / 售后 / 分销 / 配送 / 通知等 18 个共享枚举（`DeliveryTypeEnum`、`TradeOrderStatusEnum` 等），供 product、promotion、trade、statistics 共同引用
 - **业务定位**: 提供电商后台的完整能力：商品发布与管理、订单履约与售后、各类促销活动的配置与核销、经营数据统计；Admin 端（`controller/admin`）供商家后台使用，App 端（`controller/app`）供 C 端商城使用。
-- **技术栈**: Spring Boot 2.7.18（仓库为 `2026.09-jdk8-SNAPSHOT` jdk8 分支）/ MyBatis-Plus 3.5.17 / Redisson 4.7.0（trade 子模块） / yudao framework starters（web、security、mybatis、excel、biz-tenant、biz-ip、redis）
+- **技术栈**: Spring Boot 2.7.18（仓库为 `2026.10-jdk8-SNAPSHOT` jdk8 分支）/ MyBatis-Plus 3.5.17 / Redisson 4.8.0（经 trade 的 `yudao-spring-boot-starter-redis` 传递引入） / yudao framework starters（web、security、mybatis、excel、biz-tenant、biz-ip、redis）
 
 ## 设计原则
 
@@ -19,10 +19,11 @@
 |-----|------|
 | 多子模块拆分 | 商品/营销/交易/统计各自独立 Maven 子模块，按业务域隔离代码与表，避免单模块膨胀 |
 | trade-api 解循环依赖 | promotion 与 trade 相互依赖（拼团/砍价要取消订单，订单要计算活动优惠），故抽出纯接口的 `yudao-module-trade-api` 切断循环 |
-| 价格计算责任链 | 下单价格由 `TradePriceCalculator` 责任链按 `@Order` 顺序计算（优惠劵、限时折扣、满减、秒杀、拼团、砍价、积分等 10 个 Calculator 依次叠加） |
+| 价格计算责任链 | 下单价格由 `TradePriceCalculator` 责任链按 `@Order` 顺序计算（10 个 Calculator：秒杀/拼团/砍价/积分活动=8 → 限时折扣=10 → 满减=20 → 优惠劵=30 → 积分抵扣=40 → 运费=50 → 赠送积分=999） |
 | 订单处理策略模式 | 订单创建/支付后的扩展动作用 `TradeOrderHandler` 策略分发，每种活动类型一个 Handler（共 9 个），新增活动类型无需改动订单主干 |
 | Admin/App 双端分离 | 每个业务域分设 `controller/admin` 与 `controller/app`，VO 独立、权限独立，互不复用 |
 | 跨模块仅依赖 Api 包 | 对 system/member/pay/infra 的调用全部走 `XxxApi` 接口 + DTO（如 `MemberUserApi`、`PayOrderApi`），不直接依赖对方实现类 |
+| 回调单号双向核对 | 支付 / 退款 / 转账回调除校验金额与商户单号外，还必须校验「业务单绑定的 payOrderId / payRefundId / payTransferId == 回调单号」，防止其它支付应用中同商户单号、同金额的单据串单 |
 
 ## 核心功能点
 
@@ -44,7 +45,7 @@
 
 ## API 接口索引
 
-> Admin 端共 **41 个 Controller、217 个端点**，超过 120，按域分节给出控制器级摘要；另有 `controller/app` 下 32 个 App 端 Controller（约 99 个端点）不在本文档范围内。端点明细见各 `api-{key}.md`。
+> Admin 端共 **40 个 Controller、217 个端点**，超过 120，按域分节给出控制器级摘要；另有 `controller/app` 下 33 个 App 端 Controller（99 个端点）不在本文档范围内，例外：App 端独立的购物车域见 [api-cart.md](api-cart.md)（AppCartController，7 个端点）。端点明细见各 `api-{key}.md`。
 
 ### 商品中心（product 子模块，41 端点）
 
@@ -63,7 +64,7 @@
 
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |---------|---------|------|---------|
-| /product/spu/create | POST | 创建商品 SPU | product:spu:create |
+| /product/spu/create | POST | 创建商品 SPU（配送方式限 1 快递发货 / 2 用户自提） | product:spu:create |
 | /product/spu/update-status | PUT | 更新商品 SPU Status | product:spu:update |
 | /product/spu/get-detail | GET | 获得商品 SPU 明细 | product:spu:query |
 | /product/spu/get-count | GET | 获得 SPU 分页 tab count | product:spu:query |
@@ -130,7 +131,7 @@
 |---------|---------|------|---------|
 | /trade/order/page | GET | 获得交易订单分页 | trade:order:query |
 | /trade/order/get-detail | GET | 获得交易订单详情 | trade:order:query |
-| /trade/order/delivery | PUT | 订单发货 | trade:order:update |
+| /trade/order/delivery | PUT | 订单发货（仅【待发货】/【已发货】状态可发货，已发货用于改物流） | trade:order:update |
 | /trade/order/pick-up-by-verify-code | PUT | 订单核销 | trade:order:pick-up |
 | /trade/order/update-address | PUT | 修改订单收货地址 | trade:order:update |
 | /trade/after-sale/agree | PUT | 同意售后 | trade:after-sale:agree |
@@ -173,9 +174,9 @@
 | product_sku | 商品 SKU | BaseDO | spu_id、properties、price、market_price、cost_price、stock、weight |
 | product_category | 商品分类 | BaseDO | parent_id、name、pic_url、sort、status |
 | product_brand | 商品品牌 | BaseDO | name、pic_url、status |
-| product_property | 商品属性项 | BaseDO | name、status |
-| product_property_value | 商品属性值 | BaseDO | property_id、name、status |
-| product_comment | 商品评价 | BaseDO | user_id、order_item_id、spu_id、scores、content、pic_urls、visible、reply |
+| product_property | 商品属性项 | BaseDO | name、remark |
+| product_property_value | 商品属性值 | BaseDO | property_id、name、remark |
+| product_comment | 商品评价 | BaseDO | user_id、order_item_id、spu_id、scores、content、pic_urls、visible、reply_status、reply_content |
 | product_favorite | 商品收藏 | BaseDO | user_id、spu_id |
 | product_browse_history | 商品浏览记录 | BaseDO | user_id、spu_id |
 
@@ -186,26 +187,26 @@
 | promotion_coupon_template | 优惠劵模板 | BaseDO | name、discount_type、discount_percent、discount_price、use_price、validity_type、total_count、take_count、product_scope |
 | promotion_coupon | 优惠劵 | BaseDO | template_id、user_id、status、use_order_id、valid_end_time |
 | promotion_seckill_config | 秒杀时段配置 | BaseDO | name、start_time、end_time、status |
-| promotion_seckill_activity | 秒杀活动 | BaseDO | config_id、spu_id、start_time、end_time、total_limit_count |
+| promotion_seckill_activity | 秒杀活动 | BaseDO | config_ids、spu_id、status、start_time、end_time、total_limit_count、total_stock |
 | promotion_seckill_product | 秒杀活动商品 | BaseDO | activity_id、spu_id、sku_id、seckill_price、stock |
-| promotion_combination_activity | 拼团活动 | BaseDO | spu_id、team_count、team_duration、total_limit_count |
+| promotion_combination_activity | 拼团活动 | BaseDO | spu_id、user_size、limit_duration、total_limit_count |
 | promotion_combination_product | 拼团活动商品 | BaseDO | activity_id、spu_id、sku_id、combination_price |
 | promotion_combination_record | 拼团记录 | BaseDO | activity_id、user_id、head_id、user_count、status、order_id |
 | promotion_bargain_activity | 砍价活动 | BaseDO | spu_id、sku_id、random_min_price、random_max_price、help_max_count |
-| promotion_bargain_record | 砍价记录 | BaseDO | activity_id、user_id、bargaining_price、status、order_id |
-| promotion_bargain_help | 砍价助力 | BaseDO | record_id、user_id、reduction_price |
+| promotion_bargain_record | 砍价记录 | BaseDO | activity_id、user_id、bargain_first_price、bargain_price、status、order_id |
+| promotion_bargain_help | 砍价助力 | BaseDO | record_id、user_id、reduce_price |
 | promotion_discount_activity | 限时折扣活动 | BaseDO | name、start_time、end_time、status |
 | promotion_discount_product | 限时折扣商品 | BaseDO | activity_id、spu_id、sku_id、discount_price |
 | promotion_reward_activity | 满减送活动 | BaseDO | name、condition_type、rules、start_time、end_time |
-| promotion_point_activity | 积分商城活动 | BaseDO | spu_id、point、stock、total_stock、start_time、end_time |
+| promotion_point_activity | 积分商城活动 | BaseDO | spu_id、status、stock、total_stock |
 | promotion_point_product | 积分商城活动商品 | BaseDO | activity_id、spu_id、sku_id、point、price、stock |
 | promotion_diy_template | 装修模板 | BaseDO | name、property、used |
-| promotion_diy_page | 装修页面 | BaseDO | name、property、status |
+| promotion_diy_page | 装修页面 | BaseDO | template_id、name、property |
 | promotion_article | 文章 | BaseDO | category_id、title、author、pic_url、spu_id |
 | promotion_article_category | 文章分类 | BaseDO | name、status |
 | promotion_banner | 轮播图 | BaseDO | title、pic_url、position、status |
 | promotion_kefu_conversation | 客服会话 | BaseDO | user_id、last_message_time、last_message_content、admin_pinned、admin_unread_message_count |
-| promotion_kefu_message | 客服消息 | BaseDO | conversation_id、sender_user_id、sender_admin_id、content、read_status |
+| promotion_kefu_message | 客服消息 | BaseDO | conversation_id、sender_id、sender_type、receiver_id、receiver_type、content、read_status |
 
 ### trade 子模块（15 张）
 
@@ -213,10 +214,10 @@
 |------|------|---------|---------|
 | trade_order | 交易订单 | BaseDO | no、type、terminal、user_id、status、total_price、discount_price、delivery_price、adjust_price、pay_price、pay_order_id、delivery_type、receiver_area_id、pick_up_verify_code、refund_status |
 | trade_order_item | 交易订单项 | BaseDO | order_id、spu_id、sku_id、price、count、use_point、after_sale_status |
-| trade_order_log | 交易订单日志 | BaseDO | order_id、user_id、user_type、type、before_info、after_info |
+| trade_order_log | 交易订单日志 | BaseDO | order_id、user_id、user_type、before_status、after_status、operate_type、content |
 | trade_cart | 购物车（仅 App 端） | BaseDO | user_id、spu_id、sku_id、count、selected |
 | trade_after_sale | 售后订单 | BaseDO | no、order_id、order_item_id、way、type、refund_price、status |
-| trade_after_sale_log | 售后日志 | BaseDO | after_sale_id、user_id、activity_type、content |
+| trade_after_sale_log | 售后日志 | BaseDO | after_sale_id、user_id、user_type、before_status、after_status、operate_type、content |
 | trade_delivery_express | 快递公司 | BaseDO | code、name、sort、status |
 | trade_delivery_express_template | 快递运费模板 | BaseDO | name、charge_mode、sort |
 | trade_delivery_express_template_charge | 运费模板计费明细 | BaseDO | template_id、area_ids、start_count、start_price、extra_count、extra_price |
@@ -231,14 +232,14 @@
 
 | 表名 | 说明 | 继承基类 | 关键字段 |
 |------|------|---------|---------|
-| trade_statistics | 交易统计（日汇总） | BaseDO | day、order_create_count、order_pay_count、pay_price、wallet_pay_price、after_sale_refund_price |
-| product_statistics | 商品统计（日汇总） | BaseDO | day、spu_id、browse_count、order_count、pay_price |
+| trade_statistics | 交易统计（日汇总） | BaseDO | time、order_create_count、order_pay_count、order_pay_price、wallet_pay_price、after_sale_refund_price |
+| product_statistics | 商品统计（日汇总） | BaseDO | time、spu_id、browse_count、order_count、order_pay_price |
 
 ## 设计模式
 
 | 模式 | 应用位置 | 用途 |
 |------|---------|------|
-| 责任链 | `trade/service/price/calculator` 下 `TradePriceCalculator` 接口 + 10 个实现（TradeCouponPriceCalculator、TradeDiscountActivityPriceCalculator、TradeRewardActivityPriceCalculator、TradeSeckillActivityPriceCalculator、TradeCombinationActivityPriceCalculator、TradeBargainActivityPriceCalculator、TradePointUsePriceCalculator、TradePointGiveCalculator、TradeDeliveryPriceCalculator 等） | 下单价格计算按 `@Order` 顺序依次叠加各类优惠，`TradePriceServiceImpl` 汇总执行链 |
+| 责任链 | `trade/service/price/calculator` 下 `TradePriceCalculator` 接口 + 10 个实现：TradeSeckillActivityPriceCalculator、TradeCombinationActivityPriceCalculator、TradeBargainActivityPriceCalculator、TradePointActivityPriceCalculator（`@Order` 均为 8）→ TradeDiscountActivityPriceCalculator（10）→ TradeRewardActivityPriceCalculator（20）→ TradeCouponPriceCalculator（30）→ TradePointUsePriceCalculator（40）→ TradeDeliveryPriceCalculator（50）→ TradePointGiveCalculator（999，运费后赠送积分） | 下单价格计算按 `@Order` 顺序依次叠加各类优惠，`TradePriceServiceImpl` 汇总执行链 |
 | 策略模式 | `trade/service/order/handler` 下 `TradeOrderHandler` 接口 + 9 个实现（TradeSeckillOrderHandler、TradeCombinationOrderHandler、TradeBargainOrderHandler、TradeCouponOrderHandler、TradePointOrderHandler、TradeMemberPointOrderHandler、TradeBrokerageOrderHandler、TradeProductSkuOrderHandler、TradeStatusSyncToWxaOrderHandler） | 订单创建与支付后的活动扩展逻辑按策略分发，`TradeOrderUpdateServiceImpl` 注入 `List<TradeOrderHandler>` 遍历调用 |
 | 定时任务补偿 | 各子模块 `job/` 包（TradeOrderAutoCancelJob、TradeOrderAutoReceiveJob、TradeOrderAutoCommentJob、CouponExpireJob、CombinationRecordExpireJob、BrokerageRecordUnfreezeJob、ProductStatisticsJob、TradeStatisticsJob 等） | 订单超时关闭/自动收货、劵过期、拼团过期、佣金解冻、统计落库等异步补偿 |
 
@@ -249,11 +250,11 @@
   - 业务模块 API：
     - `system`：AdminUserApi、NotifyMessageSendApi、SocialClientApi（微信小程序发货信息录入/确认收货/订阅消息）
     - `member`：MemberUserApi、MemberAddressApi、MemberConfigApi、MemberLevelApi、MemberPointApi
-    - `pay`：PayOrderApi、PayRefundApi（支付/退款发起），并接收 pay 的 PayNotifyJob 回调（售后退款、佣金提现转账）
+    - `pay`：PayOrderApi、PayRefundApi、PayTransferApi、PayWalletApi（支付单/退款单/转账单发起与钱包余额查询），并接收 pay 的 PayNotifyJob 回调（售后退款、佣金提现转账）
     - `infra`：WebSocketSenderApi（客服消息推送）
 - **下游**（依赖本模块）:
   - 无其他业务模块依赖 mall 的 Api（仓库内 grep 未发现外部消费方）；`yudao-server` 聚合打包全部子模块
-  - mall 内部依赖方向：promotion → product、trade-api；trade → product、promotion、trade-api；statistics → product、promotion、trade-api
+  - mall 内部依赖方向：product → trade-api（仅为复用 `DeliveryTypeEnum` 做配送方式参数校验）；promotion → product、trade-api；trade → product、promotion、trade-api；statistics → product、promotion、trade-api
 
 ## 对外暴露的 API
 
@@ -261,7 +262,7 @@
 |---------|------|--------|
 | `cn.iocoder.yudao.module.trade.api.order.TradeOrderApi`（位于 yudao-module-trade-api） | getOrderList(ids)、getOrder(id)、cancelPaidOrder(userId, orderId, cancelType) | promotion 子模块（CombinationRecordServiceImpl 拼团失败取消订单、AppBargainRecordController 砍价订单查询） |
 | `cn.iocoder.yudao.module.product.api.*`（ProductSpuApi、ProductSkuApi、ProductCategoryApi、ProductCommentApi） | 商品/分类/SKU/评价查询与更新库存 | mall 内部（trade、promotion、statistics） |
-| `cn.iocoder.yudao.module.promotion.api.*`（CouponApi、SeckillActivityApi、BargainActivityApi、DiscountActivityApi、RewardActivityApi、PointActivityApi 等 10 个） | 活动校验与库存扣减、优惠劵使用/回收 | mall 内部（trade 价格计算链与订单 Handler） |
+| `cn.iocoder.yudao.module.promotion.api.*`（CouponApi、SeckillActivityApi、BargainActivityApi、BargainRecordApi、CombinationRecordApi、DiscountActivityApi、RewardActivityApi、PointActivityApi，共 8 个） | 活动校验与库存扣减、优惠劵使用/回收 | mall 内部（trade 价格计算链与订单 Handler） |
 
 ## 详细文档
 
@@ -288,6 +289,7 @@
 - [api-trade-delivery.md](api-trade-delivery.md) - 配送（快递公司/运费模板/自提门店）
 - [api-trade-brokerage.md](api-trade-brokerage.md) - 分销（用户/佣金/提现）
 - [api-trade-config.md](api-trade-config.md) - 交易配置
+- [api-cart.md](api-cart.md) - 购物车（App 端）
 - [api-statistics-trade.md](api-statistics-trade.md) - 交易统计
 - [api-statistics-product.md](api-statistics-product.md) - 商品统计
 - [api-statistics-member.md](api-statistics-member.md) - 会员统计

@@ -207,7 +207,7 @@ TradeOrderItemBaseVO（订单项公共字段）:
 
 - **路径**: PUT /trade/order/delivery
 - **权限**: trade:order:update
-- **说明**: 对待发货的快递订单执行发货，记录物流公司/单号并通知用户。
+- **说明**: 对快递订单执行发货，记录物流公司/单号并通知用户。仅【待发货】（UNDELIVERED=10）与【已发货】（DELIVERED=20）状态允许发货；后者用于修改物流公司/单号，因此本接口已显式支持对已发货订单再次发货。
 
 **请求参数 (TradeOrderDeliveryReqVO)**:
 
@@ -219,7 +219,19 @@ TradeOrderItemBaseVO（订单项公共字段）:
 
 **响应**: CommonResult&lt;Boolean&gt;（操作结果）
 
-**业务逻辑**: 1. 校验订单存在且未退款（validateOrderDeliverable），并执行 TradeOrderHandler 前置处理；订单不是待发货状态则抛 ORDER_DELIVERY_FAIL_STATUS_NOT_UNDELIVERED（更新失败时）。2. 校验配送方式必须为快递（EXPRESS），否则抛 ORDER_DELIVERY_FAIL_DELIVERY_TYPE_NOT_EXPRESS。3. 快递发货时校验物流公司存在并记录物流编号/单号；无需发货时置 logisticsId=0、单号为空。4. 更新订单状态为【已发货】并记录发货时间（CAS 更新，状态不匹配则抛错），记录订单日志。5. 发送站内信与微信小程序订阅消息（订单编号、状态、发货时间、快递单号、收货地址）。6. 执行 TradeOrderHandler 发货后置处理（如分销佣金冻结等）。
+**业务逻辑**: 1. 校验订单存在后执行状态白名单校验（validateOrderDeliverable）：仅【待发货】或【已发货】允许发货，其余状态（未付款/已取消/已完成/已退款等）在更新前即抛 ORDER_DELIVERY_FAIL_STATUS_NOT_UNDELIVERED；随后校验订单未退款（refundStatus = NONE，否则抛 ORDER_DELIVERY_FAIL_REFUND_STATUS_NOT_NONE），并执行 TradeOrderHandler 前置处理。2. 校验配送方式必须为快递（EXPRESS），否则抛 ORDER_DELIVERY_FAIL_DELIVERY_TYPE_NOT_EXPRESS。3. 快递发货时校验物流公司存在并记录物流编号/单号；无需发货时置 logisticsId=0、单号为空。4. 更新订单状态为【已发货】并记录发货时间；CAS 更新以读取时的订单状态（order.getStatus()）作为乐观锁条件，避免并发收货/取消被覆盖，更新失败抛 ORDER_DELIVERY_FAIL_STATUS_NOT_UNDELIVERED。5. 发送站内信与微信小程序订阅消息（订单编号、状态、发货时间、快递单号、收货地址），记录订单日志。6. 执行 TradeOrderHandler 发货后置处理（如分销佣金冻结等）。
+
+> 已发货订单再次发货时，订单状态保持【已发货】（仅刷新物流公司/单号与发货时间），但站内信、订阅消息与 `afterDeliveryOrder` 后置处理会再次执行；新增发货后置 Handler 时需自行保证幂等。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-----|-----|
+| 1_011_000_011 | 交易订单不存在 |
+| 1_011_000_017 | 交易订单发货失败，订单不是【待发货】状态（实际白名单为【待发货】或【已发货】，完整文案见域级错误码汇总） |
+| 1_011_000_021 | 交易订单发货失败，订单已退款或部分退款 |
+| 1_011_000_024 | 交易订单发货失败，发货类型不是快递 |
+| 1_011_004_000 | 快递公司不存在 |
 
 ### 2.2 订单备注
 
@@ -362,3 +374,5 @@ TradeOrderItemBaseVO（订单项公共字段）:
 | 1_011_000_038 | 交易订单创建失败，原因：用户积分不足 |
 | 1_011_000_039 | 交易订单自提失败，订单不是【待核销】状态 |
 | 1_011_004_000 | 快递公司不存在（物流轨迹查询相关） |
+
+> 1_011_000_017 的文案仍为「订单不是【待发货】状态」，但实际判定是 `isUndelivered || isDelivered` 白名单：未付款/已取消/已完成/已退款等状态都会抛出它，而【已发货】订单不再触发（允许再次发货修改物流）。排查时不要按文案字面理解。

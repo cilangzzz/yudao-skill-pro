@@ -86,12 +86,48 @@ public interface AiChatMessageMapper extends BaseMapperX<AiChatMessageDO> {
 // 获取 ChatModel
 ChatModel chatModel = modelService.getChatModel(modelId);
 
+// 获取 ChatModel（带思考档位参数）
+ChatModel chatModel = modelService.getChatModel(modelId, reasoningOptions);
+
 // 同步调用
 ChatResponse response = chatModel.call(new Prompt(messages));
 
 // 流式调用
 Flux<ChatResponse> stream = chatModel.stream(new Prompt(messages));
 ```
+
+**思考（Reasoning）档位**：
+
+模型的思考档位保存在 `ai_model.reasoning_config`（`AiModelDO.ReasoningConfig`：档位列表 + 默认档位）。发送消息时按「平台一致 → 生效档位 → 平台路由 → 参数深拷贝」的顺序解析（见 `AiChatMessageServiceImpl#resolveReasoningOptions`）：
+
+```java
+// 1. 解析本次生效的档位与思考参数
+//    注意：模型未配置思考时，只有「请求显式带了档位」才会抛 MODEL_REASONING_NOT_CONFIGURED；
+//          未带档位时不报错，直接返回 null（保持平台原有行为）
+Map<String, Object> reasoningOptions = AiReasoningUtils.getReasoningOptions(
+        model, AiReasoningUtils.resolveReasoningLevel(model, sendReqVO.getReasoningLevel()));
+
+// 2. 带着思考参数取客户端（不同档位对应不同客户端实例，缓存键含思考参数哈希）
+ChatModel chatModel = modelService.getChatModel(model.getId(), reasoningOptions);
+```
+
+思考参数的落地方式由平台决定（`AiReasoningUtils.ReasoningRoute`）：HTTP 路由复用 DeepSeek 客户端，通过 `AiRequestBodyPatcher` 在 HTTP 层做 RFC 7396 合并补丁；OPENAI 路由 `reasoning_effort` 写强类型字段、其余键进 `extraBody`；TONG_YI 路由映射到 `enable_thinking` / `thinking_budget`。
+
+**Token 用量与请求日志**：
+
+```java
+// 1. 生成请求编号（本地 UUID，非厂商返回 id）
+String requestId = IdUtil.fastUUID();
+// 2. 构建请求日志快照（bizType / bizId / 平台 / 模型 / 租户快照）
+AiRequestLogCreateReqDTO requestLog = requestLogService.buildCreateReqDTO(
+        requestId, userId, AiRequestLogBizTypeEnum.CHAT, bizId, model);
+// 3. 流式过程中用 chunk 更新用量快照（取最新整份快照，不累加）
+requestLogService.setCreateReqDTO(requestLog, chunk);
+// 4. 结束时记录日志（独立事务，主事务回滚也不丢）
+requestLogService.createRequestLog(requestLog);
+```
+
+Token 用量由 `AiUsageUtils` 从厂商返回的 usage 中提取，未知为 null（不做估算），`totalTokens` 仅在 input、output 都已知时才有值。
 
 **ImageModel（绘画）**：
 
@@ -103,14 +139,15 @@ ImageModel imageModel = modelService.getImageModel(modelId);
 ImageResponse response = imageModel.call(new ImagePrompt(prompt, options));
 ```
 
-**EmbeddingModel（向量化）**：
+**EmbeddingModel（向量化）与 VectorStore（向量库）**：
 
 ```java
-// 获取 EmbeddingModel
-EmbeddingModel embeddingModel = modelService.getOrCreateVectorStore(modelId, metadataFields);
+// 获取向量库（当前默认 SimpleVectorStore；切换 Qdrant / Redis / Milvus 需改 AiModelServiceImpl#getOrCreateVectorStore）
+// 返回类型是 VectorStore，不是 EmbeddingModel
+VectorStore vectorStore = modelService.getOrCreateVectorStore(modelId, metadataFields);
 
-// 生成向量
-EmbeddingResponse response = embeddingModel.embedForResponse(texts);
+// 写入文档（知识库段落向量化），向量 id 由 VectorStore 生成并回写 ai_knowledge_segment.vector_id
+vectorStore.add(List.of(document));
 ```
 
 ### 异常处理
@@ -121,8 +158,15 @@ EmbeddingResponse response = embeddingModel.embedForResponse(texts);
 |-------|------|
 | 1_040_000_000 | API 密钥不存在 |
 | 1_040_001_000 | 模型不存在 |
+| 1_040_001_004 | 该模型未配置思考档位 |
+| 1_040_001_005 | 该模型不支持思考档位 |
+| 1_040_001_006 | 平台暂不支持思考配置 |
+| 1_040_001_007 | 模型平台与 API 密钥平台不一致，无法使用思考配置 |
+| 1_040_001_009 | 思考配置不正确 |
 | 1_040_003_000 | 对话不存在 |
 | 1_040_004_001 | 对话生成异常 |
+| 1_040_004_002 | 读取图片附件失败 |
+| 1_040_006_000 | 音乐不存在 |
 | 1_040_009_000 | 知识库不存在 |
 
 ### 统一响应
@@ -140,15 +184,16 @@ EmbeddingResponse response = embeddingModel.embedForResponse(texts);
 MY_PLATFORM("MyPlatform", "我的平台"),
 ```
 
-2. 在 `AiModelFactoryImpl` 中添加模型创建方法：
+2. 在 `AiModelFactoryImpl` 中添加模型创建方法（`AiModelFactory#getOrCreateChatModel` 现为四参：`platform`、`apiKey`、`url`、`reasoningOptions`）：
 
 ```java
-// 在 getOrCreateChatModel 方法的 switch 中添加
+// 在 getOrCreateChatModel 方法的 switch 中添加（思考参数按平台路由处理，见下方说明）
 case MY_PLATFORM:
-    return buildMyPlatformChatModel(apiKey, url);
+    return buildMyPlatformChatModel(apiKey, url, reasoningOptions);
 
 // 新增构建方法
-private static ChatModel buildMyPlatformChatModel(String apiKey, String url) {
+private static ChatModel buildMyPlatformChatModel(String apiKey, String url,
+                                                  Map<String, Object> reasoningOptions) {
     // 参考 Spring AI 对应平台的 AutoConfiguration 实现
     MyPlatformApi api = MyPlatformApi.builder()
         .apiKey(apiKey)
@@ -159,6 +204,10 @@ private static ChatModel buildMyPlatformChatModel(String apiKey, String url) {
         .toolCallingManager(getToolCallingManager())
         .build();
 }
+
+// 若平台需要支持思考档位：先在 AiReasoningUtils#getReasoningRoute 归属路由；
+// HTTP 路由用 AiRequestBodyPatcher.configure(builder, patcher) 给 DeepSeekApi.Builder 装上补丁，
+// 缓存键需带上 reasoningOptions 的规范化哈希（AiReasoningUtils#hashReasoningOptions）
 ```
 
 3. 如需自定义模型类，在 `framework/ai/core/model/` 下创建：
@@ -237,9 +286,11 @@ MyCapabilityModel getOrCreateMyCapabilityModel(AiPlatformEnum platform,
 - 模型实例缓存：使用 `Singleton.get()` 缓存，避免重复创建连接
 - 流式响应优先：聊天推荐使用流式接口，用户体验更好
 - 错误处理：捕获 AI 调用异常，记录 `errorMessage` 字段
-- 向量存储选择：生产环境推荐 Milvus、Qdrant，测试可用 SimpleVectorStore
+- 向量存储选择：当前 `AiModelServiceImpl#getOrCreateVectorStore` 硬编码 `SimpleVectorStore`（本地文件持久化），Qdrant / Redis / Milvus 的构建方法已存在但被注释；生产环境需放开注释切换，并在 `application.yaml` 配置对应连接
 - 知识库分片：根据文档特点选择分片策略（语义分片、Markdown QA 分片）
-- 多模态支持：`ChatMessage` 支持携带 `attachmentUrls` 实现多模态对话
+- 多模态支持：模型 `input_modalities` 包含 `image` 时，图片附件以 `Media`（`ByteArrayResource`）与文本放入同一条 `UserMessage`；为空（历史数据）视为仅 text，图片退化为 Base64 文本。详见 [pitfalls 第 8 节](pitfalls.md)
+- 平台默认模型：各平台 `XxxChatModel.MODEL_DEFAULT` 是内置默认模型标识（当前 MiniMax=`MiniMax-M3.1-Flash`、月之暗面=`kimi-k3.1-pro`、智谱=`glm-5.3-flash`、小米 MiMo=`mimo-v2.6-flash`），`application.yaml` 中的示例值可能滞后，以代码常量为准
+- 复用客户端的新平台：小米 MiMo 直接复用 DeepSeek 客户端（OpenAI 兼容协议，`https://api.xiaomimimo.com/v1/chat/completions`），Bean 受 `yudao.ai.mimo.enable` 开关控制，默认关闭；新增同类平台可参考 `MiMoChatModel` 的写法
 
 ## 模块依赖
 
@@ -247,17 +298,21 @@ MyCapabilityModel getOrCreateMyCapabilityModel(AiPlatformEnum platform,
 
 | 依赖 | 版本 | 用途 |
 |-----|------|-----|
-| spring-ai-core | 1.0.x | Spring AI 核心框架，提供统一的 AI 模型抽象 |
-| spring-ai-openai | 1.0.x | OpenAI 模型集成 |
-| spring-ai-anthropic | 1.0.x | Anthropic Claude 模型集成 |
-| spring-ai-ollama | 1.0.x | Ollama 本地模型集成 |
-| spring-ai-zhipuai | 1.0.x | 智谱 AI 模型集成 |
-| spring-ai-deepseek | 1.0.x | DeepSeek 模型集成 |
-| spring-ai-minimax | 1.0.x | MiniMax 模型集成 |
-| spring-ai-milvus | 1.0.x | Milvus 向量数据库集成 |
-| spring-ai-qdrant | 1.0.x | Qdrant 向量数据库集成 |
-| spring-ai-redis | 1.0.x | Redis 向量存储集成 |
-| hutool | 5.x | Singleton 缓存、工具类 |
+| spring-ai-bom | 1.1.8 | Spring AI 依赖版本统一管理（BOM） |
+| spring-ai-starter-model-openai | 1.1.8 | OpenAI 模型集成（多个平台复用其 OpenAI 兼容协议） |
+| spring-ai-starter-model-azure-openai | 1.1.8 | Azure OpenAI 模型集成 |
+| spring-ai-starter-model-anthropic | 1.1.8 | Anthropic Claude 模型集成 |
+| spring-ai-starter-model-deepseek | 1.1.8 | DeepSeek 模型集成（HTTP 思考路由复用该客户端） |
+| spring-ai-starter-model-ollama | 1.1.8 | Ollama 本地模型集成 |
+| spring-ai-starter-model-stability-ai | 1.1.8 | StableDiffusion 绘画模型集成 |
+| spring-ai-alibaba-starter-dashscope | 1.1.2.2 | 通义千问（DASHSCOPE）模型集成，并提供 Rerank 模型 |
+| spring-ai-starter-vector-store-qdrant | 1.1.8 | Qdrant 向量数据库集成（构建代码存在，当前默认未启用） |
+| spring-ai-starter-vector-store-redis | 1.1.8 | Redis 向量存储集成（构建代码存在，当前默认未启用） |
+| spring-ai-starter-vector-store-milvus | 1.1.8 | Milvus 向量数据库集成（构建代码存在，当前默认未启用） |
+| spring-ai-tika-document-reader | 1.1.8 | Tika 文档解析（知识库文档下载解析） |
+| spring-ai-starter-mcp-server-webmvc | 1.1.8 | MCP Server（仅支持 WebMVC，WebFlux 版会导致 SSE 失效） |
+| spring-ai-starter-mcp-client | 1.1.8 | MCP Client（连接外部 MCP Server） |
+| tinyflow-java-core | 1.2.6 | TinyFlow 工作流引擎（AI 工作流执行） |
 
 ## 关键文件
 
@@ -265,12 +320,19 @@ MyCapabilityModel getOrCreateMyCapabilityModel(AiPlatformEnum platform,
 |---------|------|
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/core/model/AiModelFactory.java` | AI 模型工厂接口，定义统一的模型创建方法 |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/core/model/AiModelFactoryImpl.java` | AI 模型工厂实现，包含各平台模型创建逻辑 |
-| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/enums/model/AiPlatformEnum.java` | AI 平台枚举，定义支持的 20+ AI 服务商 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/enums/model/AiPlatformEnum.java` | AI 平台枚举，定义支持的 22 个 AI 服务商 |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/enums/model/AiModelTypeEnum.java` | AI 模型类型枚举 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/enums/model/AiModelInputModalityEnum.java` | 模型输入模态枚举（text / image / video） |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/util/AiReasoningUtils.java` | 思考档位工具：平台路由、保存校验、档位解析、参数规范化与哈希 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/util/AiUsageUtils.java` | Token 用量提取与响应元数据快照 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/util/AiChatUtils.java` | 聊天工具类（原 `AiUtils`）：构建 ChatOptions、解析响应内容 / 推理内容、多模态判断 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/core/reasoning/AiRequestBodyPatcher.java` | 思考参数 HTTP 层请求体改写（RFC 7396 JSON Merge Patch） |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/model/AiModelService.java` | 模型配置服务，管理 API Key、模型配置 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/requestlog/AiRequestLogService.java` | AI 请求日志服务（独立事务写入、用量统计） |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/chat/AiChatMessageService.java` | 聊天消息服务，核心业务逻辑 |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/service/knowledge/AiKnowledgeService.java` | 知识库服务 |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/controller/admin/chat/AiChatMessageController.java` | 聊天消息 Controller，提供 HTTP 接口 |
+| `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/controller/admin/requestlog/AiRequestLogController.java` | AI 请求日志 Controller（查询 / 分页 / 统计） |
 | `yudao-module-ai/src/main/java/cn/iocoder/yudao/module/ai/framework/ai/config/AiAutoConfiguration.java` | AI 自动配置类 |
 
 ## 领域模型
@@ -309,6 +371,7 @@ MyCapabilityModel getOrCreateMyCapabilityModel(AiPlatformEnum platform,
 - `AiWriteController`: 写作助手接口
 - `AiMindMapController`: 思维导图接口
 - `AiWorkflowController`: 工作流接口
+- `AiRequestLogController`: AI 请求日志接口（查询 / 分页 / 统计）
 
 **service — 业务逻辑层**
 
@@ -320,6 +383,7 @@ MyCapabilityModel getOrCreateMyCapabilityModel(AiPlatformEnum platform,
 - `write/`: 写作服务
 - `mindmap/`: 思维导图服务
 - `workflow/`: 工作流服务
+- `requestlog/`: AI 请求日志服务（Token 用量统计、请求链路追踪）
 
 **dal — 数据访问层**
 

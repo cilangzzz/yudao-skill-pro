@@ -1244,7 +1244,7 @@ HrmSalarySlipTemplateOptionVO:
 
 **响应**: CommonResult&lt;Long&gt; —— 模板编号
 
-**业务逻辑**: 1. 将前端扁平模板节点按排序重建为两层结构：校验节点类型、编码唯一性与父分类引用，缺少「实发工资」项时自动补全；2. 创建自定义模板（默认标记固定为 false）。
+**业务逻辑**: 1. 将前端扁平模板节点按排序重建为两层结构：校验节点类型、编码唯一性与父分类引用，缺少「实发工资」项时自动补全；2. 创建自定义模板（默认标记固定为 false）；3. 工资条模板实体继承 `TenantBaseDO`，未显式传 `tenantId` 时由租户拦截器按当前租户自动填充。
 
 **错误码**:
 
@@ -1264,6 +1264,8 @@ HrmSalarySlipTemplateOptionVO:
 
 **业务逻辑**: 1. 校验模板存在且不是默认模板；2. 重建模板项并更新。
 
+> 多租户说明：平台级默认模板固定以 `tenant_id = 0`（`TenantUtils.GLOBAL_TENANT_ID`）保存，跨租户只读共享；请求 id 命中该模板时会被识别为默认模板并抛 `SALARY_DATA_ILLEGAL`，租户只能新建自定义模板做个性化。
+
 **错误码**:
 
 | 错误码 | 说明 |
@@ -1282,6 +1284,8 @@ HrmSalarySlipTemplateOptionVO:
 **响应**: CommonResult&lt;Boolean&gt;
 
 **业务逻辑**: 1. 校验模板存在且不是默认模板；2. 删除模板。
+
+> 多租户说明：同 10.2，平台级默认模板（`tenant_id = 0`）不允许删除，抛 `SALARY_DATA_ILLEGAL`；其它租户的模板对本租户不可见，按 id 删除会抛"工资条模板不存在"。
 
 **错误码**: 同 10.2
 
@@ -1304,7 +1308,7 @@ HrmSalarySlipTemplateOptionVO:
 | options | List&lt;HrmSalarySlipTemplateOptionVO&gt; | 选项列表（扁平化，parentCode 指向父分类） |
 | createTime | LocalDateTime | 创建时间 |
 
-**业务逻辑**: 1. 查询模板（租户内不存在时回退匹配平台级默认模板）；2. 动态补全：默认模板始终按当前有效薪资项重建「基本项」「明细项」两类；自定义模板保留用户布局，模板创建后新增的薪资项归入「未分类科目」；3. 将树形选项扁平化输出。
+**业务逻辑**: 1. 查询模板：先按 id 在**当前租户**内查询，查不到时回退平台级默认模板（`tenant_id = 0`，读取经 `TenantUtils.executeIgnore` 绕过租户拦截器，且回退模板的 id 必须与请求 id 一致），其它租户的模板完全不可见；2. 动态补全：默认模板始终按当前有效薪资项重建「基本项」「明细项」两类；自定义模板保留用户布局，模板创建后新增的薪资项归入「未分类科目」；3. 将树形选项扁平化输出。
 
 ### 10.5 获得工资条模板列表
 
@@ -1315,6 +1319,8 @@ HrmSalarySlipTemplateOptionVO:
 **请求参数**: 无
 
 **响应**: CommonResult&lt;List&lt;HrmSalarySlipTemplateRespVO&gt;&gt;
+
+**业务逻辑**: 1. 查询当前租户的全部工资条模板（按默认标记倒序）；2. 若结果中没有默认模板，则追加平台级默认模板（`tenant_id = 0`，经 `TenantUtils.executeIgnore` 读取并置于首位）；其它租户的模板不会出现在结果中。
 
 ---
 

@@ -39,7 +39,7 @@ BaseDO
 
 - 仅 `MpAccountDO` 继承 `TenantBaseDO`：账号是租户维度接入的资产（每个租户可接入自己的公众号），随租户隔离；账号自身携带 `tenantId` 字段。
 - 其余 7 个 DO 继承 `BaseDO`，**不带 tenantId**，跨租户共享存储，通过 `accountId` 区分数据归属。业务查询一律先经 `MpAccountService` 校验账号归属，再按 `accountId` 过滤。
-- 多租户上下文的恢复：微信服务器回调（`/mp/{appId}/callback` 端点）没有登录态，Controller 使用 `@TenantIgnore` 跳过租户拦截，再通过 `TenantUtils.execute` 按 appId 反查账号所属租户、手动恢复租户上下文，保证下游 Service 正常走租户逻辑。
+- 多租户上下文的恢复：微信服务器回调（`/mp/open/{appId}` 端点）没有登录态，Controller 使用 `@TenantIgnore` 跳过租户拦截，再通过 `TenantUtils.execute` 按 appId 反查账号所属租户、手动恢复租户上下文，保证下游 Service 正常走租户逻辑。
 
 ## 2. 核心 DO 实体
 
@@ -266,7 +266,7 @@ BaseDO
 | type | String | type | 文件类型，枚举 `WxConsts.MediaFileType`（image/voice/video/thumb/news 等） |
 | permanent | Boolean | permanent | 是否永久：true 永久素材、false 临时素材 |
 | url | String | url | 文件服务器的 URL（本系统 infra 文件服务地址） |
-| name | String | name | 名字。永久素材非空；临时素材可能为空（粉丝主动发的图片/语音为空，主动发给粉丝的非空） |
+| name | String | name | 名字。永久素材取入参 `name`（为空/空白时回退为 `MultipartFile#getName()`，即 multipart 表单字段名，通常为 `file`）；临时素材走上传接口时同样取 `MultipartFile#getName()`（表单字段名，通常为 `file`），经 `downloadMaterialUrl` 从微信下载入库时为 null |
 | mpUrl | String | mp_url | 公众号文件 URL，仅永久素材使用 |
 | title | String | title | 视频素材的标题，仅永久素材使用 |
 | introduction | String | introduction | 视频素材的描述，仅永久素材使用 |

@@ -17,7 +17,7 @@
 | 用户侧与管理侧分离 | `controller/admin` 业务域包面向登录用户（仅认证、无权限点），`controller/admin/manager` 面向运营后台（`im:manager:{域}:{操作}` 权限点），两侧复用同一套 Service |
 | 会话内权限内聚在 Service 层 | 群操作（禁言、转让、置顶、踢人、审批）由 Service 校验群主 / 管理员角色并推送对应事件通知；管理后台只额外提供封禁 / 解散等全局干预能力 |
 | 可靠性多层兜底 | RTC 通话采用「Webhook 回调 + 僵尸通话清理 Job + 振铃超时 Job」三层兜底；消息撤回有时限、发送前敏感词拦截、群消息有回执与已读人数统计 |
-| 多租户兼容 | DO 继承 `BaseDO`（表无 tenant_id 字段），但运行在租户上下文中：RTC Job 用 `@TenantJob` 遍历租户执行，敏感词词库按租户用 Guava LoadingCache 缓存，LiveKit Webhook 用 `@TenantIgnore` + `@PermitAll` 放行 |
+| 多租户隔离 | 业务数据按租户隔离：DO 只继承 `BaseDO`，租户插件仍会自动追加 `tenant_id` 条件与插入值（建表必须带 `tenant_id` 列）；RTC 兜底 Job 用 `@TenantJob` 逐租户执行，敏感词词库按租户用 Guava LoadingCache 缓存，LiveKit Webhook 用 `@TenantIgnore` + `@PermitAll` 放行（整条回调链路无租户上下文） |
 
 ## 核心功能点
 
@@ -172,11 +172,11 @@
 |---|---|---|---|
 | im_friend | 好友关系（单向记录） | BaseDO | user_id, friend_user_id, silent, display_name, add_source, pinned, blocked, status, add_time, delete_time |
 | im_friend_request | 好友申请 | BaseDO | from_user_id, to_user_id, apply_content, display_name, add_source, handle_result, handle_content, handle_time |
-| im_group | 群 | BaseDO | name, owner_user_id, avatar, notice, join_approval, banned, banned_reason, muted_all, pinned_message_ids(JSON), status, dissolved_time |
+| im_group | 群 | BaseDO | name, owner_user_id, avatar, notice, join_approval, banned, banned_reason, banned_time, muted_all, pinned_message_ids(JSON), status, dissolved_time |
 | im_group_member | 群成员 | BaseDO | group_id, user_id, display_user_name, group_remark, role, silent, status, join_time, add_source, inviter_user_id, quit_time, mute_end_time |
 | im_group_request | 加群申请 | BaseDO | group_id, user_id, inviter_user_id, apply_content, add_source, handle_result, handle_user_id, handle_content, handle_time |
 | im_private_message | 私聊消息 | BaseDO | client_message_id, sender_id, receiver_id, type, content(JSON), status, receipt_status, send_time |
-| im_group_message | 群聊消息 | BaseDO | client_message_id, sender_id, group_id, type, content(JSON), status, receiver_user_ids(JSON), at_user_ids(JSON), receipt_status, read_count, send_time |
+| im_group_message | 群聊消息 | BaseDO | client_message_id, sender_id, group_id, type, content(JSON), status, receiver_user_ids(JSON), at_user_ids(JSON), receipt_status, send_time（`readCount` 为 `@TableField(exist=false)` 的非表字段） |
 | im_channel | 频道（广播 / 公众号） | BaseDO | code, name, avatar, sort, status |
 | im_channel_material | 频道素材（图文卡片） | BaseDO | channel_id, type, title, cover_url, summary, content, url |
 | im_channel_message | 频道消息 | BaseDO | channel_id, material_id, type, content(JSON), receiver_user_ids(JSON), send_time |
@@ -188,7 +188,7 @@
 | im_rtc_participant | 通话参与者 | BaseDO | call_id, room, user_id, role, status, invite_time, accept_time, leave_time |
 | im_sensitive_word | 敏感词 | BaseDO | word, status |
 
-> 消息正文 `content` 字段存 JSON，对应 `dal/dataobject/message/content` 下 12 种内容结构类（TextMessage / ImageMessage / VoiceMessage / VideoMessage / FileMessage / LocationMessage / CardMessage / FaceMessage / MaterialMessage / MergeMessage / QuoteMessage / RecallMessage），编号见 `ImContentTypeEnum`。
+> 消息正文 `content` 字段存 JSON，对应 `dal/dataobject/message/content` 下 12 种内容结构类（TextMessage / ImageMessage / AudioMessage / VideoMessage / FileMessage / LocationMessage / CardMessage / FaceMessage / MaterialMessage / MergeMessage / QuoteMessage / RecallMessage），编号见 `ImContentTypeEnum`（注意语音消息的类名是 `AudioMessage`，对应枚举 VOICE=103）。
 
 ## 设计模式
 

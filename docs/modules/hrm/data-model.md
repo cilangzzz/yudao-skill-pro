@@ -15,9 +15,9 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类，yudao
 │   deleted      Boolean         逻辑删除标记（@TableLogic，bit）
 │
 ├── TenantBaseDO（yudao-spring-boot-starter-biz-tenant，仅多增加 tenantId 字段）
-│   └── ✗ hrm 模块无任何 DO 继承 TenantBaseDO
+│   └── HrmSalarySlipTemplateDO（工资条模板，tenant_id=0 为平台级默认模板，跨租户只读共享）
 │
-└── hrm 模块全部 50 个 DO 直接继承 BaseDO：
+└── hrm 模块其余 49 个 DO 直接继承 BaseDO：
     ├── 员工：HrmEmployeeDO、HrmEmployeeContactDO、HrmEmployeeFileDO、HrmEmployeePersonalNoteDO、
     │         HrmEmployeeChangeRecordDO、HrmEmployeeContractDO、HrmEmployeeQuitInfoDO、HrmEmployeeSalaryCardDO、
     │         HrmEmployeeEducationExperienceDO、HrmEmployeeWorkExperienceDO、HrmEmployeeTrainingExperienceDO、
@@ -27,8 +27,8 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类，yudao
     ├── 考勤：HrmAttendanceGroupDO、HrmAttendanceHolidayDO、HrmAttendanceClockDO、HrmAttendanceLeaveDO（4 个）
     ├── 薪资：HrmSalaryConfigDO、HrmSalaryGroupDO、HrmSalaryOptionDO、HrmSalaryOptionTemplateDO、
     │         HrmSalaryTaxRuleDO、HrmSalaryChangeTemplateDO、HrmSalaryEmployeeInfoDO、HrmSalaryChangeRecordDO、
-    │         HrmSalaryMonthRecordDO、HrmSalaryMonthEmployeeRecordDO、HrmSalarySlipTemplateDO、
-    │         HrmSalarySlipSendRecordDO、HrmSalarySlipDO   （13 个）
+    │         HrmSalaryMonthRecordDO、HrmSalaryMonthEmployeeRecordDO、
+    │         HrmSalarySlipSendRecordDO、HrmSalarySlipDO   （12 个；HrmSalarySlipTemplateDO 见上方 TenantBaseDO）
     ├── 社保：HrmInsuranceSchemeDO、HrmInsuranceSchemeProjectDO、HrmInsuranceEmployeeInfoDO、
     │         HrmInsuranceMonthRecordDO、HrmInsuranceMonthEmployeeRecordDO（5 个）
     ├── 绩效：HrmPerformanceAssessmentTemplateDO、HrmPerformanceResultTemplateDO、HrmPerformancePlanDO、
@@ -40,8 +40,8 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类，yudao
 
 **使用规则**：
 
-1. **统一继承 BaseDO**：hrm 模块 50 个 DO 全部直接继承 `BaseDO`，统一获得 creator/createTime/updater/updateTime/deleted 五个公共字段；没有需要按 DO 字段读写 tenantId 的场景，因此无人继承 `TenantBaseDO`。
-2. **租户隔离在 SQL 层实现**：除 `hrm_salary_option_template` 外，其余 49 张表的 DDL 都带 `tenant_id bigint NOT NULL DEFAULT 0` 物理列。DO 不声明 tenantId 字段，由框架的 `TenantLineInnerInterceptor` + `TenantDatabaseInterceptor` 在 SQL 解析层自动追加 `tenant_id` 过滤条件并在 INSERT 时自动填值（未继承 TenantBaseDO 且未标注 `@TenantIgnore` 的已注册实体，默认参与租户隔离）。
+1. **基类继承**：hrm 模块 50 个 DO 中，49 个直接继承 `BaseDO`，统一获得 creator/createTime/updater/updateTime/deleted 五个公共字段；仅 `HrmSalarySlipTemplateDO`（工资条模板）继承 `TenantBaseDO`，额外声明 `tenantId`，用于在 DO/mapper 层显式区分平台级默认模板（`tenant_id = 0`）与各租户自己的模板。
+2. **租户隔离在 SQL 层实现**：除 `hrm_salary_option_template` 外，其余 49 张表的 DDL 都带 `tenant_id bigint NOT NULL DEFAULT 0` 物理列。除 `HrmSalarySlipTemplateDO` 外的 DO 不声明 tenantId 字段，由框架的 `TenantLineInnerInterceptor` + `TenantDatabaseInterceptor` 在 SQL 解析层自动追加 `tenant_id` 过滤条件并在 INSERT 时自动填值（未继承 TenantBaseDO 且未标注 `@TenantIgnore` 的已注册实体，默认参与租户隔离）；`HrmSalarySlipTemplateDO` 声明 tenantId 后，mapper 可用 lambda（`getTenantId`）直接过滤平台级默认模板，读取平台级模板时经 `TenantUtils.executeIgnore` 绕过租户拦截器，写入时须在该上下文中显式指定 `tenant_id = 0`。
 3. **全局共享表**：`HrmSalaryOptionTemplateDO`（标准薪资项目录）类上标注 `@TenantIgnore`，对应表无 `tenant_id` 列，作为全系统共享的字典性质目录，code 全局唯一。
 4. **主键策略**：全部 DO 主键为 `@TableId Long id`，表声明 `@KeySequence("hrm_xxx_seq")`（Oracle/PostgreSQL 等使用序列，MySQL 自增）。
 5. **复杂结构用 JSON 列**：涉及列表/嵌套配置的字段统一用 TypeHandler（`StringListTypeHandler` / `LongListTypeHandler` / `JacksonTypeHandler`）映射为 varchar JSON 字符串，对应 DO 上 `@TableName(autoResultMap = true)`。这类字段（如考勤组班次、工资条项、绩效计划配置快照）**无法在 SQL 中直接过滤或索引**，查询过滤需在内存中完成。
@@ -722,17 +722,18 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO（抽象基类，yudao
 
 #### HrmSalarySlipTemplateDO (hrm_salary_slip_template)
 
-工资条模板（控制员工可见的薪资项及展示顺序，树形）。
+工资条模板（控制员工可见的薪资项及展示顺序，树形）。平台级默认模板固定以 `tenant_id = 0`（`TenantUtils.GLOBAL_TENANT_ID`）保存，由所有租户只读共享；租户自定义模板按租户隔离。
 
 | 字段 | 类型 | 数据库列 | 说明 |
 |-----|------|---------|------|
 | id | Long | id | 主键 |
+| tenantId | Long | tenant_id | 租户编号（NOT NULL DEFAULT 0，由 TenantBaseDO 提供）；0 表示平台级默认模板 |
 | name | String | name | 模板名称（NOT NULL，varchar(64)） |
 | hideEmpty | Boolean | hide_empty | 是否隐藏空项（默认 false） |
 | defaultStatus | Boolean | default_status | 是否默认模板（默认 false） |
 | options | List\<Option\> | options | 工资条模板项，JacksonTypeHandler 存 JSON（varchar(20000)，NOT NULL），通过 Option.children 表达父子关系。Option 内嵌：name、type（枚举 HrmSalarySlipTemplateOptionTypeEnum）、code 薪资项编码、remark 说明、hidden 是否隐藏、sort 排序、children 子项 |
 
-**继承**: BaseDO
+**继承**: TenantBaseDO（多 tenantId 字段；平台级默认模板 tenant_id=0）
 **索引**: 主键 id
 
 #### HrmSalarySlipSendRecordDO (hrm_salary_slip_send_record)
@@ -1224,7 +1225,7 @@ HRM 通用业务配置（键值对，type 区分用途，如首页/门户的功�
 | hrm_salary_change_record | HrmSalaryChangeRecordDO | 定薪/调薪记录 |
 | hrm_salary_month_record | HrmSalaryMonthRecordDO | 月度工资表（批次头） |
 | hrm_salary_month_employee_record | HrmSalaryMonthEmployeeRecordDO | 员工月度工资记录（明细行） |
-| hrm_salary_slip_template | HrmSalarySlipTemplateDO | 工资条模板 |
+| hrm_salary_slip_template | HrmSalarySlipTemplateDO | 工资条模板（继承 TenantBaseDO；tenant_id=0 为平台级默认模板） |
 | hrm_salary_slip_send_record | HrmSalarySlipSendRecordDO | 工资条发放记录（批次） |
 | hrm_salary_slip | HrmSalarySlipDO | 员工工资条 |
 | hrm_insurance_scheme | HrmInsuranceSchemeDO | 社保方案 |

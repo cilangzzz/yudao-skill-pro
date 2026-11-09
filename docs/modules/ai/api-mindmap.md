@@ -20,20 +20,24 @@
 |-----|------|------|---------|------|
 | prompt | String | 是 | @NotBlank | 思维导图内容提示，如「Java 学习路线」 |
 
-**响应**: Flux<CommonResult<String>>（SSE 流，每个 chunk 为一段增量生成文本；出错时返回错误码 chunk）
+**响应**: Flux<CommonResult<AiMindMapGenerateRespVO>>（SSE 流，每个 chunk 为一个 VO 对象，属**破坏性变更**；出错时返回错误码 chunk）
 
 | 字段 | 类型 | 说明 |
 |-----|------|------|
-| data | String | 流式返回的思维导图内容增量片段（Markdown 格式，由模型生成） |
+| id | Long | 思维导图记录编号 |
+| content | String | 本次生成的内容片段（增量，Markdown 格式，由模型生成） |
+| inputTokens | Long | 输入 Token 数（未知为空，取请求日志的最新快照） |
+| outputTokens | Long | 输出 Token 数（未知为空） |
+| totalTokens | Long | 合计 Token 数（输入、输出都已知时才有值） |
 
 **业务逻辑**:
 1. 获取导图模型：按名称查找「思维导图助手」角色（AiChatRoleEnum.AI_MIND_MAP_ROLE），若角色存在且配置了 modelId 则使用该模型，否则获取默认的 CHAT 类型模型；校验模型存在且类型为 CHAT，否则抛出 MODEL_NOT_EXISTS / MODEL_USE_TYPE_ERROR。
 2. 确定系统提示词：优先取「思维导图助手」角色的 systemMessage，角色不存在或为空时使用内置的导图角色提示词。
 3. 校验模型平台合法性（AiPlatformEnum.validatePlatform），并按模型 ID 获取对应平台的 ChatModel 实例。
-4. 将请求插入 ai_mind_map 记录，保存 userId、prompt、platform、modelId、model 等信息。
-5. 构建 Prompt（SystemMessage 角色设定 + UserMessage 用户提示词），并按平台构建 ChatOptions（temperature、maxTokens），流式调用模型。
-6. 流式返回每个 chunk 的增量文本给前端，同时在内存中累积完整内容；流结束时忽略租户上下文（Flux 异步无法透传租户），将完整生成内容更新回记录的 generatedContent。
-7. 调用发生异常时，将异常信息写入记录的 errorMessage，并向前端返回 WRITE_STREAM_ERROR 错误。
+4. 生成 `requestId`（本地 UUID），将请求插入 ai_mind_map 记录，保存 userId、prompt、platform、modelId、model、requestId 等信息。
+5. 构建请求日志快照（bizType=思维导图，bizId=记录 id），构建 Prompt（SystemMessage 角色设定 + UserMessage 用户提示词），并按平台构建 ChatOptions（temperature、maxTokens），流式调用模型。
+6. 流式返回每个 chunk 的增量文本与最新 Token 用量，同时在内存中累积完整内容；流结束时按请求开始时捕获的 tenantId 将完整生成内容与用量更新回记录，并记录 SUCCESS 请求日志。
+7. doOnError 记录 FAIL 请求日志并回写 errorMessage；doOnCancel 记录 CANCEL 请求日志；向前端返回 WRITE_STREAM_ERROR 错误。
 
 **错误码**:
 
@@ -97,6 +101,10 @@
 | platform | String | 平台，如 OpenAI |
 | model | String | 模型，如 gpt-3.5-turbo-0125 |
 | errorMessage | String | 错误信息 |
+| requestId | String | 请求编号（本地 UUID，关联 ai_request_log.request_id） |
+| inputTokens | Long | 输入 Token 数（未知为空） |
+| outputTokens | Long | 输出 Token 数（未知为空） |
+| totalTokens | Long | 合计 Token 数（输入、输出都已知时才有值） |
 | createTime | LocalDateTime | 创建时间 |
 
 **业务逻辑**:

@@ -4,7 +4,7 @@
 
 ## 1. 实体继承体系
 
-ai 模块全部 14 个 DO 位于 `cn.iocoder.yudao.module.ai.dal.dataobject` 下，按业务域分为 chat / knowledge / model / image / music / mindmap / write / workflow 八个包，**全部直接继承框架的 BaseDO，无一使用 TenantBaseDO**：
+ai 模块全部 15 个 DO 位于 `cn.iocoder.yudao.module.ai.dal.dataobject` 下，按业务域分为 chat / knowledge / model / image / music / mindmap / write / workflow / requestlog 九个包，**全部直接继承框架的 BaseDO，无一使用 TenantBaseDO**：
 
 ```text
 Serializable + TransPojo（Easy-Trans 数据翻译接口）
@@ -42,7 +42,7 @@ AI API 秘钥。一个平台可配置多条秘钥，供 `AiModelFactory` 按平�
 | id | Long | id | 编号（主键，自增） |
 | name | String | name | 名称 |
 | apiKey | String | api_key | 密钥 |
-| platform | String | platform | 平台，枚举 `AiPlatformEnum`（TongYi、YiYan、DeepSeek、ZhiPu、XingHuo、DouBao、HunYuan、SiliconFlow、MiniMax、Moonshot、BaiChuan、StepFun、OpenAI、AzureOpenAI、Anthropic、Gemini、Ollama、StableDiffusion、Midjourney、Suno、Grok 共 21 个） |
+| platform | String | platform | 平台，枚举 `AiPlatformEnum`（TongYi、YiYan、DeepSeek、ZhiPu、XingHuo、DouBao、HunYuan、SiliconFlow、MiniMax、Moonshot、BaiChuan、StepFun、MiMo、OpenAI、AzureOpenAI、Anthropic、Gemini、Ollama、StableDiffusion、Midjourney、Suno、Grok 共 22 个） |
 | url | String | url | API 地址（OpenAI 兼容地址 / midjourney-proxy / suno 代理等） |
 | status | Integer | status | 状态，枚举 `CommonStatusEnum`（0 开启、1 禁用） |
 
@@ -51,7 +51,7 @@ AI API 秘钥。一个平台可配置多条秘钥，供 `AiModelFactory` 按平�
 
 #### AiModelDO (ai_model)
 
-AI 模型定义：挂在某个秘钥（keyId）之下，是聊天 / 绘画 / 向量等一切能力使用的模型元数据。「默认模型」= status 开启且 sort 排序第一。
+AI 模型定义：挂在某个秘钥（keyId）之下，是聊天 / 绘画 / 向量等一切能力使用的模型元数据。「默认模型」= status 开启且 sort 排序第一。`@TableName(autoResultMap = true)`（`input_modalities`、`reasoning_config` 需 TypeHandler）。
 
 | 字段 | 类型 | 数据库列 | 说明 |
 |------|------|---------|------|
@@ -66,6 +66,8 @@ AI 模型定义：挂在某个秘钥（keyId）之下，是聊天 / 绘画 / 向
 | temperature | Double | temperature | 温度参数（对话配置） |
 | maxTokens | Integer | max_tokens | 单条回复的最大 Token 数量（对话配置） |
 | maxContexts | Integer | max_contexts | 上下文的最大 Message 数量（对话配置） |
+| inputModalities | List\<String\> | input_modalities | 输入模态数组，`StringListTypeHandler` 存字符串数组；枚举 `AiModelInputModalityEnum`（text / image / video），仅 CHAT 使用；为空（历史数据）视为仅支持 text |
+| reasoningConfig | ReasoningConfig | reasoning_config | 思考配置，`JacksonTypeHandler` 存 JSON：`{levels:[{level,options}], defaultLevel}`；null 表示不管理思考、保持平台原有行为。内部类 `AiModelDO.ReasoningConfig` / `AiModelDO.ReasoningLevel` |
 
 **继承**: BaseDO
 **索引**: 主键 id；无其他已声明索引
@@ -152,6 +154,10 @@ AI Chat 消息：一问一答各存一条，通过 `replyId` 关联「问」与�
 | segmentIds | List\<Long\> | segment_ids | 知识库段落编号数组，`LongListTypeHandler` 存 JSON，关联 `AiKnowledgeSegmentDO.id` |
 | webSearchPages | List\<WebPage\> | web_search_pages | 联网搜索的网页内容数组，`JacksonTypeHandler` 存 JSON（`AiWebSearchResponse.WebPage`） |
 | attachmentUrls | List\<String\> | attachment_urls | 附件 URL 数组，`StringListTypeHandler` 存 JSON |
+| requestId | String | request_id | 请求编号，仅 assistant 消息有值，关联 `AiRequestLogDO.requestId`（详见下表 `ai_request_log`） |
+| inputTokens | Long | input_tokens | 输入 Token 数，未知为 null |
+| outputTokens | Long | output_tokens | 输出 Token 数，未知为 null |
+| totalTokens | Long | total_tokens | 合计 Token 数，输入、输出都已知时才有值，否则为 null |
 
 **继承**: BaseDO
 **索引**: 主键 id；无其他已声明索引
@@ -160,7 +166,7 @@ AI Chat 消息：一问一答各存一条，通过 `replyId` 关联「问」与�
 
 #### AiKnowledgeDO (ai_knowledge)
 
-AI 知识库：绑定一个向量模型（embedding model）与召回参数。`@TableName(autoResultMap = true)`；向量库支持 Qdrant / Redis / Milvus。
+AI 知识库：绑定一个向量模型（embedding model）与召回参数。`@TableName(autoResultMap = true)`；向量库实现由 `AiModelServiceImpl#getOrCreateVectorStore` 决定——当前默认 `SimpleVectorStore`（向量持久化到本地文件），Qdrant / Redis / Milvus 的构建代码已存在但默认被注释未启用。
 
 | 字段 | 类型 | 数据库列 | 说明 |
 |------|------|---------|------|
@@ -207,7 +213,7 @@ AI 知识库-文档分段：切片内容 + 向量库中的引用编号。常量 
 | documentId | Long | document_id | 文档编号，关联 `AiKnowledgeDocumentDO.id` |
 | content | String | content | 切片内容 |
 | contentLength | Integer | content_length | 切片内容长度 |
-| vectorId | String | vector_id | 向量库的编号（Qdrant / Redis / Milvus 中对应记录的 id） |
+| vectorId | String | vector_id | 向量库中对应向量记录的 id（SimpleVectorStore / Qdrant / Redis / Milvus 通用）；`VECTOR_ID_EMPTY` 表示尚未写入 |
 | tokens | Integer | tokens | token 数量 |
 | retrievalCount | Integer | retrieval_count | 召回次数 |
 | status | Integer | status | 状态，枚举 `CommonStatusEnum` |
@@ -284,6 +290,10 @@ AI 思维导图：`generate-stream` SSE 流式生成 Markdown 格式导图内容
 | prompt | String | prompt | 生成内容提示 |
 | generatedContent | String | generated_content | 生成的内容 |
 | errorMessage | String | error_message | 错误信息 |
+| requestId | String | request_id | 请求编号，关联 `AiRequestLogDO.requestId` |
+| inputTokens | Long | input_tokens | 输入 Token 数，未知为 null |
+| outputTokens | Long | output_tokens | 输出 Token 数，未知为 null |
+| totalTokens | Long | total_tokens | 合计 Token 数，输入、输出都已知时才有值 |
 
 **继承**: BaseDO
 **索引**: 主键 id；无其他已声明索引
@@ -308,6 +318,10 @@ AI 写作：撰写（1）/ 回复（2）两种类型，`generate-stream` SSE 流
 | tone | Integer | tone | 语气提示词，字典 `AI_WRITE_TONE` |
 | language | Integer | language | 语言提示词，字典 `AI_WRITE_LANGUAGE` |
 | errorMessage | String | error_message | 错误信息 |
+| requestId | String | request_id | 请求编号，关联 `AiRequestLogDO.requestId` |
+| inputTokens | Long | input_tokens | 输入 Token 数，未知为 null |
+| outputTokens | Long | output_tokens | 输出 Token 数，未知为 null |
+| totalTokens | Long | total_tokens | 合计 Token 数，输入、输出都已知时才有值 |
 
 **继承**: BaseDO
 **索引**: 主键 id；无其他已声明索引
@@ -330,6 +344,35 @@ AI 工作流：基于 TinyFlow 引擎，`graph` 字段存储流程图 JSON 模�
 **继承**: BaseDO
 **索引**: 主键 id；无其他已声明索引。`code` 的唯一性由服务层校验（`AiWorkflowServiceImpl#validateCodeUnique`，冲突抛 `WORKFLOW_CODE_EXISTS`），属应用层逻辑唯一约束
 
+### 2.6 请求日志
+
+#### AiRequestLogDO (ai_request_log)
+
+AI 请求日志：每次业务生成尝试（聊天回复 / 写作 / 思维导图）落一条记录，不承诺对应每一次底层 HTTP 调用；用于 Token 用量统计、失败排查与链路追踪。`@TableName(value = "ai_request_log", autoResultMap = true)`。日志写入使用独立事务（`REQUIRES_NEW`），不影响主业务事务。
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|------|------|---------|------|
+| id | Long | id | 编号（主键，自增） |
+| requestId | String | request_id | 请求编号，本地生成的 UUID（非厂商返回的 id），业务表通过该字段关联本记录 |
+| userId | Long | user_id | 发起请求的用户编号 |
+| bizType | Integer | biz_type | 业务类型，枚举 `AiRequestLogBizTypeEnum`：1 聊天、2 写作、3 思维导图 |
+| bizId | Long | biz_id | 业务单据编号（对话消息 id / 写作记录 id / 导图记录 id） |
+| platform | String | platform | 平台，枚举 `AiPlatformEnum` |
+| modelId | Long | model_id | 模型编号，关联 `AiModelDO.id` |
+| model | String | model | 模型标识，冗余 `AiModelDO.model` |
+| status | Integer | status | 状态，枚举 `AiRequestLogStatusEnum`：20 成功、30 失败、40 取消 |
+| errorMessage | String | error_message | 失败信息（失败 / 取消时记录） |
+| beginTime | LocalDateTime | begin_time | 请求开始时间 |
+| endTime | LocalDateTime | end_time | 请求结束时间 |
+| duration | Long | duration | 耗时（毫秒），由开始与结束时间计算 |
+| inputTokens | Long | input_tokens | 输入 Token 数，未知为 null（不做估算） |
+| outputTokens | Long | output_tokens | 输出 Token 数，未知为 null |
+| totalTokens | Long | total_tokens | 合计 Token 数，输入、输出都已知时才 = 两者之和，否则为 null |
+| responseMetadata | Map\<String, Object\> | response_metadata | 响应元数据快照，`JacksonTypeHandler` 存 JSON（含厂商返回的 usage 原始信息等） |
+
+**继承**: BaseDO
+**索引**: 主键 id；无其他已声明索引
+
 ## 3. 实体关系
 
 核心外键 / 从属关系（均为逻辑外键，靠业务代码维护，未建数据库外键约束）：
@@ -351,6 +394,7 @@ ai_model ─1:N(embeddingModelId)─> ai_knowledge ─1:N─> ai_knowledge_docum
 ai_chat_role.knowledgeIds ──逻辑多对多──> ai_knowledge.id      （JSON 数组存储）
 ai_chat_role.toolIds      ──逻辑多对多──> ai_tool.id           （JSON 数组存储）
 ai_chat_role.mcpClientNames ──配置关联──> spring.ai.mcp.client 客户端名（非数据库外键）
+ai_request_log ──逻辑关联──> ai_chat_message / ai_write / ai_mind_map   （通过 requestId + bizType/bizId）
 各表 userId ──跨模块逻辑关联──> system 模块 AdminUserDO.id
 ```
 
@@ -360,16 +404,17 @@ ai_chat_role.mcpClientNames ──配置关联──> spring.ai.mcp.client 客�
 - **ai_model → 各业务表**：`modelId` + 冗余 `model` 标志，是本模块被引用最多的表；ai_knowledge 通过 `embeddingModelId` 引用向量类型的模型（type=5）。
 - **ai_chat_role → ai_chat_conversation**：会话记录使用的角色；会话把 `systemMessage`、`temperature`、`maxTokens`、`maxContexts` 从角色/模型快照到自身，后续发送消息不再依赖角色当前配置。
 - **ai_chat_conversation → ai_chat_message**：1:N；消息表内 `replyId` 自关联实现「用户提问 → 模型回答」配对；`segmentIds` 以 JSON 数组弱引用命中的知识库分段（RAG 引用溯源）。
-- **ai_knowledge → ai_knowledge_document → ai_knowledge_segment**：知识库三级结构；segment 的 `vectorId` 指向外部向量库（Qdrant/Redis/Milvus）中的真实向量记录，向量数据不落本模块数据库。
+- **ai_knowledge → ai_knowledge_document → ai_knowledge_segment**：知识库三级结构；segment 的 `vectorId` 指向向量库（当前默认 SimpleVectorStore，可切换 Qdrant/Redis/Milvus）中的真实向量记录，向量数据不落本模块数据库。
 - **ai_chat_role 对 knowledge / tool 的引用**：通过 `LongListTypeHandler` 存 JSON 数组实现逻辑多对多，没有中间表。
 - **跨模块**：仅通过 `userId` 弱关联 system 模块用户；本模块无 api 包，不对外暴露跨模块接口，仅由 `yudao-server` 聚合引用。
 - **ai_workflow**：独立聚合，`code` 应用层唯一，供 TinyFlow 流程执行时按 code 调用。
+- **ai_request_log**：请求日志与业务表通过 `requestId`（本地 UUID）逻辑关联，`bizType` 标识来源业务（对话 / 写作 / 思维导图）、`bizId` 指向对应记录；写入使用独立事务，业务事务回滚不影响日志落库。`ai_chat_message`（仅 assistant 消息）、`ai_write`、`ai_mind_map` 各自镜像了 `requestId` 与 Token 三字段，便于随业务数据直接展示用量。
 
 ## 4. 全部数据表清单
 
 | 表名 | DO | 说明 |
 |------|-----|------|
-| ai_api_key | AiApiKeyDO | AI API 秘钥（21 个大模型平台的接入密钥） |
+| ai_api_key | AiApiKeyDO | AI API 秘钥（22 个大模型平台的接入密钥） |
 | ai_model | AiModelDO | AI 模型（挂在秘钥下的模型元数据与对话默认参数） |
 | ai_chat_role | AiChatRoleDO | AI 聊天角色（system prompt + 模型/知识库/工具/MCP 组合预设） |
 | ai_tool | AiToolDO | AI 工具（Function Calling 的 Bean 定义） |
@@ -383,3 +428,4 @@ ai_chat_role.mcpClientNames ──配置关联──> spring.ai.mcp.client 客�
 | ai_mind_map | AiMindMapDO | AI 思维导图 |
 | ai_write | AiWriteDO | AI 写作（撰写/回复） |
 | ai_workflow | AiWorkflowDO | AI 工作流（TinyFlow 流程图 JSON） |
+| ai_request_log | AiRequestLogDO | AI 请求日志（Token 用量、状态、耗时与响应元数据） |

@@ -141,6 +141,8 @@
 | taskAfterTriggerSetting | HttpRequestSetting | 否 | 无 | 任务后置通知设置 |
 | printTemplateSetting | PrintTemplateSetting | 否 | @Valid | 自定义打印模板设置（enable/template） |
 
+> 说明：以上 `processBeforeTriggerSetting` / `processAfterTriggerSetting` / `taskBeforeTriggerSetting` / `taskAfterTriggerSetting` 中的 url，在流程执行发起 HTTP 请求时受 `yudao.bpm.http-request` 域名 / IP 黑白名单约束（默认关闭，详见 [README.md](README.md) 的「配置项」章节）；命中拒绝时抛 `1_009_004_006`。
+
 **响应**: CommonResult\<String\>（返回新建模型编号）
 
 **业务逻辑**:
@@ -367,6 +369,8 @@
 2. 查询该流程 key 下全部运行中的流程实例，逐个删除运行实例、历史实例与流程抄送
 3. 查询该 key 下全部历史流程实例，逐个删除历史实例与流程抄送
 4. 查询该 key 下全部任务并逐个删除
+
+> 注意：清理是按流程 key（processDefinitionKey）查询，未附加租户条件；且该方法未标注 `@Transactional`，删除分步执行、中途失败不会回滚。详见 [pitfalls.md](pitfalls.md) 的 1.2 节。
 
 **错误码**:
 
@@ -770,7 +774,7 @@
 **响应**: CommonResult\<Boolean\>
 
 **业务逻辑**:
-1. validateFields 校验表单项字段名不重复
+1. validateFields 校验表单项字段名不重复（当前版本因采用新表单设计器，该校验暂时跳过）
 2. 校验表单存在
 3. 更新 BpmFormDO
 
@@ -779,7 +783,7 @@
 | 错误码 | 说明 |
 |-------|------|
 | 1_009_010_000 | 动态表单不存在 |
-| 1_009_010_001 | 表单项({})和({})使用了相同的字段名({}) |
+| 1_009_010_001 | 表单项({}) 和 ({}) 使用了相同的字段名({}) |
 
 ### 4.3 删除动态表单
 
@@ -1123,7 +1127,7 @@
 | type | String | 是 | @NotEmpty | 监听器类型（execution=执行监听、task=任务监听） |
 | status | Integer | 是 | @NotNull | 监听器状态（0=开启、1=禁用） |
 | event | String | 是 | @NotEmpty | 监听事件（如 start、end） |
-| valueType | String | 是 | @NotEmpty | 监听器值类型（class=类、expression=表达式） |
+| valueType | String | 是 | @NotEmpty | 监听器值类型（class=类、expression=表达式、delegateExpression=委托 Bean 表达式） |
 | value | String | 是 | @NotEmpty | 监听器值（类全名或 ${...} 表达式） |
 
 **响应**: CommonResult\<Long\>（返回监听器编号）
@@ -1131,7 +1135,7 @@
 **业务逻辑**:
 1. valueType 为 class 时通过 Class.forName 反射加载类，类不存在抛 PROCESS_LISTENER_CLASS_NOT_FOUND
 2. 校验类实现接口：type 为 execution 时必须实现 JavaDelegate，type 为 task 时必须实现 TaskListener，否则抛 PROCESS_LISTENER_CLASS_IMPLEMENTS_ERROR
-3. valueType 为表达式时，值必须以 `${` 开头且以 `}` 结尾，否则抛 PROCESS_LISTENER_EXPRESSION_INVALID
+3. valueType 非 class（expression / delegateExpression）时，值必须以 `${` 开头且以 `}` 结尾，否则抛 PROCESS_LISTENER_EXPRESSION_INVALID
 4. 校验通过后插入 BpmProcessListenerDO 并返回编号
 
 **错误码**:
@@ -1211,7 +1215,7 @@
 | type | String | 监听器类型（execution/task） |
 | status | Integer | 监听器状态 |
 | event | String | 监听事件 |
-| valueType | String | 监听器值类型（class/expression） |
+| valueType | String | 监听器值类型（class/delegateExpression/expression） |
 | value | String | 监听器值 |
 | createTime | LocalDateTime | 创建时间 |
 

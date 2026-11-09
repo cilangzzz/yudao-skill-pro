@@ -20,7 +20,7 @@
 |-----|------|------|---------|------|
 | startTime | LocalDateTime | 是 | @NotNull、@DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 请假的开始时间 |
 | endTime | LocalDateTime | 是 | @NotNull、@DateTimeFormat(yyyy-MM-dd HH:mm:ss)、@AssertTrue（结束时间需在开始时间之后） | 请假的结束时间 |
-| type | Integer | 是 | 无 | 请假类型，参见 `bpm_oa_type` 字典/枚举 |
+| type | Integer | 是 | 无 | 请假类型，参见 `bpm_oa_leave_type` 字典 |
 | reason | String | 是 | 无 | 原因 |
 | startUserSelectAssignees | Map&lt;String, List&lt;Long&gt;&gt; | 否 | 无 | 发起人自选审批人 Map，key 为任务标识，value 为审批人用户编号列表 |
 
@@ -63,7 +63,7 @@
 | 字段 | 类型 | 说明 |
 |-----|------|------|
 | id | Long | 请假表单主键 |
-| type | Integer | 请假类型，参见 `bpm_oa_type` 枚举 |
+| type | Integer | 请假类型，参见 `bpm_oa_leave_type` 字典 |
 | reason | String | 原因 |
 | createTime | LocalDateTime | 申请时间 |
 | startTime | LocalDateTime | 请假的开始时间 |
@@ -87,8 +87,8 @@
 |-----|------|------|---------|------|
 | pageNo | Integer | 否 | 继承 PageParam（默认 1） | 页码 |
 | pageSize | Integer | 否 | 继承 PageParam（默认 10） | 每页条数 |
-| status | Integer | 否 | 无 | 审批结果，参见 `BpmProcessInstanceResultEnum` 枚举 |
-| type | Integer | 否 | 无 | 请假类型，参见 `bpm_oa_type` |
+| status | Integer | 否 | 无 | 审批结果，参见 `BpmProcessInstanceStatusEnum` 枚举 |
+| type | Integer | 否 | 无 | 请假类型，参见 `bpm_oa_leave_type` 字典 |
 | reason | String | 否 | 无 | 原因，模糊匹配 |
 | createTime | LocalDateTime[] | 否 | @DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 申请时间区间（between 查询） |
 

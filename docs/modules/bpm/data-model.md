@@ -192,7 +192,7 @@ OA 请假申请，模块自带的"业务表单 + 流程审批"示例，演示如
 | reason | String | reason | 原因 |
 | startTime | LocalDateTime | start_time | 开始时间 |
 | endTime | LocalDateTime | end_time | 结束时间 |
-| day | Long | day | 请假天数（简单实现：1 整天或 0.5 半天） |
+| day | Long | day | 请假天数：`LocalDateTimeUtil.between(startTime, endTime).toDays()` 按整天数取整，不足一天为 0 |
 | status | Integer | status | 审批结果，复用枚举 `BpmTaskStatusEnum`（即 `BpmProcessInstanceStatusEnum` 语义） |
 | processInstanceId | String | process_instance_id | 对应的流程编号，关联 Flowable ProcessInstance 的 id |
 

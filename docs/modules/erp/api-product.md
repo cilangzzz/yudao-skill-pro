@@ -68,7 +68,7 @@
 
 **响应**: CommonResult&lt;Boolean&gt; — 是否成功
 
-**业务逻辑**: 1. 校验产品存在；2. 依次校验六类业务单据明细的引用计数：采购订单（PRODUCT_DELETE_FAIL_PURCHASE_ORDER_EXISTS）、采购入库单（PRODUCT_DELETE_FAIL_PURCHASE_IN_EXISTS）、采购退货单（PRODUCT_DELETE_FAIL_PURCHASE_RETURN_EXISTS）、销售订单（PRODUCT_DELETE_FAIL_SALE_ORDER_EXISTS）、销售出库单（PRODUCT_DELETE_FAIL_SALE_OUT_EXISTS）、销售退货单（PRODUCT_DELETE_FAIL_SALE_RETURN_EXISTS），任一引用计数 > 0 则抛对应错误；3. 执行删除。
+**业务逻辑**: 1. 校验产品存在；2. 依次校验九类业务单据明细的引用计数：采购订单（PRODUCT_DELETE_FAIL_PURCHASE_ORDER_EXISTS）、采购入库单（PRODUCT_DELETE_FAIL_PURCHASE_IN_EXISTS）、采购退货单（PRODUCT_DELETE_FAIL_PURCHASE_RETURN_EXISTS）、销售订单（PRODUCT_DELETE_FAIL_SALE_ORDER_EXISTS）、销售出库单（PRODUCT_DELETE_FAIL_SALE_OUT_EXISTS）、销售退货单（PRODUCT_DELETE_FAIL_SALE_RETURN_EXISTS）、其它入库单（PRODUCT_DELETE_FAIL_STOCK_IN_EXISTS）、其它出库单（PRODUCT_DELETE_FAIL_STOCK_OUT_EXISTS）、库存盘点单（PRODUCT_DELETE_FAIL_STOCK_CHECK_EXISTS），任一引用计数 > 0 则抛对应错误；3. 执行删除（库存调拨明细、erp_stock、erp_stock_record 尚未校验）。
 
 **错误码**:
 
@@ -81,6 +81,9 @@
 | 1_030_500_005 | 产品已被销售订单引用，无法删除 |
 | 1_030_500_006 | 产品已被销售出库单引用，无法删除 |
 | 1_030_500_007 | 产品已被销售退货单引用，无法删除 |
+| 1_030_500_008 | 产品已被其它入库单引用，无法删除 |
+| 1_030_500_009 | 产品已被其它出库单引用，无法删除 |
+| 1_030_500_010 | 产品已被盘点单引用，无法删除 |
 
 ### 1.4 获得产品
 

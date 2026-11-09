@@ -107,4 +107,4 @@ PageResult.list 中每个元素为 ProductStatisticsRespVO（字段同 1.2），
 ## 补充说明
 
 - **数据来源**: 本域接口只读 `product_statistics` 统计表，不实时计算。数据由 `ProductStatisticsService#statisticsProduct(days)` 定时任务离线生成：按天回溯，逐日检查该日是否已有统计数据（已存在则跳过并提示需先删除），然后分页（每页 100 条）聚合交易、浏览、收藏、售后等来源数据，计算访客支付转化率（`100 * 支付件数 / 访客量`）后批量插入。
-- **错误码**: 商品统计模块未定义专属错误码（statistics 模块无 ErrorCodeConstants）；相关商品 SPU 错误码位于 product 模块 1-008-005-000 段（如 1_008_005_000 商品 SPU 不存在），但本域接口不直接抛出这些错误码。
+- **错误码**: 商品统计模块未定义专属错误码（statistics 模块无 ErrorCodeConstants）；相关商品 SPU 错误码位于 product 模块 1_008_005_000 段（如 1_008_005_000 商品 SPU 不存在），但本域接口不直接抛出这些错误码。

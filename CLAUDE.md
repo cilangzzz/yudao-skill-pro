@@ -36,7 +36,7 @@
 
 ### 通用结构
 
-每个模块目录下包含以下文档（api-{domain}.md 按业务域拆分，数量因模块而异；code-patterns.md 仅 15 个核心模块有；pitfalls.md 暂缺 system/mes；data-model.md 暂缺 mes）：
+每个模块目录下包含以下文档（api-{domain}.md 按业务域拆分，数量因模块而异；code-patterns.md 仅 16 个模块有，fms/oa/hrm/pms 暂缺；pitfalls.md 与 data-model.md 全部 20 个模块均已具备）：
 
 | 文件 | 说明 |
 |-----|------|
@@ -52,16 +52,16 @@
 |-----|---------|---------|
 | system | [docs/modules/system/](docs/modules/system/README.md) | 用户、角色、权限、部门、租户 |
 | infra | [docs/modules/infra/](docs/modules/infra/README.md) | 文件、配置、定时任务、日志、代码生成 |
-| pay | [docs/modules/pay/](docs/modules/pay/README.md) | 订单、退款、钱包、转账、渠道、通知 |
-| member | [docs/modules/member/](docs/modules/member/README.md) | 用户、等级、积分、签到、地址、标签 |
-| mall | [docs/modules/mall/](docs/modules/mall/README.md) | 商品(SPU/SKU)、订单、促销、统计 |
+| pay | [docs/modules/pay/](docs/modules/pay/README.md) | 订单、退款、钱包、转账、渠道、通知、APP 端支付 |
+| member | [docs/modules/member/](docs/modules/member/README.md) | 用户、等级、积分、签到、地址、标签、APP 端接口 |
+| mall | [docs/modules/mall/](docs/modules/mall/README.md) | 商品(SPU/SKU)、订单、促销、客服、装修、统计 |
 | crm | [docs/modules/crm/](docs/modules/crm/README.md) | 客户、线索、商机、合同、回款、统计 |
 | erp | [docs/modules/erp/](docs/modules/erp/README.md) | 采购、销售、库存、财务、产品 |
-| bpm | [docs/modules/bpm/](docs/modules/bpm/README.md) | 模型、流程定义、实例、任务、表单 |
-| ai | [docs/modules/ai/](docs/modules/ai/README.md) | 对话、图像、模型、知识库、音乐、写作 |
-| iot | [docs/modules/iot/](docs/modules/iot/README.md) | 设备、产品、物模型、规则、OTA、告警 |
+| bpm | [docs/modules/bpm/](docs/modules/bpm/README.md) | 模型、流程定义、实例、任务、表单、HTTP 请求配置 |
+| ai | [docs/modules/ai/](docs/modules/ai/README.md) | 对话、图像、模型、知识库、音乐、写作、请求日志、思考档位、Token 用量统计 |
+| iot | [docs/modules/iot/](docs/modules/iot/README.md) | 设备、产品、物模型、规则、OTA、告警、设备影子、产品脚本调试、IoTDB 时序存储、Modbus 接入 |
 | mp | [docs/modules/mp/](docs/modules/mp/README.md) | 账号、用户、消息、素材、菜单、自动回复 |
-| report | [docs/modules/report/](docs/modules/report/README.md) | GoView 项目、数据查询、积木报表 |
+| report | [docs/modules/report/](docs/modules/report/README.md) | GoView 项目、数据查询、积木报表、UReport2 中国式报表 |
 | im | [docs/modules/im/](docs/modules/im/README.md) | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 |
 | mes | [docs/modules/mes/](docs/modules/mes/README.md) | 主数据、排班、设备、工装、生产、质检、仓库 |
 | wms | [docs/modules/wms/](docs/modules/wms/README.md) | 仓库、物料、库存、入库、出库、调拨、盘点 |

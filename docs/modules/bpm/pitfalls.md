@@ -8,7 +8,7 @@
 
 **问题**: 在定时器超时（延迟器、审批超时）、SIMPLE 触发器等 Flowable 异步路径里执行自定义代码时，`TenantContextHolder.getTenantId()` 返回 null，导致后续调用 system 模块接口或业务 Mapper 时查不到数据。
 
-**原因**: Flowable 的 Job 执行线程不是请求线程，TenantContextHolder 基于 ThreadLocal，天然为空。框架自身代码对此有大量防御：`BpmTaskCandidateInvoker.calculateUsersByTask` 的注释明确写了"解决极端情况下，Flowable 异步调用，导致租户 id 丢失的情况。例如说，SIMPLE 延迟器在 trigger 的时候！！！"，并用 `FlowableUtils.execute(execution.getTenantId(), ...)` 包裹；`BpmTaskEventListener` 的 taskCreated/taskAssigned/taskCompleted/timerFired、`BpmTaskServiceImpl.processTaskTimeout`、`triggerTask`、`processTaskAssigned`（注释："需要基于 instance 设置租户编号，避免 Flowable 内部异步执行时【例如：超时自动通过】丢失租户编号"）都做了同样包装。
+**原因**: Flowable 的 Job 执行线程不是请求线程，TenantContextHolder 基于 ThreadLocal，天然为空。框架自身代码对此有大量防御：`BpmTaskCandidateInvoker.calculateUsersByTask` 的注释明确写了"解决极端情况下，Flowable 异步调用，导致租户 id 丢失的情况。例如说，SIMPLE 延迟器在 trigger 的时候！！！"，并用 `FlowableUtils.execute(execution.getTenantId(), ...)` 包裹；`BpmTaskEventListener` 的 taskCreated/taskAssigned/taskCompleted 都做了同样包装，而 timerFired 委托的 `BpmTaskServiceImpl.processTaskTimeout`、`triggerTask`、`processChildProcessTimeout`、`processTaskAssigned`（注释："需要基于 instance 设置租户编号，避免 Flowable 内部异步执行时【例如：超时自动通过】丢失租户编号"）内部也按实体 / 任务的 tenantId 包装。
 
 **解决**: 自定义 Flowable 监听器、JavaDelegate、Trigger 时，必须从 Flowable 实体上取 tenantId 后用 `FlowableUtils.execute(tenantId, runnable)` 包裹业务逻辑，不要直接裸写：
 
@@ -62,13 +62,13 @@ FlowableUtils.execute(entity.getTenantId(), () -> taskService.processTaskCreated
 
 **解决**: 不要随意升级 Flowable；确需升级时必须回归回退、加签、并行分支、超时提醒四类场景。业务建模尽量避免在并行网关分支上做"取消流程"操作。
 
-### 3.2 任务列表按创建时间过滤是"先分页、后内存过滤"，分页总数不准
+### 3.2 已办/全部任务按创建时间过滤是"先分页、后内存过滤"，分页总数不准
 
-**问题**: 待办/已办任务按创建时间区间筛选时，返回的 total 偏大、单页条数少于 pageSize，甚至翻到整页空数据。
+**问题**: 已办任务（done-page）、流程任务管理（manager-page）按创建时间区间筛选时，返回的 total 偏大、单页条数少于 pageSize，甚至翻到整页空数据。
 
-**原因**: Flowable 的 `taskCreatedAfter/taskCreatedBefore` 拼接条件是 OR（`BpmTaskServiceImpl` 两处 TODO 注释），框架只能把查询侧代码注释掉，改为查询后内存过滤：先 `taskQuery.count()` 拿总数、`listPage` 取当前页，再 `tasks.removeIf(...)` 过滤时间。过滤发生在分页之后，count 里包含了不满足时间的任务。
+**原因**: Flowable 的 `taskCreatedAfter/taskCreatedBefore` 拼接条件是 OR（`BpmTaskServiceImpl.getTaskDonePage`、`getTaskPage` 两处 TODO 注释），框架只能把查询侧代码注释掉，改为查询后内存过滤：先 `taskQuery.count()` 拿总数、`listPage` 取当前页，再 `tasks.removeIf(...)` 过滤时间。过滤发生在分页之后，count 里包含了不满足时间的任务。注意：待办任务 `getTaskTodoPage` 仍直接调用 `taskCreatedAfter/taskCreatedBefore` 查询，同样受该 OR 拼接 bug 影响，但未改为内存过滤。
 
-**解决**: 前端理解 total 为近似值；对时间筛选准确性要求高时，自定义 SQL 按 `ACT_HI_TASKINST.START_TIME_` 过滤，不要复用这两个分页方法。
+**解决**: 前端理解 total 为近似值；对时间筛选准确性要求高时，自定义 SQL 按 `ACT_HI_TASKINST.START_TIME_` 过滤，不要复用 done-page / manager-page 这两个分页方法。
 
 ### 3.3 任务状态和审批意见存在 VariableLocal 里，不是表字段
 
@@ -115,3 +115,55 @@ FlowableUtils.execute(entity.getTenantId(), () -> taskService.processTaskCreated
 **原因**: `BpmProcessIdRedisDAO.generate` 中 `if (StrUtil.isEmpty(infix)) { stringRedisTemplate.expire(key, Duration.ofDays(1L)); }` 与其上方注释"没有前缀，则不能过期，不能每次都是从 0 开始"语义相反：infix 为空时 key 固定不变却每次续 1 天过期；infix 非空（DAY/HOUR 等）时 key 每天自然轮换却从不设置过期。每次调用都会刷新 TTL，因此只有"整整一天没有任何新流程发起"时序号才会清零，隐蔽性强。
 
 **解决**: 配置流程 ID 规则时务必选择日期中缀（至少 DAY 粒度），避免纯前缀+后缀；修复代码时应将条件改为 `StrUtil.isNotEmpty(infix)`（有日期中缀才对旧 key 设置过期清理）。
+
+## 7. HTTP 请求黑白名单相关
+
+### 7.1 黑白名单不是完整的 SSRF 防护
+
+**问题**: 开启 `yudao.bpm.http-request` 后，误以为已阻止所有 SSRF 攻击（例如通过 DNS 重绑定、代理、302 重定向访问内网 / 云元数据地址），实际仍可能被绕过。
+
+**原因**: `BpmHttpRequestUtils.validateHttpRequestUrl` 只校验流程模型中**填写的 URL 主机字符串**，不解析 DNS、不校验实际连接的 IP、不跟踪重定向。`BpmHttpRequestProperties` 与 `BpmHttpRequestUtils` 的注释均明确声明"只校验 URL 中填写的域名 / IP，不解析 DNS，不能防御 DNS 重绑定、代理、重定向等场景，不是完整的 SSRF 防护"。
+
+**解决**: 把它当作"误配置防护"而非安全边界；对不可信的流程模型编辑者仍需限制编辑权限，敏感内网出口在网络层做访问控制。
+
+### 7.2 白名单是精确匹配，不支持子域 / 通配符；黑名单优先
+
+**问题**: 配置白名单 `erp.example.internal` 后，`a.erp.example.internal` 与 `erp.example.internal.evil.com` 都被拒绝；同时配置黑白名单时，`denyHosts` 优先于 `allowHosts`。
+
+**原因**: `containsHost` 先对名单项做 `normalizeHost`（去首尾空白、转小写、IPv6 去方括号），再与目标 host 用 `equals` 比较，没有前缀 / 后缀 / 包含 / 通配符逻辑。`validateHttpRequestUrl` 先判断黑名单，命中即抛；再判断白名单，白名单非空且未命中才抛。两者都为空时，即使 `enabled=true` 也只校验 scheme 与 host 可解析。
+
+**解决**: 需要放行子域时逐条列出完整主机名；需要临时封禁某主机时用 `deny-hosts`，它会压过白名单。
+
+### 7.3 拒绝时复用错误码，且在审批事务内回滚
+
+**问题**: 前端看到的错误是"流程 Http 请求调用失败"，无法区分是网络真实失败还是黑白名单拒绝；审批操作会因此失败回滚。
+
+**原因**: 校验失败、地址非法、黑名单命中、白名单未命中、`sendHttpRequest` 的 `RestClientException` 都抛同一个 `PROCESS_INSTANCE_HTTP_CALL_ERROR`（1_009_004_006）。流程 / 任务前置后置通知由 `BpmProcessInstanceEventListener` 在完成事务中同步触发（见 2.1 节），异常直接导致本次审批回滚。此外开启后相对地址（如 `callback`、`//host/path`）与 ftp/file 等非 http(s) 地址一并被拒绝——它们此前是在 `RestTemplate.exchange` 阶段以另一路径失败，同样抛该码，错误语义略有变化。
+
+**解决**: 排障时结合 `validateHttpRequestUrl` 的 warn 日志（"不合法 / 在黑名单中 / 不在白名单中"）判断；配置流程通知时确保 URL 是绝对 http(s) 地址，且主机在放行范围内。
+
+### 7.4 另一个重载不校验黑白名单
+
+**问题**: 使用 `executeBpmHttpRequest(BpmProcessInstanceStatusEvent, String url)` 发送通知时，黑白名单配置不生效。
+
+**原因**: 该重载直接构造请求头后调用 `sendHttpRequest`，没有调用 `validateHttpRequestUrl`。当前主代码未调用该重载，但扩展代码若使用需自行校验。
+
+**解决**: 新增出站 HTTP 调用时统一走带 `ProcessInstance` 的重载，或在调用前自行做主机校验。
+
+## 8. 数据库兼容相关
+
+### 8.1 Flowable 方言推断只在未显式配置且数据源非空时生效
+
+**问题**: 为 Flowable 单独配置数据源、或在 `EngineConfiguration` 上显式 `setDatabaseType` 后，GaussDB / openGauss / 神通仍可能在启动时报"无法识别数据库"。
+
+**原因**: `BpmFlowableConfiguration.initDatabaseType` 开头 `if (configuration.getDatabaseType() != null || configuration.getDataSource() == null) { return; }`，任一条件不满足即跳过推断。元数据读取抛 `SQLException` 时也只 `log.warn` 后返回，最终仍可能由 Flowable 自动识别时报错。推断依赖 ProductName 字面量（`GaussDB` / `openGauss` / `OSCAR`）且大小写敏感；用 io.mogdb 驱动连 MogDB 时 ProductName 为 `PostgreSQL`，不进入该分支（Flowable 原生可识别）。
+
+**解决**: 若自行设置了 `databaseType` 或独立数据源，需自行设置为正确的方言；GaussDB / openGauss 必须使用 PG 兼容模式（DBCOMPATIBILITY='PG'）创建的数据库；神通按 Oracle 处理（大写表名、BLOB/CLOB，Flowable 的 ACT_* 表随之使用大写命名）。
+
+### 8.2 启动时会额外建立一次数据库连接
+
+**问题**: 观察连接池监控时，应用启动阶段会出现一次额外的建连 / 元数据读取。
+
+**原因**: `initDatabaseType` 通过 `configuration.getDataSource().getConnection()` 获取连接读取 `DatabaseMetaData`，读取后即关闭（try-with-resources）；连接池空闲时可能触发一次建连。
+
+**解决**: 属预期行为，无需处理；如需避免，可显式配置 `databaseType` 以跳过推断。

@@ -204,4 +204,4 @@ TradeOrderTrendRespVO 字段：
 3. 按同样分组规则查询对照区间的趋势数据。
 4. 将当前序列与对照序列按索引一一配对（CollUtil.get），组装为 List&lt;DataComparisonRespVO&lt;TradeOrderTrendRespVO&gt;&gt; 返回。
 
-**错误码**: 交易统计域为只读聚合查询，Service 层不抛出业务异常，statistics 模块未定义专属错误码。其统计口径依赖的交易/售后/佣金数据的相关错误码见交易模块（前缀 1_011，如售后 1_011_000_100 起、佣金提现 1_011_008_000 起，详见 api-trade.md）。
+**错误码**: 交易统计域为只读聚合查询，Service 层不抛出业务异常，statistics 模块未定义专属错误码。其统计口径依赖的交易/售后/佣金数据的相关错误码见交易模块（前缀 1_011，如售后 1_011_000_100 起、佣金提现 1_011_008_000 起，详见 [api-trade-order.md](api-trade-order.md)、[api-trade-aftersale.md](api-trade-aftersale.md)、[api-trade-brokerage.md](api-trade-brokerage.md)）。

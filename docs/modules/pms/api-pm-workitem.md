@@ -238,7 +238,7 @@
 **业务逻辑**:
 1. 校验项目可编辑且处于进行中；iterationId 非空时校验迭代属于当前项目。
 2. 校验列表无重复，且恰好包含目标区域（待规划区/迭代）内的全部一级工作项。
-3. iterationId 为空（Backlog）时，按当前用户保存个人排序（工作项用户排序表）。
+3. iterationId 为空（Backlog）时，按当前用户保存个人排序（工作项用户排序表）；保存前先对项目行做 `SELECT ... FOR UPDATE` 锁定，串行化同一项目的并发个人排序，并在锁内复核项目仍存在且处于 ACTIVE（否则抛项目不存在 / 项目状态不允许执行该操作）。
 4. 迭代内排序为项目成员共享，按请求顺序批量写入 sort。
 
 **错误码**:
@@ -424,7 +424,7 @@
 | iterationIds | List&lt;Long&gt; | 否 | - | 迭代编号列表 |
 | excludedIterationIds | List&lt;Long&gt; | 否 | - | 排除的迭代编号列表 |
 | parentId | Long | 否 | - | 父工作项编号 |
-| labelIds | List&lt;Long&gt; | 否 | - | 标签编号列表 |
+| labelIds | List&lt;Long&gt; | 否 | - | 标签编号列表，多标签按「匹配任一」过滤（OR） |
 | unplannedOnly | Boolean | 否 | - | 是否只查询未规划工作项 |
 | planningOnly | Boolean | 否 | - | 是否用于待规划视图；true 时只查一级工作项并按规划顺序返回 |
 | rootOnly | Boolean | 否 | - | 是否只查询一级工作项 |
@@ -1170,13 +1170,13 @@ Excel 列（PmsWorkItemImportExcelVO）：事项标题 name、描述 description
 |-----|------|------|
 | estimatedHours | Integer | 预估工时，单位：小时 |
 | actualHours | Integer | 已登记工时（全部记录求和），单位：小时 |
-| remainingHours | Integer | 剩余工时，取最新一条登记记录；无记录时为 null，可由预估工时减已登记工时兜底 |
+| remainingHours | Integer | 剩余工时，有登记记录时取最新一条记录的 remainingHours；无记录时回退为预估工时；值仍为空且预估工时非空时，按 预估工时 - 已登记工时 计算（不小于 0） |
 | records | List&lt;PmsWorkItemWorkLogRespVO&gt; | 工时记录列表，元素字段同 6.3 |
 
 **业务逻辑**:
 1. 校验工作项可查看。
 2. 查询工作项全部工时记录，累加得到已登记工时。
-3. 剩余工时取最新一条登记记录的 remainingHours；无登记记录时回退为预估工时，仍无则按 预估-已登记 计算（不小于 0）。
+3. 有登记记录时剩余工时取最新一条记录的 remainingHours；无记录时回退为预估工时；结果仍为空且预估工时非空时，按 max(预估工时 - 已登记工时, 0) 计算。
 4. 转换记录列表并拼接登记人与工作项名称。
 
 **错误码**:

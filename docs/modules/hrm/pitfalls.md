@@ -42,11 +42,19 @@
 
 ### 3.1 标准薪资项目录与平台级默认工资条模板是跨租户共享数据
 
-**问题**: 在自己租户下修改/删除「平台级默认工资条模板」时接口成功但数据没变；排查薪资项数据时发现所有租户看到同一份标准薪资项目录。
+**问题**: 在自己租户下修改/删除「平台级默认工资条模板」时报错，租户无法直接改平台默认模板；排查薪资项数据时发现所有租户看到同一份标准薪资项目录。
 
-**原因**: 两处刻意的跨租户设计。`HrmSalaryOptionTemplateDO` 标注了 `@TenantIgnore`，表 `hrm_salary_option_template` 完全不参与租户隔离；平台级默认工资条模板固定以 `tenant_id = 0` 保存（见 `HrmSalarySlipTemplateMapper.selectGlobalDefaultTemplate`），读取时通过 `TenantUtils.executeIgnore` 绕过租户拦截器（`HrmSalarySlipTemplateServiceImpl.getGlobalDefaultSalarySlipTemplate`）。但更新/删除仍走普通 `updateById`/`deleteById`，会被租户拦截器追加 `tenant_id = 当前租户` 条件，对 `tenant_id = 0` 的行命中 0 条而静默失败。
+**原因**: 两处刻意的跨租户设计。`HrmSalaryOptionTemplateDO` 标注了 `@TenantIgnore`，表 `hrm_salary_option_template` 完全不参与租户隔离；平台级默认工资条模板固定以 `tenant_id = 0`（`TenantUtils.GLOBAL_TENANT_ID`）保存，`HrmSalarySlipTemplateDO` 继承 `TenantBaseDO`，读取时通过 `TenantUtils.executeIgnore` 绕过租户拦截器（`HrmSalarySlipTemplateServiceImpl.getGlobalDefaultSalarySlipTemplate`）。更新/删除时，Service 先经 `validateSalarySlipTemplateExists` 找到模板——租户内按 id 查不到会回退平台级默认模板且要求 id 一致——再判断 `defaultStatus = true` 并抛 `SALARY_DATA_ILLEGAL`（1_050_400_014）；**不是**命中 0 行后静默失败。若请求的 id 属于其它租户，则租户内查不到、也不会误回退平台模板，直接抛 `SALARY_SLIP_TEMPLATE_NOT_EXISTS`（1_050_400_011）。
 
-**解决**: 标准薪资项目录由平台侧统一维护，租户差异通过 `syncSalaryOption` 同步到租户隔离的 `hrm_salary_option`（同步会保留租户自己的 `enabled`/`visible`）；前端不要提供对平台级默认模板（`defaultStatus=true` 且 id 等于全局模板 id）的编辑入口，租户个性化直接新建自定义模板。
+**解决**: 标准薪资项目录由平台侧统一维护，租户差异通过 `syncSalaryOption` 同步到租户隔离的 `hrm_salary_option`（同步会保留租户自己的 `enabled`/`visible`）；前端不要提供对平台级默认模板（`defaultStatus=true`）的编辑/删除入口，租户个性化直接新建自定义模板。
+
+### 3.2 工资条模板改为 TenantBaseDO 后的写入约定
+
+**问题**: 二次开发中手工 `insert` 工资条模板时，若想写平台级默认模板却落到了当前租户（之后读取不到）；或误把租户模板写成 `tenantId = 0`，导致它不再属于该租户、反而可能被平台默认模板的回退/列表逻辑当作平台级默认模板。
+
+**原因**: `HrmSalarySlipTemplateDO` 继承 `TenantBaseDO` 后拥有 `tenantId` 字段。普通上下文中若不显式 `setTenantId`，由租户拦截器按当前租户自动填值（单测 `testCreateSalarySlipTemplate_success` 已覆盖）；而一旦显式设置了 `tenantId`（TenantBaseDO 场景下租户列已存在，MyBatis-Plus 租户插件不会再改写），就会按字面值落库。平台级默认模板必须在 `TenantUtils.executeIgnore(...)` 上下文中显式指定 `tenant_id = 0`（`TenantUtils.GLOBAL_TENANT_ID`）写入。
+
+**解决**: 租户模板交由框架自动填租户，不要手写 `tenantId`；写平台级默认模板时必须包在 `TenantUtils.executeIgnore` 中并显式设 `tenantId = GLOBAL_TENANT_ID`，否则未显式赋值时会被租户拦截器按当前租户填值，无法被 `selectGlobalDefaultTemplate`（按 tenant_id=0 过滤）读到。
 
 ## 4. 缓存相关
 
@@ -75,6 +83,30 @@
 **原因**: `HrmAttendanceLeaveStatusListener.onEvent` 中 `Long.parseLong(event.getBusinessKey())` 要求 businessKey 是请假记录 id（`createLeave` 里 `setBusinessKey(String.valueOf(attendanceLeave.getId()))`）；`HrmAttendanceLeaveServiceImpl.updateLeaveApprovalStatus` 只在「processInstanceId 匹配且 `approvalStatus` 仍为 RUNNING」时通过条件更新 `updateApprovalResultByIdAndProcessInstanceIdAndApprovalStatus` 写入一次终态，重复事件或乱序事件（`isProcessEndStatus` 之外的状态）都会被安全忽略。
 
 **解决**: 保持 businessKey = 请假记录 id 的约定；不要绕过 Service 直接 UPDATE `approvalStatus` 字段，否则可能破坏「终态只写一次」的保护，导致后到的 BPM 事件再次覆盖。
+
+### 5.3 月度社保表三个写操作共用全局分布式锁，跨租户互斥且可能返回 423
+
+**问题**: 高峰期或批量操作时，创建首月/次月社保表、删除月度社保表偶发返回 **423「请求失败，请稍后重试」**；A 租户操作时 B 租户的同类操作会一起卡住。
+
+**原因**: `HrmInsuranceMonthRecordServiceImpl` 的 `createFirstMonthRecord` / `createNextMonthRecord` / `deleteMonthRecord` 共用 `HrmInsuranceMonthRecordLockRedisDAO` 提供的**全局分布式锁**，Redis Key 固定为 `hrm:insurance_month_record_mutation_lock`（`RedisKeyConstants.INSURANCE_MONTH_RECORD_MUTATION_LOCK`），不区分租户、跨租户串行。使用 Redisson `tryLock`，等待上限硬编码 10 秒（`LOCK_WAIT_SECONDS`），抢锁超时或等待期间线程被中断均抛全局错误码 `LOCKED`（423）；不设租期、由 Redisson 看门狗续期（各租户的数据仍按租户过滤）。
+
+**解决**: 批量/高频操作做串行或错峰，并对 423 做重试；三个操作本身已是互斥关系，不要再在外层包一层长事务或在锁内调用外部 HTTP、站内信批量发送等慢操作——锁在事务提交或回滚后才释放（`TransactionSynchronization.afterCompletion`），长事务会长时间占用这把全局锁。
+
+### 5.4 月度社保表变更锁必须在事务中获取，且强依赖 Redis
+
+**问题**: 二次开发中直接调用 `HrmInsuranceMonthRecordLockRedisDAO.lock(...)` 抛 `IllegalStateException`（「月度社保表变更锁需要在事务中获得」）；或 Redis 不可用时首月/次月创建、删除直接失败。
+
+**原因**: `lock` 方法先校验 `TransactionSynchronizationManager.isActualTransactionActive()` 与 `isSynchronizationActive()`，只有在 Spring 事务上下文中才能注册 `afterCompletion` 回调来释放锁。三个入口 Service 方法均标注 `@Transactional`，但若通过非事务上下文或绕过 Spring 代理的自调用（同类内部调用）进入，则事务校验失败。此外该锁是唯一的并发保护，没有「仅靠数据库行锁」的降级路径。
+
+**解决**: 始终从事务入口（Controller → Service 代理方法）调用；自调用会绕过事务与锁，如需复用抽独立 Bean。运维上必须保证 Redis/Redisson 可用，否则月度社保表的创建与删除不可用。
+
+### 5.5 锁定读统一走框架 selectOneForUpdate / selectFirstOneForUpdate，Wrapper 有约束
+
+**问题**: 二次开发复制旧写法拼 `.last("FOR UPDATE")` 加锁，在 SQL Server（不支持 `FOR UPDATE`/`LIMIT`）或 Oracle（不支持 `LIMIT 1 FOR UPDATE`）上报语法错误；或 Wrapper 里带了 `last`/`groupBy`/`having`/自定义参数别名，锁定读直接抛 `IllegalArgumentException`；或条件不唯一时 `selectOneForUpdate` 抛 `TooManyResultsException`。
+
+**原因**: 框架已将锁定读重写为 `SelectForUpdateMethod` 内置查询 + `ForUpdateInnerInterceptor`（拦截器链末尾按方言改写：SQL Server 生成 `WITH (UPDLOCK, ROWLOCK)` 与 `TOP (1)`，Oracle 的首行锁定改为「查候选主键 → 按主键加锁 → 重读校验」的多次查询，最多重试 5 次后抛 `LOCKED`）。hrm 内部模式：员工/参保方案/工资表/社保表等按 `selectOneForUpdate(xxx::getId, id)` 锁单行（`HrmEmployeeMapper`、`HrmInsuranceSchemeMapper` 等）；`selectFirstOneForUpdate` 用于按业务条件锁首行（`HrmInsuranceMonthRecordMapper` 月度表、`HrmSalaryOptionMapper` 含已删除的薪资项目）；绩效流程用 `selectOneForUpdate` 锁阶段行串行化推进。
+
+**解决**: 加锁读一律用框架方法并放在 `@Transactional` 内（否则锁随 auto-commit 立即释放）；`selectOneForUpdate` 的条件要能唯一定位一行，多于 1 条会抛 `TooManyResultsException`；`selectFirstOneForUpdate` 未设置排序时返回任意一条满足条件的记录，只适合「判断是否存在/加锁兜底」场景，需要确定性时显式 `orderBy`；Wrapper 不能使用 `last`、`groupBy`、`having`、参数别名（内置查询只支持实体条件、普通条件与排序）。
 
 ## 6. 状态机相关
 
@@ -113,3 +145,21 @@
 **原因**: 该模块大量使用 TypeHandler JSON 列存储复杂结构：`HrmAttendanceGroupDO` 的 `shifts`/`points`/`wifis`/`deductRule`/`specialDates`、`HrmSalarySlipDO.options`、`HrmSalaryMonthEmployeeRecordDO.optionValues`、`HrmPerformancePlanDO` 的 `scopes`/`reviewStages`/`resultConfig` 等，MyBatis-Plus 的查询条件无法下推到 JSON 内部字段。同时 `HrmAttendanceGroupServiceImpl.transferAttendanceGroupScope` 在创建/更新考勤组时会展开子部门、把范围内全部员工收编到本组，并把冲突范围从其它考勤组移除（同一部门/员工只归属一个考勤组）；考勤组匹配 `matchAttendanceGroup` 是全量加载所有组后按「显式员工 > 上级部门 > 默认组」顺序内存匹配。
 
 **解决**: 涉及 JSON 字段的筛选/统计在 Java 层完成或另建宽表；保存考勤组前核对预期「接管」的部门与员工范围，避免误改其它组；员工规模大时注意 `getAttendanceGroupMap` 的全量匹配成本，必要时为统计场景做缓存或预计算（月度考勤统计已由 `HrmAttendanceStatisticsService` 单独实现）。
+
+## 9. 多数据库兼容
+
+### 9.1 不要手写 LIMIT 1 / TOP 1 / ROWNUM
+
+**问题**: 在 Oracle / SQL Server / PostgreSQL 等非 MySQL 数据库下，自定义查询报语法错误，或「取第一条/最近一条」取到错误行数。
+
+**原因**: hrm 内多处「取第一条/最近一条」查询已由写死 MySQL `LIMIT 1` 改为按方言生成：`HrmSalaryConfigMapper.selectFirst`、`HrmSalaryMonthRecordMapper.selectLast`、`HrmRecruitInterviewMapper.selectLatestByCandidateId` 改用 `BaseMapperX.selectFirstOne`（由 MyBatis-Plus 分页插件生成 LIMIT / ROWNUM / OFFSET FETCH）；`HrmSalaryOptionMapper.selectByCodeIncludeDeleted` 通过 `SqlDialectUtils.limitRows(1, false)` 在 `@Select` 中拼装方言分页。MySQL 下行为与原 `LIMIT 1` 完全一致。
+
+**解决**: 二次开发不要在新的自定义 SQL/XML 中手写 `LIMIT 1`、`TOP 1` 或 `ROWNUM`，应使用 `BaseMapperX.selectFirstOne(wrapper)` / `selectFirstOne(column, value)`，或在注解 SQL 中使用 `SqlDialectUtils.limitRows` / `limitParam`。
+
+### 9.2 日期函数（月份、日）也应按方言生成
+
+**问题**: 把员工待办「本月生日」的筛选条件复制到其它查询或在其它数据库中运行时，`MONTH(birthday)` / `DAYOFMONTH(birthday)` 不被支持或语义不同。
+
+**原因**: `HrmEmployeeMapper` 的生日筛选已改用 `SqlDialectUtils.month("birthday")` 与 `SqlDialectUtils.dayOfMonth("birthday")`，按当前路由数据源方言生成（MySQL / H2 仍输出 `MONTH` / `DAYOFMONTH`）；非闰年 2 月仍额外排除 29 日，以与首页日历、年龄计算保持一致。
+
+**解决**: 新增日期函数条件时优先使用 `SqlDialectUtils` 提供的方言方法，不要硬编码 MySQL 函数名。

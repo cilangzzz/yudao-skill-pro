@@ -38,7 +38,7 @@ cn.iocoder.yudao.module.wms.dal.dataobject（全部 16 个 DO 直接继承 BaseD
 
 **使用规则**
 
-- 本模块 16 个 DO **全部直接继承 BaseDO，无一使用 TenantBaseDO**：wms 各表均不含 `tenant_id` 字段，未启用多租户（需要租户隔离的模块如 system/mall 才继承 TenantBaseDO）。
+- 本模块 16 个 DO **全部直接继承 BaseDO，无一使用 TenantBaseDO**：DO 上没有 `tenantId` 字段，但 wms 各表在数据库层仍带 `tenant_id` 列并参与租户隔离——租户拦截器按「实体是否继承 TenantBaseDO / 是否标注 @TenantIgnore」判定是否忽略该表，与 DO 有无 `tenantId` 字段无关，因此 wms 表的 SQL 会被自动追加 `tenant_id = ?`、INSERT 自动补值（详见 [pitfalls.md](pitfalls.md) §1.1）。新建 wms 业务表时 DDL 必须包含 `tenant_id` 列。
 - BaseDO 的 5 个公共字段（`creator`/`create_time`/`updater`/`update_time`/`deleted`）由框架字段填充器与 `@TableLogic` 统一维护，下文各 DO 字段表不再重复列出。
 - 所有 DO 均标注 `@TableName("wms_xxx")` 与 `@KeySequence("wms_xxx_seq")`，后者供 Oracle/PostgreSQL 等序列型数据库生成主键，MySQL 下不生效。
 - 仓库 `sql/` 目录的初始化 SQL **不含 wms 业务表 DDL**（仅部分方言文件含 wms 字典与菜单 INSERT），建表语句需另行维护；因此下文索引信息除特别标注外均从代码推断，仅有主键 id 可确认。
@@ -168,7 +168,7 @@ WMS 库存余额表，按「SKU + 仓库」维度一行一条，是整个模块�
 | remark | String | remark | 备注 |
 
 **继承**: BaseDO
-**索引**: 主键 id；**(sku_id, warehouse_id) 唯一索引**——从代码推断：`WmsInventoryMapper.selectBySkuIdAndWarehouseId` 按「唯一键」查询，并发补建库存行时捕获 `DuplicateKeyException` 后按维度回查已有行。并发更新通过 `selectByIdForUpdate`/`selectListByIdsForUpdate`（`FOR UPDATE` 悲观锁）按库存行加锁。
+**索引**: 主键 id；**(sku_id, warehouse_id) 唯一索引**——从代码推断：`WmsInventoryMapper.selectBySkuIdAndWarehouseId` 按「唯一键」查询，并发补建库存行时捕获 `DuplicateKeyException` 后按维度回查已有行。并发更新通过 `selectByIdForUpdate`/`selectListByIdsForUpdate`（委托框架 `BaseMapperX#selectOneForUpdate / selectListForUpdate` 的悲观锁定读）按库存行加锁。
 
 #### WmsInventoryHistoryDO（wms_inventory_history）
 
@@ -194,7 +194,7 @@ WMS 库存流水表，每次库存变动（入库/出库/移库/盘库）生成�
 
 ### 2.3 单据聚合（order）
 
-四类单据均为「主表 + 明细表」结构，状态统一使用 `WmsOrderStatusEnum`（0 草稿 PREPARE / 4 已完成 FINISHED / 5 已作废 CANCELED，字典 wms_order_status），仅草稿态允许修改、删除、完成、作废。完成单据时按明细逐行写库存流水并增减 wms_inventory。
+四类单据均为「主表 + 明细表」结构，状态统一使用 `WmsOrderStatusEnum`（0 草稿 PREPARE / 4 已完成 FINISHED / 5 已作废 CANCELED，字典 wms_order_status），仅草稿态允许修改、完成、作废（删除允许草稿与已作废两种状态）。完成单据时按明细逐行写库存流水并增减 wms_inventory。
 
 #### WmsReceiptOrderDO（wms_receipt_order）
 

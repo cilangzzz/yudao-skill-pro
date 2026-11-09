@@ -1,6 +1,6 @@
 # 产品管理接口 (IotProductController / IotProductCategoryController)
 
-> IoT 平台的产品与产品分类管理：产品是设备的模板，定义设备类型、联网方式、协议类型、序列化类型等；创建产品时自动生成 ProductSecret，发布产品时同步生成 TDengine 超级表数据模型。
+> IoT 平台的产品与产品分类管理：产品是设备的模板，定义设备类型、联网方式、协议类型、序列化类型等；创建产品时自动生成 ProductSecret，发布产品时同步生成时序库（TDengine / IoTDB）的超级表数据模型。产品还可配置 JS 数据解析脚本（decode/encode），并在保存前在线调试。
 
 ## 接口路径前缀
 
@@ -70,7 +70,7 @@
 
 - **路径**: PUT /iot/product/update-status
 - **权限**: iot:product:update
-- **说明**: 发布/取消发布产品；发布时同步创建 TDengine 产品超级表数据模型。
+- **说明**: 发布/取消发布产品；发布时同步创建时序库（TDengine / IoTDB）的产品超级表数据模型。
 
 **请求参数**（Query 参数）:
 
@@ -151,6 +151,8 @@
 | netType | Integer | 联网方式 |
 | protocolType | String | 协议类型 |
 | serializeType | String | 序列化类型 |
+| scriptContent | String | 数据解析脚本（JS ES5） |
+| scriptEnabled | Boolean | 是否启用数据解析脚本 |
 | createTime | LocalDateTime | 创建时间 |
 
 **业务逻辑**:
@@ -212,11 +214,11 @@
 2. 复用分页查询逻辑（含分类名称拼接）。
 3. 通过 ExcelUtils 写出「产品.xls」文件流；操作日志记录为导出（@ApiAccessLog EXPORT）。
 
-### 1.9 同步产品属性表结构到 TDengine
+### 1.9 同步产品属性表结构到时序库
 
 - **路径**: POST /iot/product/sync-property-table
 - **权限**: iot:product:update
-- **说明**: 手动同步指定产品的物模型属性表结构到 TDengine 超级表。
+- **说明**: 手动同步指定产品的物模型属性表结构到时序库（TDengine / IoTDB）的超级表。
 
 **请求参数**（Query 参数）:
 
@@ -228,7 +230,7 @@
 
 **业务逻辑**:
 1. 校验产品是否存在，不存在抛出 PRODUCT_NOT_EXISTS。
-2. 调用 devicePropertyDataService.defineDevicePropertyData 同步该产品的 TDengine 表结构。
+2. 调用 devicePropertyDataService.defineDevicePropertyData 同步该产品的时序库表结构。
 
 **错误码**:
 
@@ -261,6 +263,82 @@
 **业务逻辑**:
 1. 按设备类型（可为空）查询产品列表。
 2. 仅转换出 id、name、status、deviceType、productKey 五个字段返回。
+
+### 1.11 更新产品数据解析脚本
+
+- **路径**: PUT /iot/product/update-script
+- **权限**: iot:product:update
+- **说明**: 部分更新产品的 JS 数据解析脚本与启用开关；只修改本次提交的字段，保存即生效。脚本内容只做语法编译校验，不执行。
+
+**请求参数 (IotProductScriptUpdateReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| id | Long | 是 | @NotNull | 产品编号 |
+| scriptContent | String | 否 | UTF-8 ≤ 32KB | 数据解析脚本（JS ES5）；空字符串表示清空，仅在停用时允许 |
+| scriptEnabled | Boolean | 否 | - | 是否启用数据解析脚本 |
+
+> 校验约束：scriptContent 与 scriptEnabled 至少提交一个。
+
+**响应**: CommonResult&lt;Boolean&gt; — 是否成功
+
+**业务逻辑**:
+1. 校验产品存在，不存在抛出 PRODUCT_NOT_EXISTS。
+2. 若提交了 scriptContent：校验 UTF-8 字节数不超过 32KB；非空时在调试线程池上只编译（限时 2000ms）做语法检查，不执行用户代码，编译失败/超时/繁忙分别抛对应错误。
+3. 计算生效值：未提交的 scriptContent / scriptEnabled 取数据库当前值；若最终为启用且脚本内容为空，抛 PRODUCT_SCRIPT_EMPTY。
+4. 部分更新数据库（null 字段跳过），并清除该产品的 Redis 缓存。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_050_001_000 | 产品不存在 |
+| 1_050_009_000 | 数据解析脚本不能超过 32KB |
+| 1_050_009_001 | 数据解析脚本语法错误 |
+| 1_050_009_002 | 启用数据解析脚本时，脚本内容不能为空 |
+| 1_050_009_003 | 脚本调试繁忙或已熔断，请稍后再试 |
+
+### 1.12 调试产品数据解析脚本
+
+- **路径**: POST /iot/product/debug-script
+- **权限**: iot:product:update
+- **说明**: 执行当前编辑的脚本内容做 decode/encode 调试；不保存、不发消息、不改属性。使用与网关相同的运行时、输出校验与执行预算，请求线程同步等待，最长 2000ms。
+
+**请求参数 (IotProductScriptDebugReqVO)**:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| id | Long | 是 | @NotNull | 产品编号 |
+| scriptContent | String | 是 | @NotEmpty、UTF-8 ≤ 32KB | 数据解析脚本（JS ES5） |
+| direction | String | 是 | @NotEmpty、@Pattern(decode\|encode) | 方向：decode 上行解码 / encode 下行编码 |
+| inputHex | String | decode 时必填 | 偶数位 HEX（允许空格）、≤ 4096 字节 | 上行原始字节的 HEX |
+| message | Map&lt;String, Object&gt; | encode 时必填 | - | 下行指令：{method, requestId?, params?}，仅支持 thing.property.set / thing.service.invoke |
+
+**响应**: CommonResult&lt;IotProductScriptDebugRespVO&gt;
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| success | Boolean | 是否成功 |
+| durationMs | Long | 执行耗时（毫秒） |
+| message | Map&lt;String, Object&gt; | decode：解析出的消息；为空表示没有业务消息（只记录原始消息） |
+| standard | Boolean | encode：是否走标准 JSON 下发 |
+| outputHex | String | encode：下行字节的 HEX |
+| error | ErrorInfo | 失败信息（type：ERROR、TIMEOUT、REJECTED、OUTPUT_INVALID、ENCODE_EMPTY；message；line） |
+
+**业务逻辑**:
+1. 校验产品存在；校验脚本长度不超过 32KB。
+2. 构建与网关结构一致的上下文：decode 校验 HEX 与长度，设备名固定为 `debug-device`；encode 只允许 thing.property.set / thing.service.invoke。
+3. 按方向执行脚本（截止时间 2000ms），并按网关同一套规则校验输出：decode 未定义或返回 null 表示无业务消息；encode 的字节按产品协议规则校验（Modbus 必须是合法请求 PDU），未生成下行数据返回 ENCODE_EMPTY。
+4. 返回执行结果与错误信息（错误行号可选）。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_050_001_000 | 产品不存在 |
+| 1_050_009_000 | 数据解析脚本不能超过 32KB |
+| 1_050_009_003 | 脚本调试繁忙或已熔断，请稍后再试 |
+| 400 | 上行数据不是偶数位 HEX / 超过 4096 字节；下行指令为空或不是属性设置/服务调用 |
 
 ## 2. 产品分类管理（IotProductCategoryController）
 

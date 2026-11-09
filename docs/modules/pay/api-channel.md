@@ -189,7 +189,7 @@
 1. 按应用编号 appId 查询状态为开启（CommonStatusEnum.ENABLE）的渠道列表。
 2. 提取渠道编码 code 并转为 Set 集合返回。
 
-## 2. 域内错误码汇总（CHANNEL 模块，1-007-001-000 段）
+## 2. 域内错误码汇总（CHANNEL 模块，1_007_001_000 段）
 
 以下错误码属于支付渠道域，除上述端点外，还被 Service 内部方法 validPayChannel / getPayClient 使用（支付发起、退款、转账等流程校验渠道时触发）：
 

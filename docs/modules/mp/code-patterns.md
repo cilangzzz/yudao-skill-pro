@@ -1,6 +1,6 @@
 # 微信公众号代码模式与扩展指南 (mp)
 
-> 本文档移植自模块 Skill 知识库（skill-mp.yaml），提供该模块的代码模式、扩展指南与关键文件索引。
+> 本文档基于模块源码整理，提供该模块的代码模式、扩展指南与关键文件索引。
 
 ## 代码模式
 
@@ -114,7 +114,10 @@ public interface MpMessageMapper extends BaseMapperX<MpMessageDO> {
     default PageResult<MpMessageDO> selectPage(MpMessagePageReqVO reqVO) {
         return selectPage(reqVO, new LambdaQueryWrapperX<MpMessageDO>()
                 .eqIfPresent(MpMessageDO::getAccountId, reqVO.getAccountId())
+                .eqIfPresent(MpMessageDO::getType, reqVO.getType())
+                .eqIfPresent(MpMessageDO::getOpenid, reqVO.getOpenid())
                 .eqIfPresent(MpMessageDO::getUserId, reqVO.getUserId())
+                .betweenIfPresent(MpMessageDO::getCreateTime, reqVO.getCreateTime())
                 .orderByDesc(MpMessageDO::getId));
     }
 }
@@ -131,6 +134,10 @@ mp 模块错误码前缀为 `1-006-XXX-XXX`，典型错误码：
 | 1_006_005_000 | 发送消息失败，原因：{} |
 | 1_006_009_000 | 自动回复不存在 |
 | 1_006_010_004 | 发送模版消息失败，原因：{} |
+
+**框架能力：JDBC 异常识别（`JdbcExceptionUtils.isTableNotExists`）**
+
+需要判断数据库异常是否为「表不存在」（如 `initLocalCache` 未建表静默降级）时，统一使用框架的 `JdbcExceptionUtils.isTableNotExists(ex)`，不要自己匹配异常文案：它沿 cause 链与 `SQLException#getNextException` 链，优先按 SQLState（`42S02`/`S0002`/`42P01`）和 Oracle 错误码 `942`（SQLState `42000`）识别，只有整条链都没有有效 SQLState 时才兜底匹配消息含 `doesn't exist`；列不存在、权限不足等其它异常返回 false，由调用方原样抛出。详见 pitfalls 2.2。
 
 ### 统一响应
 
@@ -194,8 +201,9 @@ try {
 | yudao-spring-boot-starter-mybatis | 继承自父 POM | MyBatis-Plus 封装，提供 BaseMapperX 等 |
 | yudao-spring-boot-starter-redis | 继承自父 POM | Redis 封装，用于 WxMpService 配置存储（access token） |
 | yudao-spring-boot-starter-biz-tenant | 继承自父 POM | 多租户支持 |
+| yudao-spring-boot-starter-mq | 继承自父 POM | 已在 pom 中声明，但模块源码未使用消息队列 |
 
-> 注意：本模块未使用消息队列，模块间通信不涉及 MQ。
+> 注意：pom 中声明了 `yudao-spring-boot-starter-mq` 依赖，但模块源码中没有任何 MQ 生产/消费代码；模块间通信不涉及 MQ。
 
 ## 关键文件
 
@@ -218,7 +226,7 @@ try {
 
 | 聚合根 | 说明 | 关联实体 |
 |-------|------|---------|
-| MpAccount | 公众号账号聚合根，管理公众号配置信息 | MpMenu、MpTag、MpStatistics |
+| MpAccount | 公众号账号聚合根，管理公众号配置信息 | MpMenu、MpTag、MpUser、MpMessage、MpAutoReply、MpMessageTemplate、MpMaterial |
 | MpUser | 公众号粉丝聚合根，关联粉丝标签和消息记录 | MpTag |
 | MpMessage | 消息聚合根，包含自动回复配置和消息模板 | MpAutoReply、MpMessageTemplate |
 | MpMaterial | 素材聚合根，管理临时素材和永久素材 | - |
@@ -242,7 +250,7 @@ try {
 |---|------|---------|
 | controller | HTTP 接口层，提供管理后台和微信回调接口 | MpAccountController、MpUserController、MpMessageController、MpMessageTemplateController、MpAutoReplyController、MpMaterialController、MpMenuController、MpTagController、MpOpenController（微信回调入口：签名校验、消息处理）、MpStatisticsController、MpDraftController、MpFreePublishController |
 | service | 业务逻辑层 | MpAccountService、MpUserService、MpMessageService、MpMaterialService、MpMenuService、MpAutoReplyService、MpMessageTemplateService、MpTagService、MpStatisticsService |
-| handler | 微信消息事件处理器 | SubscribeHandler（关注）、UnsubscribeHandler（取消关注）、MenuHandler（菜单点击）、MessageReceiveHandler（消息接收）、MessageAutoReplyHandler（自动回复）、LocationHandler（地理位置）、ScanHandler（扫码）、KfSessionHandler（客服会话） |
+| handler | 微信消息事件处理器 | SubscribeHandler（关注）、UnsubscribeHandler（取消关注）、MenuHandler（菜单点击）、MessageReceiveHandler（消息接收）、MessageAutoReplyHandler（自动回复）、LocationHandler（地理位置）、ScanHandler（扫码）、KfSessionHandler（客服会话）、StoreCheckNotifyHandler（门店审核事件）、NullHandler（空处理器兜底） |
 | dal | 数据访问层 | MpAccountMapper、MpUserMapper、MpMessageMapper、MpMaterialMapper、MpMenuMapper、MpAutoReplyMapper、MpMessageTemplateMapper、MpTagMapper |
 | framework/mp | 微信公众号框架核心 | MpServiceFactory（WxMpService 工厂接口）、DefaultMpServiceFactory（默认工厂实现，管理多账号 WxMpService）、MpContextHolder（公众号上下文持有者） |
 
@@ -261,7 +269,7 @@ try {
 
 ### 数据模型补充
 
-README「数据模型」章节给出各表概要，此处补充完整字段、索引与表间关系。
+README「数据模型」章节给出各表概要；此处补充字段概览与表间关系，完整字段定义以 [data-model.md](data-model.md) 为准。仓库 `sql/` 目录不含 mp 模块建表 DDL，除 `@TableId` 声明的主键外无法从代码确证索引，故本节不臆测索引名。
 
 #### mp_account 公众号账号表
 
@@ -276,8 +284,9 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | aes_key | String | 消息加解密密钥 |
 | qr_code_url | String | 二维码图片 URL |
 | remark | String | 备注 |
+| tenant_id | Long | 租户编号（继承自 TenantBaseDO，mp_account 是本模块唯一的多租户表） |
 
-索引：`uk_app_id`（app_id 唯一索引，保证 appId 全局不重复，否则微信回调无法识别归属账号）。
+索引：主键 `id`；仓库无 mp 建表 DDL，`appId` 的业务唯一性由 `MpAccountServiceImpl#validateAppIdUnique` 在应用层保证，代码未声明唯一索引。
 
 #### mp_user 公众号粉丝表
 
@@ -300,7 +309,7 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | account_id | Long | 公众号账号 ID |
 | app_id | String | 公众号 AppId（冗余） |
 
-索引：`idx_account_id`（account_id）；`uk_appid_openid`（app_id + openid 联合唯一索引，保证同一公众号下粉丝不重复）。
+索引：主键 `id`；仓库无 mp 建表 DDL，`(app_id, openid)` 联合唯一约束无法从代码确证。
 
 #### mp_message 公众号消息表
 
@@ -334,7 +343,7 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | event | String | 事件类型 |
 | event_key | String | 事件 Key 值 |
 
-索引：`idx_account_id`（account_id）；`idx_user_id`（user_id）。
+索引：主键 `id`；仓库无 mp 建表 DDL，其余索引无法从代码确证。
 
 #### mp_material 公众号素材表
 
@@ -352,7 +361,7 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | title | String | 视频素材标题 |
 | introduction | String | 视频素材描述 |
 
-索引：`idx_account_id`（account_id）；`idx_media_id`（media_id）。
+索引：主键 `id`；仓库无 mp 建表 DDL，其余索引无法从代码确证。
 
 #### mp_menu 公众号菜单表
 
@@ -374,8 +383,14 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | reply_media_id | String | 回复媒体 ID |
 | reply_media_url | String | 回复媒体 URL |
 | reply_articles | List&lt;Article&gt; | 回复图文消息（JSON） |
+| reply_title | String | 回复标题（VIDEO） |
+| reply_description | String | 回复描述（VIDEO） |
+| reply_thumb_media_id | String | 回复缩略图媒体 ID（MUSIC/VIDEO） |
+| reply_thumb_media_url | String | 回复缩略图 URL（MUSIC/VIDEO） |
+| reply_music_url | String | 回复音乐链接（MUSIC） |
+| reply_hq_music_url | String | 回复高质量音乐链接（MUSIC） |
 
-索引：`idx_account_id`（account_id）。
+索引：主键 `id`；仓库无 mp 建表 DDL，其余索引无法从代码确证。
 
 #### mp_auto_reply 公众号自动回复表
 
@@ -393,8 +408,14 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | response_media_id | String | 响应媒体 ID |
 | response_media_url | String | 响应媒体 URL |
 | response_articles | List&lt;Article&gt; | 响应图文消息（JSON） |
+| response_title | String | 响应标题（VIDEO） |
+| response_description | String | 响应描述（VIDEO） |
+| response_thumb_media_id | String | 响应缩略图媒体 ID（MUSIC/VIDEO） |
+| response_thumb_media_url | String | 响应缩略图 URL（MUSIC/VIDEO） |
+| response_music_url | String | 响应音乐链接（MUSIC） |
+| response_hq_music_url | String | 响应高质量音乐链接（MUSIC） |
 
-索引：`idx_account_id`（account_id）。
+索引：主键 `id`；仓库无 mp 建表 DDL，其余索引无法从代码确证。
 
 #### mp_message_template 公众号模板消息表
 
@@ -410,7 +431,7 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | primary_industry | String | 一级行业 |
 | deputy_industry | String | 二级行业 |
 
-索引：`idx_account_id`（account_id）；`idx_template_id`（template_id）。
+索引：主键 `id`；仓库无 mp 建表 DDL，其余索引无法从代码确证。
 
 #### mp_tag 公众号标签表
 
@@ -423,7 +444,7 @@ README「数据模型」章节给出各表概要，此处补充完整字段、�
 | account_id | Long | 公众号账号 ID |
 | app_id | String | 公众号 AppId |
 
-索引：`idx_account_id`（account_id）。
+索引：主键 `id`；仓库无 mp 建表 DDL，其余索引无法从代码确证。
 
 #### 表间关系
 

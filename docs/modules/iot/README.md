@@ -1,6 +1,6 @@
 # IoT 物联网模块 (iot)
 
-> 提供设备接入、产品/物模型管理、消息上下行、OTA 升级、规则引擎与告警的一站式物联网平台，采用 biz/core/gateway 三子模块 + MySQL/TDengine 双存储架构。
+> 提供设备接入、产品/物模型管理、消息上下行、设备影子、原始字节透传、产品级 JS 数据解析脚本、OTA 升级、规则引擎与告警的一站式物联网平台，采用 biz/core/gateway 三子模块 + MySQL/时序库（TDengine 或 IoTDB）双存储架构。
 
 ## 模块概述
 
@@ -8,30 +8,35 @@
   - `yudao-module-iot-biz`: 管理后台业务（Controller/Service/DAL），打包进 yudao-server
   - `yudao-module-iot-core`: biz 与 gateway 共享的消息总线、DTO、协议枚举
   - `yudao-module-iot-gateway`: 设备接入网关（独立 Spring Boot 进程），负责编解码与协议接入
-- **业务定位**: 面向管理后台的 IoT 平台能力，覆盖产品与物模型（TSL）定义、设备全生命周期管理、设备消息上下行与日志存储、Modbus 采集配置、OTA 固件升级、场景联动/数据流转规则引擎、告警配置与记录、以及设备/消息数据统计。
-- **技术栈**: Spring Boot 2.7.18（JDK8 分支，javax.* 风格）/ MyBatis-Plus / Swagger v3（springdoc）/ TDengine（taos-jdbcdriver 3.9.2，设备消息与属性时序存储）/ Redis（最新属性、serverId 缓存）/ Vert.x 4.5.26（网关 MQTT/TCP/UDP/WebSocket）/ Eclipse Californium 3.14.0（CoAP）/ j2mod 3.4.0（Modbus）/ Eclipse Paho MQTT / RocketMQ、Kafka、RabbitMQ（消息总线可选实现，optional 依赖）
+- **业务定位**: 面向管理后台的 IoT 平台能力，覆盖产品与物模型（TSL）定义、设备全生命周期管理、设备消息上下行与日志存储、设备影子、原始字节透传、产品级数据解析脚本（JS）、Modbus 采集配置、OTA 固件升级、场景联动/数据流转规则引擎、告警配置与记录、以及设备/消息数据统计。
+- **技术栈**: Spring Boot 2.7.18（JDK8 分支，javax.* 风格）/ MyBatis-Plus / Swagger v3（springdoc）/ TDengine（taos-jdbcdriver 3.10.0）或 Apache IoTDB（iotdb-jdbc 2.0.8，通过 `yudao.iot.storage.type` 二选一，存储设备消息与属性时序数据）/ Redis（最新属性、设备影子读缓存、serverId、网关存活标记）/ Vert.x 4.5.26（网关 MQTT/TCP/UDP/WebSocket）/ Eclipse Californium 3.14.0（CoAP）/ j2mod 3.4.0（Modbus）/ Eclipse Paho MQTT / Mozilla Rhino 1.7.15.1（产品数据解析脚本 JS 引擎）/ RocketMQ、Kafka、RabbitMQ（消息总线可选实现，optional 依赖）
 
 ## 设计原则
 
 | 原则 | 说明 |
 |-----|------|
-| 三子模块分层 | biz（管理业务）与 gateway（协议网关）通过 core 提供的消息总线 + HTTP API 通信，可独立部署、互不耦合 |
-| 双存储引擎 | MySQL 存业务数据；TDengine 存设备消息日志超级表 `iot_device_message` 与按产品（productKey）建属性超级表；Redis 缓存设备最新属性与网关 serverId |
-| 消息总线驱动 | 设备消息经 core 的 messagebus（spring-event / redis stream / rocketmq / kafka / rabbitmq 可选）在 gateway 与 biz 间流转，上下行统一为 `IotDeviceMessage` |
+| 三子模块分层 | biz（管理业务）与 gateway（协议网关）通过 core 提供的消息总线 + HTTP API 通信，可独立部署、互不耦合；通过 Maven `exec` classifier 产出 `-exec.jar` 支持「网关 + biz 合并部署」到同一进程 |
+| 双存储引擎 | MySQL 存业务数据；时序数据由 `yudao.iot.storage.type` 二选一：`tdengine`（默认）存设备消息超级表 `device_message` 与按产品编号建属性超级表 `product_property_{productId}`，或 `iotdb`（Apache IoTDB，表 `device_message` / `product_property_{productId}`）；Redis 缓存设备最新属性、设备影子读缓存（60s）、网关 serverId 与网关协议实例存活标记 |
+| 消息总线驱动 | 设备消息经 core 的 messagebus（spring-event / redis stream / rocketmq / kafka / rabbitmq 可选）在 gateway 与 biz 间流转，上下行统一为 `IotDeviceMessage`；合并部署时可走本地消息总线 |
 | 物模型驱动 | TSL 定义属性/服务/事件，设备消息 method（Alink 风格如 `thing.property.post`）与物模型 identifier 对齐，属性表结构由物模型同步生成 |
-| 多协议插件化网关 | 网关以 `IotProtocol` 接口 + `IotProtocolManager` 管理多协议实例（MQTT/EMQX/CoAP/HTTP/TCP/UDP/WebSocket/Modbus），按配置启停 |
+| 设备影子 | DB 为权威数据源（`iot_device_shadow`），Redis 60s 读缓存，version 乐观锁（3 次重试），单设备属性上限 128，version=-1 清空；设备侧 `thing.shadow.update`（内层 get/update），回复走 `thing/shadow/update_reply` |
+| 原始字节透传 | `IotDeviceMessage.raw` 以 Base64 承载原始字节；上行 `thing.raw.post`（仅网关 raw 入口）、下行 `thing.raw.push`；通用协议 1~4096 字节，Modbus 额外校验请求 PDU（5~253 字节）；HTTP/CoAP 不支持 raw 下行，raw 不自动回复 |
+| 产品级数据解析脚本 | 产品可配置 JS 脚本（Rhino 引擎）实现 decode/encode，把非 Alink 报文转换为标准消息；脚本 32KB 上限、deadline 2000ms、execBudget 500ms、maxInstructions 100 万、超时熔断，非安全沙箱 |
+| 事务化设备状态 | 状态变更消息按事件时间截断到秒、按条件 UPDATE，规则在状态事务内执行，数据访问异常随事务回滚 |
+| 多协议插件化网关 | 网关以 `IotProtocol` 接口 + `IotProtocolManager` 管理多协议实例（MQTT/EMQX/CoAP/HTTP/TCP/UDP/WebSocket/Modbus），按配置启停；网关与 biz 通过 keep-alive RPC 上报存活 |
 | 规则引擎策略化 | 场景联动的触发器/条件/动作均为策略接口，由 MatcherManager/Action 注册分发，便于扩展新类型 |
-| 多租户与权限 | 核心表（device/product/modbus/scene_rule）继承 TenantBaseDO 支持租户隔离，admin 接口以 `iot:xxx:yyy` 权限标识鉴权 |
+| 多租户与权限 | 核心表（device/product/modbus/scene_rule/device_shadow）继承 TenantBaseDO 支持租户隔离，admin 接口以 `iot:xxx:yyy` 权限标识鉴权 |
 
 ## 核心功能点
 
 | 功能域 | 说明 | 关键实体 |
 |-------|------|---------|
-| 产品管理 | 产品与产品分类 CRUD、ProductKey/动态注册、发布状态、属性表同步到 TDengine | IotProductDO、IotProductCategoryDO |
+| 产品管理 | 产品与产品分类 CRUD、ProductKey/动态注册、发布状态、属性表同步到时序库、产品级 JS 数据解析脚本（decode/encode 的编辑、编译与在线调试） | IotProductDO、IotProductCategoryDO |
 | 物模型 | 产品 TSL 属性/服务/事件定义，TSL 整体导出 | IotThingModelDO |
 | 设备管理 | 设备 CRUD、Excel 导入导出、网关子设备拓扑绑定、设备分组、位置地图、连接信息 | IotDeviceDO、IotDeviceGroupDO |
-| 设备通信 | 设备消息上下行/消息对分页/模拟发送，属性最新值与历史查询（TDengine） | IotDeviceMessageDO、IotDevicePropertyDO |
-| Modbus 接入 | 设备 Modbus 连接配置（Client/Server 模式）与寄存器点位配置 | IotDeviceModbusConfigDO、IotDeviceModbusPointDO |
+| 设备影子 | 设备上报状态（reported）与管理端期望状态（desired）的存取与重置，版本乐观锁与 Redis 读缓存 | IotDeviceShadowDO |
+| 设备通信 | 设备消息上下行/消息对分页/模拟发送、属性最新值与历史查询（时序库）、原始字节透传收发 | IotDeviceMessageDO、IotDevicePropertyDO |
+| Modbus 接入 | 设备 Modbus 连接配置（Client/Server 模式）与寄存器点位配置（含 bitIndex 位读取、最小轮询间隔） | IotDeviceModbusConfigDO、IotDeviceModbusPointDO |
 | OTA 升级 | 固件管理、升级任务（全量/指定设备）、升级记录与进度 | IotOtaFirmwareDO、IotOtaTaskDO、IotOtaTaskRecordDO |
 | 规则引擎 | 场景联动（触发器/条件/动作）、数据流转规则与数据目的（9 种类型） | IotSceneRuleDO、IotDataRuleDO、IotDataSinkDO |
 | 告警管理 | 告警配置（短信/邮件/站内信通知）、告警记录查询与处理 | IotAlertConfigDO、IotAlertRecordDO |
@@ -133,9 +138,20 @@ IotDeviceModbusPointController — `@RequestMapping("/iot/device-modbus-point")`
 
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |---------|---------|------|---------|
-| /iot/device/message/page | GET | 获得设备消息分页 | iot:device:message-query |
+| /iot/device/message/page | GET | 获得设备消息分页（支持按是否透传 raw 过滤） | iot:device:message-query |
 | /iot/device/message/pair-page | GET | 获得设备消息对分页（请求-回复配对） | iot:device:message-query |
-| /iot/device/message/send | POST | 发送消息（可用于设备模拟） | iot:device:message-send |
+| /iot/device/message/send | POST | 发送消息（可用于设备模拟；`thing.raw.push` 透传下发额外要求 `iot:device:message-raw-send`，`thing.raw.post` 不允许模拟） | iot:device:message-send（raw 下发追加 iot:device:message-raw-send） |
+
+### 设备影子 (IotDeviceShadowController)
+
+`@RequestMapping("/iot/device/shadow")`
+
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /iot/device/shadow/get | GET | 获取设备影子（含物模型属性对齐的 desired/reported） | iot:device:shadow-query |
+| /iot/device/shadow/update-desired | PUT | 更新设备影子期望状态 | iot:device:shadow-update |
+| /iot/device/shadow/update-status | PUT | 更新设备影子开关状态 | iot:device:shadow-update |
+| /iot/device/shadow/reset | DELETE | 重置设备影子（清空 desired/reported/metadata，version 归 0，不删除记录） | iot:device:shadow-update |
 
 ### OTA 升级 (IotOtaFirmwareController / IotOtaTaskController / IotOtaTaskRecordController)
 
@@ -175,13 +191,15 @@ IotProductController — `@RequestMapping("/iot/product")`
 |---------|---------|------|---------|
 | /iot/product/create | POST | 创建产品 | iot:product:create |
 | /iot/product/update | PUT | 更新产品 | iot:product:update |
+| /iot/product/update-script | PUT | 更新产品数据解析脚本（支持仅更新脚本内容/开关、仅编译校验） | iot:product:update |
+| /iot/product/debug-script | POST | 调试产品数据解析脚本（用示例报文执行 decode/encode） | iot:product:update |
 | /iot/product/update-status | PUT | 更新产品状态 | iot:product:update |
 | /iot/product/delete | DELETE | 删除产品 | iot:product:delete |
 | /iot/product/get | GET | 获得产品 | iot:product:query |
 | /iot/product/get-by-key | GET | 通过 ProductKey 获得产品 | iot:product:query |
 | /iot/product/page | GET | 获得产品分页 | iot:product:query |
 | /iot/product/export-excel | GET | 导出产品 Excel | iot:product:export |
-| /iot/product/sync-property-table | POST | 同步产品属性表结构到 TDengine | iot:product:update |
+| /iot/product/sync-property-table | POST | 同步产品属性表结构到时序库（TDengine / IoTDB） | iot:product:update |
 | /iot/product/simple-list | GET | 获取产品的精简信息列表（下拉用） | 已认证 |
 
 IotProductCategoryController — `@RequestMapping("/iot/product-category")`
@@ -257,13 +275,14 @@ IotSceneRuleController — `@RequestMapping("/iot/scene-rule")`
 
 | 表名 | 说明 | 继承基类 | 关键字段 |
 |-----|------|---------|---------|
-| iot_product | 产品 | TenantBaseDO | name、productKey、productSecret、registerEnabled、categoryId、deviceType、netType、protocolType、serializeType、status |
+| iot_product | 产品 | TenantBaseDO | name、productKey、productSecret、registerEnabled、categoryId、deviceType、netType、protocolType、serializeType、status、scriptContent、scriptEnabled |
 | iot_product_category | 产品分类 | BaseDO | name、sort、status、description |
 | iot_thing_model | 产品物模型（TSL） | BaseDO | identifier、productId、productKey、type（1属性/2服务/3事件）、property/event/service（JSON，autoResultMap） |
 | iot_device | 设备 | TenantBaseDO | deviceName、nickname、serialNumber、groupIds、productId、productKey、deviceType、gatewayId、state、deviceSecret、onlineTime、firmwareId、latitude/longitude、config |
 | iot_device_group | 设备分组 | BaseDO | name、status、description |
+| iot_device_shadow | 设备影子 | TenantBaseDO | deviceId、productId、productKey、deviceName、reported（JSON）、desired（JSON）、metadata（JSON：desired/reported 各属性时间戳）、version（乐观锁）、shadowTime（epoch 秒）、status |
 | iot_device_modbus_config | 设备 Modbus 连接配置 | TenantBaseDO | deviceId、productId、ip、port、slaveId、mode、frameFormat、timeout、retryInterval、status |
-| iot_device_modbus_point | 设备 Modbus 点位配置 | TenantBaseDO | deviceId、thingModelId、identifier、functionCode（FC01-04）、registerAddress、registerCount、byteOrder、rawDataType、scale、pollInterval |
+| iot_device_modbus_point | 设备 Modbus 点位配置 | TenantBaseDO | deviceId、thingModelId、identifier、functionCode（FC01-04）、registerAddress、registerCount、bitIndex、byteOrder、rawDataType、scale、pollInterval |
 | iot_ota_firmware | OTA 固件 | BaseDO | name、version、productId、fileUrl、fileSize、fileDigestAlgorithm、fileDigestValue |
 | iot_ota_task | OTA 升级任务 | BaseDO | name、firmwareId、status、deviceScope、deviceTotalCount、deviceSuccessCount |
 | iot_ota_task_record | OTA 升级记录 | BaseDO | firmwareId、taskId、deviceId、fromFirmwareId、status、progress、description |
@@ -272,8 +291,8 @@ IotSceneRuleController — `@RequestMapping("/iot/scene-rule")`
 | iot_scene_rule | 场景联动 | TenantBaseDO | name、status、lastTriggerTime、triggers（JSON：type/productId/deviceId/identifier/operator/value/cronExpression/conditionGroups）、actions（JSON） |
 | iot_alert_config | IoT 告警配置 | BaseDO | name、level、status、sceneRuleIds、receiveUserIds、receiveTypes、smsTemplateCode、mailTemplateCode、notifyTemplateCode |
 | iot_alert_record | IoT 告警记录 | BaseDO | configId、configName、configLevel、sceneRuleId、productId、deviceId、deviceMessage（JSON）、processStatus、processRemark |
-| iot_device_message（TDengine 超级表） | 设备消息日志 | 无（IotDeviceMessageDO，自管理主键） | id（消息编号）、deviceId、tenantId、serverId、upstream、reply、identifier、requestId、method、params、data、code、msg、reportTime、ts |
-| iot_device_property（TDengine，按产品 productKey 建超级表+设备子表） | 设备属性最新值/历史 | 无（IotDevicePropertyDO 为值包装对象） | value、updateTime（历史表含时间戳与各属性列） |
+| device_message（时序库：TDengine 超级表 + 子表 device_message_{deviceId}，或 IoTDB 全局表） | 设备消息日志 | 无（IotDeviceMessageDO，自管理主键） | id（消息编号）、deviceId、tenantId、serverId、upstream、reply、identifier、requestId、method、params、data、raw（Base64 原始字节）、code、msg、reportTime、ts |
+| product_property_{productId} / device_property（时序库：TDengine 按产品编号建超级表 + 设备子表 device_property_{deviceId}，或 IoTDB 表） | 设备属性最新值/历史 | 无（IotDevicePropertyDO 为值包装对象） | value、updateTime（历史表含时间戳与各属性列） |
 
 说明：数据目的配置 9 种子类（Http/Tcp/WebSocket/Mqtt/Database/Redis/RocketMQ/RabbitMQ/Kafka）位于 `dal/dataobject/rule/config`，物模型 TSL 模型（ThingModelProperty/Service/Event 及 dataType 规格类）位于 `dal/dataobject/thingmodel/model`，均为 JSON 内嵌模型，不单独建表。
 
@@ -287,17 +306,19 @@ IotSceneRuleController — `@RequestMapping("/iot/scene-rule")`
 | 插件化策略 | yudao-module-iot-gateway 的 protocol 包：IotProtocol 接口 + IotProtocolManager（SmartLifecycle），MQTT/EMQX/CoAP/HTTP/TCP/UDP/WebSocket/Modbus（Client/Server）实现 | 网关按配置启停多协议接入实例 |
 | 模板方法 | gateway/protocol/AbstractIotProtocolDownstreamSubscriber | 各协议下行消息订阅者的公共流程骨架 |
 | 观察者/发布订阅 | core messagebus + biz 的 mq 包：IotDeviceMessageProducer 发布，IotDeviceMessageSubscriber、IotDataRuleMessageSubscriber、IotSceneRuleMessageSubscriber 消费 | 设备消息驱动属性存储、规则引擎、场景联动 |
+| 策略模式（多存储实现） | biz 的 dal/tdengine（IotDeviceMessageTDengineDAO、IotDevicePropertyTDengineDAO）与 dal/iotdb（IotDeviceMessageIoTDBDAO、IotDevicePropertyIoTDBDAO），由 framework/storage/config/IotStorageConfiguration 按 `yudao.iot.storage.type` 装配 | 同一消息/属性存储接口适配 TDengine 与 IoTDB 两种时序库 |
+| 脚本引擎（策略 + 预算） | core/script：IotScriptExecutor 接口 + IotRhinoScriptExecutor（Rhino 实现），IotScriptUtils、IotScriptBudget、IotScriptRuntime 负责预算/超时/熔断 | 执行产品级 JS 数据解析脚本的 decode/encode |
 
 ## 依赖关系
 
 - **上游**（本模块依赖）
   - framework starter：yudao-spring-boot-starter-web、yudao-spring-boot-starter-security、yudao-spring-boot-starter-mybatis、yudao-spring-boot-starter-redis、yudao-spring-boot-starter-excel、yudao-spring-boot-starter-biz-tenant、yudao-spring-boot-starter-mq（经 core 引入）、yudao-spring-boot-starter-test
-  - 中间件驱动：taos-jdbcdriver（TDengine）、rocketmq-spring-boot-starter、spring-kafka、spring-boot-starter-amqp（RabbitMQ，后三者 optional）、org.eclipse.paho.client.mqttv3、okhttp、vertx-web/vertx-mqtt、j2mod（Modbus）、californium-core（CoAP，后三者为 gateway）
+  - 中间件驱动：taos-jdbcdriver（TDengine）、iotdb-jdbc（Apache IoTDB）、rocketmq-spring-boot-starter、spring-kafka、spring-boot-starter-amqp（RabbitMQ，后三者 optional）、org.eclipse.paho.client.mqttv3、okhttp、vertx-web/vertx-mqtt、j2mod（Modbus）、californium-core（CoAP，后三者为 gateway）、org.mozilla:rhino（产品数据解析脚本，core 引入）
   - 业务模块：yudao-module-system（AdminUserApi、SmsSendApi、MailSendApi、NotifyMessageSendApi）、yudao-module-iot-core
 - **下游**（依赖本模块）
   - yudao-server：可选引入 yudao-module-iot-biz（yudao-server/pom.xml 中默认注释，启用后随主服务启动）
-  - yudao-module-iot-gateway：依赖 core，通过 HTTP 调用 biz 暴露的 IotDeviceCommonApi 获取设备信息/鉴权/注册/Modbus 配置
-  - 说明：gateway 与 biz 之间还通过 core 的消息总线（redis stream / rocketmq / kafka / rabbitmq / spring-event）异步传递设备消息
+  - yudao-module-iot-gateway：依赖 core，通过 HTTP 调用 biz 暴露的 IotDeviceCommonApi 获取设备信息/鉴权/注册/Modbus 配置与上报存活
+  - 说明：gateway 与 biz 之间还通过 core 的消息总线（redis stream / rocketmq / kafka / rabbitmq / spring-event）异步传递设备消息；gateway 打包时 spring-boot-maven-plugin 以 `exec` classifier 生成可执行 `-exec.jar`，主 artifact 保留普通 jar，biz 可选择性引入 gateway 实现合并部署（消息总线配为 local）
 
 ## 对外暴露的 API
 
@@ -310,11 +331,15 @@ biz 侧实现 `cn.iocoder.yudao.module.iot.core.biz.IotDeviceCommonApi`（实现
 | IotDeviceCommonApi | registerDevice（设备动态注册） | yudao-module-iot-gateway |
 | IotDeviceCommonApi | registerSubDevices（网关子设备批量注册） | yudao-module-iot-gateway |
 | IotDeviceCommonApi | getModbusDeviceConfigList（获取 Modbus 设备配置与点位） | yudao-module-iot-gateway |
+| IotDeviceCommonApi | keepAliveGatewayServers（网关协议实例存活上报，写入 `iot:gateway_server:{serverId}`，供离线检查任务使用） | yudao-module-iot-gateway |
+
+> `keepAliveGatewayServers` 对应内部 HTTP 接口 `/rpc-api/iot/gateway-server/keep-alive`（@PermitAll + @TenantIgnore），返回是否全部续期成功。
 
 ## 详细文档
 
 - [api-alert.md](api-alert.md) - 告警管理（告警配置 + 告警记录）
 - [api-device.md](api-device.md) - 设备管理（设备/分组/Modbus 配置/属性/消息）
+- [api-shadow.md](api-shadow.md) - 设备影子（影子查询/期望状态/开关/重置）
 - [api-ota.md](api-ota.md) - OTA 升级（固件/升级任务/升级记录）
 - [api-product.md](api-product.md) - 产品管理（产品 + 产品分类）
 - [api-rule.md](api-rule.md) - 规则引擎（场景联动/数据流转规则/数据目的）

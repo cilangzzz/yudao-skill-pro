@@ -46,7 +46,6 @@
 
 | 错误码 | 说明 |
 |-------|------|
-| 1_001_001_000 | 定时任务不存在 |
 | 1_001_001_001 | 定时任务的处理器已经存在 |
 | 1_001_001_005 | CRON 表达式不正确 |
 | 1_001_001_006 | 定时任务的处理器 Bean 不存在，注意 Bean 默认首字母小写 |
@@ -359,4 +358,4 @@
 | 1_001_001_006 | 定时任务的处理器 Bean 不存在，注意 Bean 默认首字母小写 |
 | 1_001_001_007 | 定时任务的处理器 Bean 类型不正确，未实现 JobHandler 接口 |
 
-> 备注：日志的新增（createJobLog）与结果回写（updateJobLogResultAsync，@Async 异步更新状态为 SUCCESS/FAILURE）由 Quartz Job 执行链路内部调用，不暴露 admin 端点；日志清理（cleanJobLog，按 exceedDay 循环分批删除过期记录）亦为内部方法，供定时任务自身调度调用。
+> 备注：日志的新增（createJobLog）与结果回写（updateJobLogResultAsync，@Async 异步更新状态为 SUCCESS/FAILURE）由 Quartz Job 执行链路内部调用，不暴露 admin 端点；日志清理（cleanJobLog，按 exceedDay 循环分批删除过期记录）亦为内部方法，供定时任务自身调度调用。清理 SQL 由 `SqlDialectUtils.deleteBatchByLessThan` 在 Mapper 注解中按当前执行数据源方言动态生成：MySQL/OceanBase/达梦/神通/人大金仓/openGauss 等保持 `DELETE ... LIMIT`，PostgreSQL 用 `id IN (SELECT ... LIMIT)` 子查询，Oracle 用 `ROWNUM`，SQL Server 2012+ 用 `TOP`（此前硬编码 `LIMIT`，非 MySQL 系数据库不可用）。

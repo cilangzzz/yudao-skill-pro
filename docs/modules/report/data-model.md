@@ -2,7 +2,7 @@
 
 > report 模块的核心数据模型，包括 DO、DTO、VO 及其之间的关系。
 
-report 模块是数据可视化模块，基于积木报表（JimuReport）与积木仪表盘（JimuBI）提供报表与大屏设计能力，并内置 GoView 大屏项目管理与数据集查询 API。模块自身的持久化层非常轻量：**仅 1 个 DO（`GoViewProjectDO`，对应 1 张表 `report_go_view_project`）**，积木报表/仪表盘所需的 `jimu_*`、`onl_drag_*` 等表均由第三方 starter（`jimureport-spring-boot-starter`，版本锁定 2.3.4）自动建表并维护，不在本仓库 DO 层管理。
+report 模块是数据可视化模块，基于积木报表（JimuReport）与积木仪表盘（JimuBI）提供报表与大屏设计能力，内置 GoView 大屏项目管理与数据集查询 API，并集成 UReport2 提供中国式报表。模块自身的持久化层仍非常轻量：**2 个 DO（`GoViewProjectDO` 对应表 `report_go_view_project`，`UReport2FileDO` 对应表 `report_ureport_file`）**，积木报表/仪表盘所需的 `jimu_*`、`onl_drag_*` 等表均由第三方 starter（`jimureport-spring-boot-starter`，版本锁定 2.3.4）自动建表并维护，不在本仓库 DO 层管理。UReport2 另使用 Redis 保存模板版本号（无对应的持久化表）。
 
 ## 1. 实体继承体系
 
@@ -19,12 +19,15 @@ cn.iocoder.yudao.framework.mybatis.core.dataobject.BaseDO        ← 框架通�
 
 cn.iocoder.yudao.module.report.dal.dataobject.goview.GoViewProjectDO
         └── 继承 BaseDO（不继承 TenantBaseDO）
+
+cn.iocoder.yudao.module.report.dal.dataobject.ureport2.UReport2FileDO
+        └── 继承 TenantBaseDO（含 tenant_id，多租户表）
 ```
 
 **使用规则**：
 
-- `BaseDO`：通用审计字段基类，适用于无多租户隔离诉求的表。report 模块唯一的 `GoViewProjectDO` 即继承它 —— 大屏项目按**创建人**隔离（`creator` 字段实现"我的项目"过滤），而非按租户隔离，因此表中没有 `tenant_id` 列。
-- `TenantBaseDO`：需要租户隔离的表使用，新增 `tenantId` 字段并由租户插件自动过滤。**report 模块当前没有任何 DO 使用该基类**；若后续需要将大屏项目纳入租户体系，可让 `GoViewProjectDO` 改继承 `TenantBaseDO` 并补 `tenant_id` 列。
+- `BaseDO`：通用审计字段基类，适用于无多租户隔离诉求的表。`GoViewProjectDO` 即继承它 —— 大屏项目按**创建人**隔离（`creator` 字段实现"我的项目"过滤），DO 中没有 `tenantId` 字段。**但建表仍必须包含 `tenant_id` 列**：`TenantDatabaseInterceptor#computeIgnoreTable` 只对「继承 `TenantBaseDO`」或「标注 `@TenantIgnore`」的实体放行，`GoViewProjectDO` 两者都不满足，租户插件会自动为它的 SQL 追加 `tenant_id` 条件、INSERT 时自动补该列（详见 [pitfalls.md](pitfalls.md) 1.1）。
+- `TenantBaseDO`：需要租户隔离的表使用，新增 `tenantId` 字段并由租户插件自动过滤。`UReport2FileDO` 继承它 —— UReport2 报表模板按租户隔离，`report_ureport_file` 必须有 `tenant_id` 列。
 - `BaseDO` 同时实现 `TransPojo`（Easy-Trans 简单翻译模式），并提供 `clean()` 方法在落库前清空前端可能传入的审计字段。
 
 ## 2. 核心 DO 实体
@@ -48,19 +51,48 @@ cn.iocoder.yudao.module.report.dal.dataobject.goview.GoViewProjectDO
 | updater | String | updater | 更新者（继承自 BaseDO，自动填充） |
 | updateTime | LocalDateTime | update_time | 最后更新时间（继承自 BaseDO，自动填充） |
 | deleted | Boolean | deleted | 逻辑删除标记（继承自 BaseDO，`@TableLogic`） |
+| tenantId（DO 中无此字段） | Long | tenant_id | 租户编号：由租户插件在 INSERT 时自动补值、查询时自动追加过滤条件，建表必须包含该列 |
 
-**继承**: `BaseDO`（未继承 `TenantBaseDO`，无 `tenant_id` 列，非多租户表）
+**继承**: `BaseDO`（未继承 `TenantBaseDO`，DO 中无 `tenantId` 字段；但受租户插件约束，物理表仍需 `tenant_id` 列）
 
 **索引**:
 
 - 主键：`id`（自增）。
 - 无其他唯一索引或普通索引（仓库内仅有 H2 测试建表脚本 `yudao-module-report/src/test/resources/sql/create_tables.sql`，其中仅声明 `PRIMARY KEY ("id")`）。
+- 该表的建表语句不在当前仓库 `sql/` 目录中（历史脚本 `sql/mysql/optional/go-view.sql` 已被删除），历史脚本中除主键外同样没有 `creator` 等普通索引。
 - "我的项目"过滤通过 `creator` 字段等值查询实现（`GoViewProjectMapper` 按当前登录用户编号筛选），未单独建索引，数据量大时可视情况补 `creator` 普通索引。
 - 类上标注 `@KeySequence("report_go_view_project_seq")`，仅用于 Oracle、PostgreSQL、Kingbase、DB2、H2 等数据库的序列主键自增，MySQL 下不生效；`@TableName(autoResultMap = true)` 开启自动结果映射以支持 TypeHandler。
 
-### 2.2 VO 数据传输对象
+### 2.2 UReport2 报表模板聚合
 
-模块 VO 全部位于 `controller/admin/goview/vo/` 下，分 project（项目管理）与 data（数据查询）两组，通过 `GoViewProjectConvert`（MapStruct）与 DO 互转：
+UReport2 的中国式报表模板：一个模板对应一条 `UReport2FileDO` 记录，模板的 XML 内容整体存放在 `content` 字段中（无子表拆分）。模板按租户隔离，由 UReport2 自带的 `ReportProvider`（前缀 `db:`）负责读写。
+
+#### UReport2FileDO (report_ureport_file)
+
+| 字段 | 类型 | 数据库列 | 说明 |
+|-----|------|---------|------|
+| id | Long | id | 编号，数据库自增主键（`@TableId`） |
+| name | String | name | 模板名称，不包含存储前缀（如 `demo.ureport.xml`）；长度上限 128，与 `UReport2FileSaveReqVO` 的 `@Size(max = 128)` 一致 |
+| content | String | content | 模板内容，UReport2 的 XML 格式（可能包含数据源的账号密码，禁止写入日志） |
+| creator | String | creator | 创建者（继承自 BaseDO），存 SysUser 用户编号 |
+| createTime | LocalDateTime | create_time | 创建时间（继承自 BaseDO，自动填充） |
+| updater | String | updater | 更新者（继承自 BaseDO，自动填充） |
+| updateTime | LocalDateTime | update_time | 最后更新时间（继承自 BaseDO，自动填充） |
+| deleted | Boolean | deleted | 逻辑删除标记（继承自 BaseDO，`@TableLogic`） |
+| tenantId | Long | tenant_id | 租户编号（继承自 TenantBaseDO，租户插件自动过滤） |
+
+**继承**: `TenantBaseDO`（多租户表，含 `tenant_id` 列）
+
+**索引**:
+
+- 主键：`id`（自增）。
+- 除主键外**无唯一索引或普通索引**（仓库内仅有 H2 测试建表脚本 `yudao-module-report/src/test/resources/sql/create_tables.sql`，其中仅声明 `PRIMARY KEY ("id")`）。因此并发新增同名模板没有数据库兜底。
+- 类上标注 `@KeySequence("report_ureport_file_seq")`，仅用于 Oracle、PostgreSQL、Kingbase、DB2、H2 等数据库的序列主键自增，MySQL 下不生效。
+- `name` 使用 MySQL `utf8mb4_bin` 排序规则（区分大小写，但属 PAD SPACE，尾部 ASCII 空格会被忽略），详见 [pitfalls.md](pitfalls.md) 中的名称规范化说明。
+
+### 2.3 VO 数据传输对象
+
+模块 VO 全部位于 `controller/admin/` 下，分 goview（项目管理与数据查询）与 ureport2（报表模板）两组；goview 组通过 `GoViewProjectConvert`（MapStruct）与 DO 互转，ureport2 组直接使用 `BeanUtils.toBean` 转换：
 
 | VO | 层级 | 字段 | 说明 |
 |----|------|------|------|
@@ -69,12 +101,15 @@ cn.iocoder.yudao.module.report.dal.dataobject.goview.GoViewProjectDO
 | GoViewProjectRespVO | 响应 | id、name、status、content、picUrl、remark、creator、createTime | 项目详情/列表响应，额外返回 creator 与 createTime |
 | GoViewDataGetBySqlReqVO | 请求 | sql（必填） | 按原生 SQL 查询图表数据源 |
 | GoViewDataRespVO | 响应 | dimensions（List\<String\>）、source（List\<Map\<String, Object\>\>） | GoView 图表数据格式：维度列表 + 明细行 |
+| UReport2FilePageReqVO | 请求 | name（模糊匹配）、pageNo、pageSize | 报表模板分页查询，继承 `PageParam` |
+| UReport2FileSaveReqVO | 请求 | name（`@NotBlank`、`@Size(max = 128)`）、content（`@NotNull`） | 供 UReport2 Provider 保存模板使用（非管理后台接口入参） |
+| UReport2FileRespVO | 响应 | id、name、createTime、updateTime | 模板列表响应，**不含 content**（避免传输大字段） |
 
 > 注意：`GoViewDataController` 的两个端点使用 `@RequestMapping` 未限定 HTTP 方法（任意方法均可访问），且直接执行前端传入的 SQL；`GoViewProjectUpdateReqVO` 中 `name` 未加 `@NotEmpty`，与 CreateReqVO 的校验强度不一致，使用时需留意。
 
 ## 3. 实体关系
 
-report 模块内部为**单表单聚合**结构，无表间外键；与外部模块和第三方表均为逻辑关联：
+report 模块内部为**两张表单聚合**结构，无表间外键；与外部模块和第三方表均为逻辑关联：
 
 ```
                 ┌──────────────────────────────┐
@@ -93,6 +128,26 @@ report 模块内部为**单表单聚合**结构，无表间外键；与外部模
         │（yudao-module-system）│  └─────────────────────────────┘
         └────────────────────┘
 
+                ┌──────────────────────────────┐
+                │  BaseDO（5 个审计字段）        │
+                └──────────────┬───────────────┘
+                               │ 继承
+                ┌──────────────▼───────────────┐
+                │        TenantBaseDO          │  tenant_id：租户编号
+                └──────────────┬───────────────┘
+                               │ 继承
+                ┌──────────────▼───────────────┐
+                │         UReport2FileDO        │
+                │    report_ureport_file       │
+                │  （报表模板，content 存 XML）  │
+                └──┬───────────────────────┬───┘
+   tenant_id 逻辑关联│                       │ ReportProvider（db: 前缀）读写
+        （非外键）    │                       │
+        ┌───────────▼────────┐    ┌──────────▼──────────────────┐
+        │ system_tenant 租户表 │    │ UReport2 设计器 / 预览页面    │
+        │（yudao-module-system）│  │  /ureport/**（starter 提供） │
+        └────────────────────┘    └─────────────────────────────┘
+
   第三方表（jimureport-spring-boot-starter 自建自管，本仓库无 DO）：
   ┌─────────────────────┐        ┌─────────────────────┐
   │ jimu_*（积木报表）    │        │ onl_drag_*（积木仪表盘）│
@@ -109,8 +164,10 @@ report 模块内部为**单表单聚合**结构，无表间外键；与外部模
 
 关系说明：
 
-- **GoViewProjectDO → system_users（逻辑关联）**：`creator` 字段存创建人用户编号，用于"我的项目"过滤，无数据库外键约束；用户鉴权与权限校验依赖上游 `yudao-module-system` 的 `PermissionApi` 及 framework common biz 的 `OAuth2TokenCommonApi`/`PermissionCommonApi`。
+- **GoViewProjectDO → system_users（逻辑关联）**：`creator` 字段存创建人用户编号，用于"我的项目"过滤，无数据库外键约束；用户鉴权与权限校验依赖上游 `yudao-module-system` 的 `RoleCodeEnum`（超管角色编码）及 framework common biz 的 `OAuth2TokenCommonApi`、`PermissionCommonApi`。
 - **GoViewProjectDO ↔ jimu_*/onl_drag_*（集成关系，非数据关系）**：积木报表/仪表盘的自建表由 starter 维护，与 `report_go_view_project` 之间无外键、无关联查询。本模块通过 `JmReportTokenServiceImpl`（为积木端点提供登录态）、`JmOnlDragExternalServiceImpl`（为积木仪表盘提供字典/日志桥接，当前均为默认实现）接入。
+- **UReport2FileDO → system_tenant（逻辑关联）**：`tenant_id` 存租户编号，由租户插件自动过滤，无数据库外键约束。
+- **UReport2FileDO ↔ UReport2 设计器（集成关系）**：模板 XML 由 UReport2 的 `UReportServlet` 通过自定义 `ReportProvider`（前缀 `db:`）读写；模板解析后的定义缓存在各实例本地，Redis 只保存版本号（Key `report:ureport2_file_version:{tenantId}:{file}`），无对应的持久化表。
 - **GoView 数据查询无落库**：`GoViewDataController` 的 SQL 查询端点直接执行 SQL 返回 `GoViewDataRespVO`，不产生新的持久化数据。
 
 ## 4. 全部数据表清单
@@ -118,5 +175,6 @@ report 模块内部为**单表单聚合**结构，无表间外键；与外部模
 | 表名 | DO | 说明 |
 |------|----|------|
 | report_go_view_project | GoViewProjectDO | GoView 大屏项目表，一个大屏项目一条记录，JSON 配置整体存于 content 字段 |
+| report_ureport_file | UReport2FileDO | UReport2 报表模板表，一个模板一条记录，XML 内容整体存于 content 字段，按 tenant_id 隔离 |
 
-> 附注：积木报表/仪表盘由 starter 自建自管的 `jimu_*`（报表）、`onl_drag_*`（仪表盘拖拽设计）等表，表结构定义在第三方 jar 内，不属于本模块 DO 层管理范围，故不计入上表。
+> 附注：积木报表/仪表盘由 starter 自建自管的 `jimu_*`（报表）、`onl_drag_*`（仪表盘拖拽设计）等表，表结构定义在第三方 jar 内，不属于本模块 DO 层管理范围，故不计入上表。UReport2 的模板版本号存于 Redis（`report:ureport2_file_version:{tenantId}:{file}`），不是数据库表。

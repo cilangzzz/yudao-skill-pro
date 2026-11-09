@@ -25,7 +25,7 @@
 | 字段 | 类型 | 说明 |
 |-----|------|------|
 | usedSize | Long | 已用容量，单位字节（回收站文件仍占用容量） |
-| totalSize | Long | 总容量，单位字节（来自 `oa.file.storage-size` 配置，默认 5 GB） |
+| totalSize | Long | 总容量，单位字节（来自 `yudao.oa.file.storage-size` 配置，默认 5 GB） |
 | fileCount | Long | 本人正常文件数量，不含目录和回收站 |
 | sharedCount | Long | 本人有效共享节点数量，按文件或目录去重 |
 | receivedCount | Long | 收到的共享入口数量，不重复统计子节点 |
@@ -343,7 +343,7 @@
 |-----|------|------|---------|------|
 | id | Long | 是 | — | 节点编号 |
 
-**响应**: CommonResult&lt;OaFileNodeRespVO&gt;（字段同 1.2 响应；url 仅在文件类型且权限级别 ≥ 下载时签发临时地址，有效期由 `oa.file.download-url-expire-seconds` 配置，默认 300 秒）
+**响应**: CommonResult&lt;OaFileNodeRespVO&gt;（字段同 1.2 响应；url 仅在文件类型且权限级别 ≥ 下载时签发临时地址，有效期由 `yudao.oa.file.download-url-expire-seconds` 配置，默认 300 秒）
 
 **业务逻辑**:
 1. 校验节点存在，且自身及祖先均处于正常状态（拒绝通过编号直接访问回收目录中的文件，并排除断链与循环路径）。
@@ -516,7 +516,7 @@
 
 ---
 
-## 附：本域错误码汇总（1-054-230-000 段）
+## 附：本域错误码汇总（1_054_230_000 段）
 
 | 错误码 | 说明 |
 |-------|------|

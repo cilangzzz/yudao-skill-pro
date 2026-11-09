@@ -13,6 +13,8 @@
 - /crm/statistics-rank  (Controller: CrmStatisticsRankController) —— 排行榜
 
 > 本域全部为只读统计接口（仅 GET），Service 层不抛业务错误码，参数校验失败由框架统一返回 400；仅在关联查询商机/业绩目标配置/产品分类时可能涉及相关域的错误码，已在对应分组列出。
+>
+> 统计 SQL 说明：本域 Mapper XML（`resources/mapper/statistics/*.xml` 与公海统计用的 `resources/mapper/permission/CrmOwnerRecordMapper.xml`）已通过框架 `SqlDialectUtils` 做多数据库方言化，支持 MySQL/MariaDB/OceanBase/H2/达梦/神通/人大金仓/openGauss/GaussDB 及 PostgreSQL/Oracle/SQL Server 2012+；接口路径与返回字段不受影响，扩展约束见 [code-patterns.md](code-patterns.md)「新增统计 SQL（多数据库兼容）」。客户画像 4 个端点的成交数统计按布尔列聚合（`SUM(CASE WHEN deal_status = #{trueValue} ...)`），语义为「成交计 1、NULL 仍为 NULL」。
 
 ## 1. 员工客户统计（CrmStatisticsCustomerController）
 

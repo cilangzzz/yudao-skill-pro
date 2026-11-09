@@ -116,10 +116,11 @@
 **业务逻辑**:
 1. 校验充值记录存在，不存在抛 WALLET_RECHARGE_NOT_FOUND；
 2. 幂等校验：若已支付且支付单号相同，直接返回；若已支付但支付单号不同，抛 WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_ID_ERROR；
-3. `validatePayOrderPaid` 校验支付单：存在（PAY_ORDER_NOT_FOUND）、状态为支付成功（WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_STATUS_NOT_SUCCESS）、金额与充值支付金额一致（WALLET_RECHARGE_UPDATE_PAID_PAY_PRICE_NOT_MATCH）、商户订单号匹配（WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_ID_ERROR）；
-4. 通过 `updateByIdAndPaid`（条件 payStatus = false 乐观更新）将充值记录置为已支付，记录支付时间与支付渠道，更新失败抛 WALLET_RECHARGE_UPDATE_PAID_STATUS_NOT_UNPAID；
-5. 调用 `addWalletBalance(RECHARGE)` 增加钱包余额（金额为 支付金额 + 赠送金额），并生成「充值」类型流水；
-6. 异步发送微信小程序订阅消息（充值成功通知）；若支付渠道为微信小程序，还会调用 system 模块接口上传虚拟物品发货信息。
+3. 绑定校验：充值记录未支付时，回调的 payOrderId 必须与充值记录绑定的 payOrderId 一致，否则抛 WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_ID_ERROR（防止其它支付应用中「相同商户订单号 + 相同金额」的支付单串单）；
+4. `validatePayOrderPaid` 校验支付单：存在（PAY_ORDER_NOT_FOUND）、状态为支付成功（WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_STATUS_NOT_SUCCESS）、金额与充值支付金额一致（WALLET_RECHARGE_UPDATE_PAID_PAY_PRICE_NOT_MATCH）、商户订单号匹配（WALLET_RECHARGE_UPDATE_PAID_PAY_ORDER_ID_ERROR）；
+5. 通过 `updateByIdAndPaid`（条件 payStatus = false 乐观更新）将充值记录置为已支付，记录支付时间与支付渠道，更新失败抛 WALLET_RECHARGE_UPDATE_PAID_STATUS_NOT_UNPAID；
+6. 调用 `addWalletBalance(RECHARGE)` 增加钱包余额（金额为 支付金额 + 赠送金额），并生成「充值」类型流水；
+7. 异步发送微信小程序订阅消息（充值成功通知）；若支付渠道为微信小程序，还会调用 system 模块接口上传虚拟物品发货信息。
 
 **错误码**:
 
@@ -135,7 +136,7 @@
 ### 2.2 发起钱包充值退款
 
 - **路径**: POST /pay/wallet-recharge/refund
-- **权限**: 已认证（无 @PreAuthorize 注解，仅要求登录）
+- **权限**: pay:wallet:update-balance（复用「用户余额修改」权限，菜单 451；退款会扣减用户钱包余额，因此不再允许任意已登录管理员调用）
 - **说明**: 对已支付的钱包充值记录发起退款，先冻结余额再创建支付退款单
 
 **请求参数**（Query 参数）:
@@ -147,7 +148,7 @@
 **响应**: CommonResult&lt;Boolean&gt;（发起是否成功）
 
 **业务逻辑**:
-1. 查询充值记录，不存在抛 WALLET_RECHARGE_NOT_FOUND；
+1. 通过 `selectOneForUpdate`（`SELECT ... FOR UPDATE`）读取充值记录并加行锁，不存在抛 WALLET_RECHARGE_NOT_FOUND；行锁依赖本方法的 `@Transactional`，用于串行化同一充值记录的并发退款——后到的请求会等待前一个事务提交，读到已绑定的 payRefundId 后拒绝重复退款，避免重复冻结余额；
 2. `validateWalletRechargeCanRefund` 校验：未支付抛 WALLET_RECHARGE_REFUND_FAIL_NOT_PAID；已存在退款单号抛 WALLET_RECHARGE_REFUND_FAIL_REFUNDED；钱包余额小于充值总额（支付 + 赠送）抛 WALLET_RECHARGE_REFUND_BALANCE_NOT_ENOUGH；
 3. 调用 `freezePrice` 冻结退款金额（冻结失败即余额不足，抛 WALLET_BALANCE_NOT_ENOUGH）；
 4. 调用 `payRefundApi.createRefund` 创建支付退款单（商户退款单号为 `{充值id}-refund`，退款金额为充值的支付金额 payPrice，即赠送金额随支付金额一并退回）；
@@ -181,10 +182,12 @@
 
 **业务逻辑**:
 1. 查询充值记录，不存在抛 WALLET_RECHARGE_NOT_FOUND；
-2. `validateWalletRechargeCanRefunded` 校验：退款单编号与充值记录不匹配抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_ORDER_ID_ERROR；支付退款单不存在抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_NOT_FOUND；退款金额与充值支付金额不一致抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_PRICE_NOT_MATCH；商户退款单号不匹配再次抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_ORDER_ID_ERROR；
-3. 退款成功：调用 `reduceWalletBalance(RECHARGE_REFUND)` 扣减钱包（仅扣减冻结金额 freezePrice，balance 在冻结时已扣、保持不变），并更新充值记录的退款状态为 SUCCESS、退款时间、退款总额 / 退款支付金额 / 退款赠送金额；
-4. 退款失败：调用 `unfreezePrice` 解冻余额（解冻失败抛 WALLET_FREEZE_PRICE_NOT_ENOUGH），退款状态置为 FAILURE；
-5. 通过 `updateByIdAndRefunded`（条件退款状态为 WAITING）将上述退款字段更新到充值记录。
+2. 绑定校验：回调的 payRefundId 必须与充值记录绑定的 payRefundId 一致，否则抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_ORDER_ID_ERROR（防止其它支付应用或历史退款单串单）；
+3. 幂等返回：若充值记录已是退款终态（SUCCESS / FAILURE）且 payRefundId 相同，说明是重复回调，直接返回；
+4. `validateWalletRechargeCanRefunded` 校验支付退款单：退款单不存在抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_NOT_FOUND；退款金额与充值支付金额不一致抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_PRICE_NOT_MATCH；商户退款单号不是 `{充值id}-refund` 抛 WALLET_RECHARGE_REFUND_FAIL_REFUND_ORDER_ID_ERROR；
+5. 按 payRefund 状态构建更新对象：退款成功 → 退款状态置为 SUCCESS 并记录退款时间、退款总额 / 退款支付金额 / 退款赠送金额；退款失败 → 退款状态置为 FAILURE；**退款未结束（非成功且非失败，如 WAITING）→ 直接返回**，既不更新充值记录退款状态，也不操作钱包；
+6. 通过 `updateByIdAndRefunded`（条件 refundStatus = WAITING 的乐观锁）更新充值记录退款字段；若更新数为 0，说明已被并发回调处理，直接返回；
+7. 只有抢到更新的这一次调用，才在**同一事务内**操作钱包：退款成功 → `reduceWalletBalance(RECHARGE_REFUND)` 扣减冻结金额（balance 在冻结时已扣，保持不变）；退款失败 → `unfreezePrice` 解冻余额（解冻失败抛 WALLET_FREEZE_PRICE_NOT_ENOUGH）。钱包操作失败会回滚第 6 步的退款字段更新。
 
 **错误码**:
 
@@ -333,7 +336,7 @@
 
 ---
 
-## 4. 钱包余额明细（PayWalletTransactionController）
+## 4. 钱包余额明细（PayWalletTransactionController / AppPayWalletTransactionController）
 
 ### 4.1 获得钱包流水分页
 
@@ -367,3 +370,30 @@
 1. 当 walletId 为空且 userId、userType 均非空时，调用 `getOrCreateWallet` 查询（必要时创建）该用户钱包，并将其编号回填到查询条件；
 2. 由 PayWalletTransactionMapper 按 walletId 分页查询流水记录；
 3. 转换为 PayWalletTransactionRespVO 分页结果返回。
+
+### 4.2 获得钱包流水统计（用户 APP）
+
+- **路径**: GET /pay/wallet-transaction/get-summary
+- **权限**: 已认证（用户 APP 端 `AppPayWalletTransactionController`，按当前登录用户统计）
+- **说明**: 统计当前会员钱包在指定时间段内的累计支出与累计收入
+
+**请求参数**（Query 参数）:
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| createTime | LocalDateTime[] | 是 | @DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 统计时间段（起止） |
+
+**响应**: CommonResult&lt;AppPayWalletTransactionSummaryRespVO&gt;
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| totalExpense | Integer | 累计支出，单位分，**正数**（支出流水 price 为负，汇总时按 `SUM(-price)` 取反） |
+| totalIncome | Integer | 累计收入，单位分，正数（收入流水 price 为正，按 `SUM(price)` 汇总） |
+
+**业务逻辑**:
+1. 调用 `getOrCreateWallet(getLoginUserId(), MEMBER)` 获取（必要时创建）当前用户钱包；
+2. `selectPriceSum(walletId, TYPE_EXPENSE, createTime)` 统计支出：只汇总 `price < 0` 的流水，并使用 `SUM(-price)` 取反，返回**正值**，与 `pay_wallet.total_expense` 的正值语义一致；
+3. `selectPriceSum(walletId, TYPE_INCOME, createTime)` 统计收入：只汇总 `price > 0` 的流水，使用 `SUM(price)` 汇总，同样为正值；
+4. 返回 totalExpense + totalIncome。
+
+> 注意：`totalExpense` 与 `totalIncome` 均为正数，前端不要再次取反或按负数展示；其它调用方若直接复用 `selectPriceSum` 也要注意支出类型已内置取反逻辑。

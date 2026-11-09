@@ -183,5 +183,6 @@
 3. **批量调度**（`executeNotify()`）：查询所有到达 nextNotifyTime 的待通知任务，提交到专用线程池并发执行，用 CountDownLatch 等待完成（总超时 120 秒，每秒打印一次剩余任务数）。
 4. **加锁防并发**（`executeNotify(task)`）：以 Redis 分布式锁包裹，并通过比对 notifyTimes 与数据库值，避免同一任务被并发重复通知。
 5. **发起 HTTP 回调**（`executeNotifyInvoke`）：按任务类型组装 PayOrderNotifyReqDTO / PayRefundNotifyReqDTO / PayTransferNotifyReqDTO 作为请求体，携带租户请求头，POST 到任务的 notifyUrl（超时 120 秒），将响应解析为 CommonResult。
-6. **处理结果**（`processNotifyResult`）：回调返回 success 则任务置为 SUCCESS；失败时若已达最大次数（9 次）置为 FAILURE，否则按 NOTIFY_FREQUENCY（15s/15s/30s/180s/1800s/1800s/1800s/3600s）设置 nextNotifyTime 并置为 REQUEST_SUCCESS（响应失败）或 REQUEST_FAILURE（请求异常）状态等待重试。
+6. **处理结果**（`processNotifyResult`）：回调返回 success 则任务置为 SUCCESS；失败时按「首次 + 8 个重试间隔 = 共 9 次」的语义处理——第 N 次失败使用 `NOTIFY_FREQUENCY[notifyTimes - 1]` 对应的第 N 个间隔（下标从 0 开始，因此第 1 次失败取第 0 个间隔 15s）设置 nextNotifyTime，并置为 REQUEST_SUCCESS（响应失败）或 REQUEST_FAILURE（请求异常）状态等待重试；只有第 9 次仍失败（`notifyTimes >= NOTIFY_FREQUENCY.length + 1`）才置为 FAILURE。注意失败上限与间隔下标的边界，改错会重现「少通知一次 / 间隔整体偏移」的缺陷。
 7. **记录日志**：每次执行均插入一条 `pay_notify_log`，记录通知次数、状态与响应内容（异常时记录根因消息），可在 2.1 明细接口中查看。
+8. **业务侧回调的绑定校验**：通知请求体只携带业务单号与支付侧单号（支付单：`merchantOrderId` + `payOrderId`；退款单：`merchantOrderId` + `merchantRefundId` + `payRefundId`；转账单：`merchantTransferId` + `payTransferId`）。业务方处理回调时，除了校验自身单据状态，还必须校验「回调单号 = 业务单据已绑定的单号」，否则其它支付应用中「相同商户订单号 + 相同金额」的支付单可能串单。pay 模块内的钱包充值（`/pay/wallet-recharge/update-paid`、`/pay/wallet-recharge/update-refunded`）与示例模块（`/pay/demo-order/update-paid`、`/pay/demo-withdraw/update-transferred`）均已按此约定实现。

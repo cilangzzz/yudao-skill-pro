@@ -1177,4 +1177,4 @@ ProductStatisticsDO（按天+spuId 汇总 product_spu 的浏览/收藏/加购/�
 | trade_statistics | TradeStatisticsDO | 交易统计（天维度） |
 | product_statistics | ProductStatisticsDO | 商品统计（天+SPU 维度） |
 
-> 备注：App 端另有 32 个 App*Controller（购物车、分销等约 99 个端点）共用上述数据表，不引入额外表；trade 子模块的 `controller/admin/base` 与 statistics 子模块的 `controller/admin/common` 目录仅含共享 VO，无对应数据表。
+> 备注：App 端另有 33 个 App*Controller（购物车、分销等 99 个端点）共用上述数据表，不引入额外表；trade 子模块的 `controller/admin/base` 与 statistics 子模块的 `controller/admin/common` 目录仅含共享 VO，无对应数据表。

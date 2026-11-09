@@ -143,6 +143,8 @@ public void updateCustomer(CrmCustomerSaveReqVO updateReqVO)
 public void deleteCustomer(Long id)
 ```
 
+负责人转移统一走 `CrmPermissionService#transferPermission`（客户/线索/联系人/商机/合同共用）：操作人须为数据 OWNER 或 CRM 管理员；`oldOwnerPermissionLevel` 只能是 null（移除）、只读(2)、读写(3)，传负责人(1) 抛 `1_020_007_010`；新负责人已在团队时直接提升为 OWNER，不重复插入。提交合同/回款审批等写操作需 `level = WRITE`（只读成员会被 `1_020_007_001` 拦截）。
+
 ### 异常处理
 
 错误码前缀为 `1-020-xxx-xxx`，典型错误码：
@@ -151,7 +153,10 @@ public void deleteCustomer(Long id)
 |--------|----------|--------|
 | 1_020_006_000 | 客户不存在 | CUSTOMER_NOT_EXISTS |
 | 1_020_002_000 | 商机不存在 | BUSINESS_NOT_EXISTS |
+| 1_020_007_000 | 数据权限不存在 | CRM_PERMISSION_NOT_EXISTS |
 | 1_020_007_001 | {}操作失败，原因：没有权限 | CRM_PERMISSION_DENIED |
+| 1_020_007_003 | {}操作失败，原因：转移对象已经是该负责人 | CRM_PERMISSION_MODEL_TRANSFER_FAIL_OWNER_USER_EXISTS |
+| 1_020_007_010 | {}操作失败，原因：老负责人的权限级别只能是只读或读写 | CRM_PERMISSION_MODEL_TRANSFER_FAIL_OLD_OWNER_PERMISSION_LEVEL_ERROR |
 
 ```java
 // 抛出业务异常
@@ -177,7 +182,7 @@ throw exception(CUSTOMER_OWNER_EXISTS, customer.getName());
 
 ### 自定义商机阶段
 
-1. **创建商机状态组**：通过 CrmBusinessStatusService.createBusinessStatusType() 创建新的状态组
+1. **创建商机状态组**：通过 CrmBusinessStatusService#createBusinessStatus() 创建新的状态组（请求 VO 的 statuses 列表会随状态组一并插入，组内各阶段 sort 由服务端按顺序自动设置）
 2. **添加状态阶段**：为状态组添加多个状态，设置赢单率和排序
 3. **关联部门**：设置状态组适用的部门列表
 4. **使用状态组**：创建商机时选择对应的状态组
@@ -187,16 +192,47 @@ throw exception(CUSTOMER_OWNER_EXISTS, customer.getName());
 1. **修改字典数据**：在 CRM_CUSTOMER_INDUSTRY 字典中添加新的行业类型
 2. **前端适配**：前端页面会自动读取字典数据显示下拉选项
 
+### 新增统计 SQL（多数据库兼容）
+
+CRM 统计 SQL 位于 `src/main/resources/mapper/statistics/*.xml` 与 `src/main/resources/mapper/permission/CrmOwnerRecordMapper.xml`，已全面改用框架 `cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils` 生成方言片段（通过 `${@...SqlDialectUtils@方法('列名')}` 调用）：
+
+| 原 MySQL 写法 | 替代方式 |
+|--------------|----------|
+| `DATE_FORMAT(col, '%Y-%m-%d')` | `SqlDialectUtils.formatDate('col')` |
+| `DATE_FORMAT(col, '%Y%m')` | `SqlDialectUtils.formatYearMonth('col')` |
+| `MONTH(col)` / `YEAR(col)` | `SqlDialectUtils.month('col')` / `SqlDialectUtils.year('col')` |
+| `TIMESTAMPDIFF + TRUNCATE`（成交周期） | `SqlDialectUtils.customerDealCycle('begin', 'end')` |
+| `FIND_IN_SET(valueCol, listCol)` | `SqlDialectUtils.findInSetColumn('valueCol', 'listCol')` |
+| `IFNULL(x, y)` | `COALESCE(x, y)` |
+| `SUM(IF(cond, 1, 0))` | `SUM(CASE WHEN cond THEN 1 ELSE 0 END)` |
+
+约定：
+
+- `GROUP BY` 必须使用真实列名，不能复用 SELECT 别名，且覆盖所有非聚合列（如按产品分组用 `GROUP BY product.id, product.name`）；
+- 表别名不加 `AS`（`FROM tbl alias` / `JOIN tbl alias`），兼容更多数据库；
+- 布尔列聚合使用 `SUM(CASE WHEN deal_status = #{trueValue} THEN 1 WHEN deal_status IS NULL THEN NULL ELSE 0 END)`，兼容 PostgreSQL 原生 boolean；
+- 新增统计 SQL 禁止再手写 `DATE_FORMAT/IFNULL/FIND_IN_SET/TIMESTAMPDIFF/LIMIT` 等 MySQL 专有写法。
+
+### 单条配置查询
+
+`crm_contract_config`、`crm_customer_pool_config` 等「只取一条」的配置查询使用 `selectFirstOne` 并显式排序（如 `orderByAsc(id)`），不要用 `selectOne`：多行脏数据时 `selectOne` 会抛 `TooManyResultsException`。`selectFirstOne` 走 MyBatis-Plus 分页插件生成方言化行数限制，SQL Server 要求 ORDER BY，故必须显式排序。
+
+### 操作日志模板变量
+
+`@LogRecord` 的 success 模板中引用的每个变量都必须在方法内通过 `LogRecordContext.putVariable(...)` 放入上下文，否则日志求值阶段抛 `EL1007E`（数据已落库但接口报错、审计留痕缺失）。删除类操作尤其容易遗漏，参考 `CrmProductServiceImpl#deleteProduct` 的 `putVariable("product", product)`。
+
 ### 最佳实践
 
 | 实践 | 说明 |
 |------|------|
-| 数据权限校验 | 所有涉及数据操作的方法都必须添加 @CrmPermission 注解，确保数据安全 |
-| 操作日志记录 | 关键业务操作（创建、更新、删除、转移）使用 @LogRecord 记录操作日志 |
+| 数据权限校验 | 所有涉及数据操作的方法都必须添加 @CrmPermission 注解，确保数据安全；提交审批类写操作使用 WRITE 级别 |
+| 操作日志记录 | 关键业务操作（创建、更新、删除、转移）使用 @LogRecord 记录操作日志，并确保模板变量已 putVariable |
 | 事务管理 | 涉及多表操作的方法添加 @Transactional 注解，确保数据一致性 |
 | 参数校验 | VO 类使用 @Valid 注解进行参数校验，Service 层使用 @Validated |
 | 公海池机制 | 客户放入公海时，需要同时更新联系人的负责人为空 |
 | 客户转移 | 客户转移时，可选择同时转移联系人、商机、合同 |
+| 统计 SQL | 使用 SqlDialectUtils 生成方言片段，禁止手写 MySQL 专有函数；GROUP BY 用真实列名 |
+| 配置查询 | 只取一条的配置使用 selectFirstOne + 显式排序，避免多行脏数据抛异常 |
 
 ## 模块依赖
 
@@ -215,7 +251,7 @@ throw exception(CUSTOMER_OWNER_EXISTS, customer.getName());
 | MyBatis-Plus | 3.x | ORM 框架，提供 CRUD 操作 |
 | Spring Security | 5.x | 权限校验 |
 | Swagger/OpenAPI | 3.x | API 文档生成 |
-| EasyExcel | 3.x | Excel 导入导出 |
+| Apache FESOD（FastExcel） | 2.1.0-incubating（`org.apache.fesod:fesod-sheet`） | Excel 导入导出 |
 | LogRecord | mzt-biz-log | 操作日志记录 |
 
 ## 关键文件

@@ -190,7 +190,7 @@
 | documentId | Long | 文档编号 |
 | shareUserIds | List&lt;Long&gt; | 内部分享成员用户编号列表 |
 | token | String | 外部查看令牌（fastSimpleUUID） |
-| status | Integer | 分享状态（1 开启 / 0 关闭） |
+| status | Integer | 分享状态（CommonStatusEnum：0 开启 / 1 关闭） |
 | createTime | LocalDateTime | 创建时间 |
 | closeUserId | Long | 关闭人用户编号（重新开启时清空） |
 | closeTime | LocalDateTime | 关闭时间（重新开启时清空） |

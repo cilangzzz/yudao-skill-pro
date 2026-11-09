@@ -244,7 +244,7 @@
 ### 1.9 合同转移
 
 - **路径**: PUT /crm/contract/transfer
-- **权限**: crm:contract:update（Service 层另校验合同 OWNER 数据权限）
+- **权限**: crm:contract:update（Service 层另校验合同 OWNER 数据权限；CRM 管理员亦可转移）
 - **说明**: 将合同负责人转移给新负责人，老负责人可保留团队权限。
 
 **请求参数 (CrmContractTransferReqVO)**:
@@ -253,13 +253,13 @@
 |-----|------|------|----------|------|
 | id | Long | 是 | @NotNull | 合同编号 |
 | newOwnerUserId | Long | 是 | @NotNull | 新负责人的用户编号 |
-| oldOwnerPermissionLevel | Integer | 否 | @InEnum(CrmPermissionLevelEnum) | 老负责人加入团队后的权限级别 |
+| oldOwnerPermissionLevel | Integer | 否 | @InEnum(CrmPermissionLevelEnum) | 老负责人保留的权限级别：null 表示移除，只能传只读(2) 或读写(3)，传负责人(1) 报错 |
 
 **响应**: CommonResult&lt;Boolean&gt;
 
 **业务逻辑**:
-1. 校验合同存在（需 OWNER 数据权限）。
-2. 转移数据权限：调用 `crmPermissionService.transferPermission`，新负责人成为 OWNER，老负责人按 `oldOwnerPermissionLevel` 加入团队。
+1. 校验合同存在（需 OWNER 数据权限或 CRM 管理员）。
+2. 转移数据权限：调用 `crmPermissionService.transferPermission`（详见 [api-permission.md](api-permission.md) 第 2 节），新负责人成为 OWNER（已在团队时直接提升），老负责人按 `oldOwnerPermissionLevel` 保留只读/读写或移除。
 3. 更新合同的负责人为新负责人。
 4. 记录转移操作日志。
 
@@ -268,11 +268,15 @@
 | 错误码 | 说明 |
 |-------|------|
 | 1_020_000_000 | 合同不存在 |
+| 1_020_007_000 | 数据权限不存在（该数据缺少负责人权限记录） |
+| 1_020_007_001 | 操作失败，原因：没有权限 |
+| 1_020_007_003 | 操作失败，原因：转移对象已经是该负责人 |
+| 1_020_007_010 | 操作失败，原因：老负责人的权限级别只能是只读或读写 |
 
 ### 1.10 提交合同审批
 
 - **路径**: PUT /crm/contract/submit
-- **权限**: crm:contract:update
+- **权限**: crm:contract:update（Service 层 `@CrmPermission(level = WRITE)`：需本人对合同具备读写(3)或负责人(1)级权限，或其下属具备同等权限，或为 CRM 管理员）
 - **说明**: 将草稿状态的合同提交 BPM 审批流程（流程 Key：`crm-contract-audit`）。
 
 **请求参数**: 无（Query 参数 `id`：Long，必填，合同编号）
@@ -280,10 +284,11 @@
 **响应**: CommonResult&lt;Boolean&gt;
 
 **业务逻辑**:
-1. 校验合同存在，且审批状态必须为未提交（草稿 0），否则抛出 `CONTRACT_SUBMIT_FAIL_NOT_DRAFT`。
-2. 调用 `bpmProcessInstanceApi.createProcessInstance` 创建 BPM 流程实例（流程定义 Key 为 `crm-contract-audit`，businessKey 为合同编号）。
-3. 更新合同的 `processInstanceId`，并将审批状态置为审批中（10）。
-4. 审批结果由 `CrmContractStatusListener` 监听 BPM 流程实例状态事件后回调 `updateContractAuditStatus`：仅审批中（10）的合同可回写结果（否则抛 `CONTRACT_UPDATE_AUDIT_STATUS_FAIL_NOT_PROCESS`），并将 BPM 结果转换为合同审批状态（通过/不通过）。
+1. 数据权限校验：当前用户需对该合同具备 WRITE（读写=3）或 OWNER（负责人=1）级权限（下属具备同等权限亦放行、CRM 管理员直接放行）；只读团队成员、非团队成员会抛 `1_020_007_001`，且不会创建 BPM 流程实例。
+2. 校验合同存在，且审批状态必须为未提交（草稿 0），否则抛出 `CONTRACT_SUBMIT_FAIL_NOT_DRAFT`。
+3. 调用 `bpmProcessInstanceApi.createProcessInstance` 创建 BPM 流程实例（流程定义 Key 为 `crm-contract-audit`，businessKey 为合同编号）。
+4. 更新合同的 `processInstanceId`，并将审批状态置为审批中（10）。
+5. 审批结果由 `CrmContractStatusListener` 监听 BPM 流程实例状态事件后回调 `updateContractAuditStatus`：仅审批中（10）的合同可回写结果（否则抛 `CONTRACT_UPDATE_AUDIT_STATUS_FAIL_NOT_PROCESS`），并将 BPM 结果转换为合同审批状态（通过/不通过）。
 
 **错误码**:
 
@@ -292,6 +297,7 @@
 | 1_020_000_000 | 合同不存在 |
 | 1_020_000_002 | 合同提交审核失败，原因：合同没处在未提交状态 |
 | 1_020_000_003 | 更新合同审核状态失败，原因：合同不是审核中状态 |
+| 1_020_007_001 | 操作失败，原因：没有权限（不具备 WRITE 级数据权限） |
 
 ### 1.11 获得待审核合同数量
 

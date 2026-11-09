@@ -8,8 +8,8 @@
 
 说明：
 
-- `bizType` 对应 `CrmBizTypeEnum`（如 1=线索、2=客户、3=联系人、5=商机、6=合同 等），`bizId` 为对应业务数据编号。
-- `level` 对应 `CrmPermissionLevelEnum`（READ 只读、WRITE 读写、OWNER 负责人）。
+- `bizType` 对应 `CrmBizTypeEnum`（1=线索、2=客户、3=联系人、4=商机、5=合同、6=产品、7=回款、8=回款计划），`bizId` 为对应业务数据编号。
+- `level` 对应 `CrmPermissionLevelEnum`（OWNER 负责人=1、READ 只读=2、WRITE 读写=3；权限强弱 OWNER > WRITE > READ）。
 - 本控制器端点均未使用 `@PreAuthorize` 菜单权限，仅要求登录；数据级权限通过 CRM 专属 `@CrmPermission` 注解（AOP 切面）在业务数据维度校验。
 
 ## 1. 数据权限管理 (CrmPermissionController)
@@ -162,3 +162,51 @@
 4. 逐条拼接返回结果：补充用户昵称、部门名称、岗位名称集合。
 
 **错误码**: 无专属错误码
+
+---
+
+## 2. 负责人转移（共享实现 `CrmPermissionService#transferPermission`）
+
+> 本控制器没有独立的 transfer 端点；「客户 / 线索 / 联系人 / 商机 / 合同」5 个业务转移端点（`PUT /crm/{customer|clue|contact|business|contract}/transfer`）在 Service 层统一调用 `CrmPermissionServiceImpl#transferPermission(CrmPermissionTransferReqBO)` 完成负责人变更。以下语义对这 5 个端点共同生效。
+
+**请求参数 (CrmPermissionTransferReqBO，内部 BO)**:
+
+| 字段 | 类型 | 必填 | 说明 |
+|-----|------|------|------|
+| userId | Long | 是 | 操作人（当前登录用户） |
+| bizType | Integer | 是 | CRM 类型 |
+| bizId | Long | 是 | CRM 类型数据编号 |
+| newOwnerUserId | Long | 是 | 新负责人用户编号 |
+| oldOwnerPermissionLevel | Integer | 否 | 老负责人保留的权限级别：null 表示移除，只读(2) 或读写(3)；传负责人(1) 或非法值报错 |
+
+**业务逻辑**:
+
+1. 按 `(bizType, bizId)` 查询该数据的全量权限记录。
+2. 校验操作人：操作人是该数据的 OWNER，或拥有 CRM 管理员角色（`crm_admin`），否则抛出 `1_020_007_001`。
+3. 校验 `oldOwnerPermissionLevel`：只能为 null（移除）、只读(2)、读写(3)；传负责人(1) 或任何其它值抛出 `1_020_007_010`（避免出现两个负责人）。该校验在写入任何权限之前执行。
+4. 定位「老负责人」权限记录：
+   - 操作人是负责人时，取操作人自己的权限记录；
+   - 操作人是 CRM 管理员（本人不是负责人）时，取该数据实际 OWNER 级别的权限记录，而非管理员自己的团队权限。
+   - 若该数据不存在 OWNER 记录（数据异常或权限被误删），抛出 `1_020_007_000`，此时尚未写入任何权限，不会产生部分写入。
+5. 校验转移对象不是当前老负责人，否则抛出 `1_020_007_003`；校验新负责人用户存在。
+6. 修改新负责人权限：新负责人已有团队权限记录时，直接将其提升为 OWNER（`updateById`），不重复插入；否则新增一条 OWNER 记录。
+7. 修改老负责人权限：`oldOwnerPermissionLevel` 非空时更新为该级别，为空时删除该权限记录。
+
+**错误码**:
+
+| 错误码 | 说明 |
+|-------|------|
+| 1_020_007_001 | {}操作失败，原因：没有权限（操作人既不是负责人也不是 CRM 管理员） |
+| 1_020_007_003 | {}操作失败，原因：转移对象已经是该负责人 |
+| 1_020_007_000 | 数据权限不存在（该数据缺少 OWNER 权限记录） |
+| 1_020_007_010 | {}操作失败，原因：老负责人的权限级别只能是只读或读写 |
+
+**涉及端点**:
+
+| 端点 | 说明 |
+|------|------|
+| PUT /crm/customer/transfer | 客户转移（可级联联系人/商机/合同） |
+| PUT /crm/clue/transfer | 线索转移 |
+| PUT /crm/contact/transfer | 联系人转移 |
+| PUT /crm/business/transfer | 商机转移 |
+| PUT /crm/contract/transfer | 合同转移 |

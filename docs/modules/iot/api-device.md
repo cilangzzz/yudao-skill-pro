@@ -1,6 +1,6 @@
 # 设备管理接口 (IotDeviceController)
 
-> IoT 设备全生命周期管理：设备 CRUD、网关拓扑绑定、分组管理、Modbus 连接与点位配置、设备属性（最新值/历史值）、设备消息查询与模拟发送。
+> IoT 设备全生命周期管理：设备 CRUD、网关拓扑绑定、分组管理、Modbus 连接与点位配置、设备属性（最新值/历史值）、设备消息查询与模拟发送。设备影子（/iot/device/shadow）单独见 [api-shadow.md](api-shadow.md)。
 
 ## 接口路径前缀
 
@@ -638,10 +638,11 @@ Excel 行 (IotDeviceImportExcelVO):
 | functionCode | Integer | 是 | @NotNull | Modbus 功能码 |
 | registerAddress | Integer | 是 | @NotNull | 寄存器起始地址 |
 | registerCount | Integer | 否 | - | 寄存器数量 |
+| bitIndex | Integer | 否 | @Min(0)/@Max(15) | 位索引（0-15，0 为最低位；仅 FC03/FC04、rawDataType=BOOLEAN、registerCount=1 时可配；为空表示整个寄存器） |
 | byteOrder | String | 是 | @NotEmpty | 字节序（如 AB） |
 | rawDataType | String | 是 | @NotEmpty | 原始数据类型（如 INT16） |
 | scale | BigDecimal | 否 | - | 缩放因子 |
-| pollInterval | Integer | 否 | - | 轮询间隔（毫秒） |
+| pollInterval | Integer | 否 | @Min(100) | 轮询间隔（毫秒） |
 | status | Integer | 是 | @NotNull | 状态 |
 
 **响应**: CommonResult&lt;Long&gt; — 点位编号
@@ -650,7 +651,8 @@ Excel 行 (IotDeviceImportExcelVO):
 1. 校验设备存在。
 2. 校验物模型属性存在。
 3. 校验同一设备下该 identifier 的点位唯一。
-4. 插入点位（identifier/name 取自物模型属性）。
+4. 校验位索引配置：bitIndex 非空时，功能码必须是 FC03/FC04、rawDataType 必须是 BOOLEAN、registerCount 必须为 1，否则抛 DEVICE_MODBUS_POINT_BIT_INDEX_INVALID。
+5. 插入点位（identifier/name 取自物模型属性）。
 
 **错误码**:
 
@@ -659,6 +661,7 @@ Excel 行 (IotDeviceImportExcelVO):
 | 1_050_003_000 | 设备不存在 |
 | 1_050_002_000 | 产品物模型不存在 |
 | 1_050_007_001 | 设备 Modbus 点位配置已存在 |
+| 1_050_007_002 | 位索引仅支持功能码 03/04、数据类型 BOOLEAN、寄存器数量为 1 的点位 |
 
 ### 4.2 更新设备 Modbus 点位配置
 - **路径**: PUT /iot/device-modbus-point/update
@@ -673,7 +676,8 @@ Excel 行 (IotDeviceImportExcelVO):
 1. 校验点位存在。
 2. 校验设备存在、物模型属性存在。
 3. 校验同一设备下 identifier 唯一（排除自身）。
-4. 更新点位（identifier/name 同步取自物模型属性）。
+4. 校验位索引配置（同 4.1；bitIndex 为空时也会写入，用于清空已配置的位索引）。
+5. 更新点位（identifier/name 同步取自物模型属性）。
 
 **错误码**:
 
@@ -683,6 +687,7 @@ Excel 行 (IotDeviceImportExcelVO):
 | 1_050_003_000 | 设备不存在 |
 | 1_050_002_000 | 产品物模型不存在 |
 | 1_050_007_001 | 设备 Modbus 点位配置已存在 |
+| 1_050_007_002 | 位索引仅支持功能码 03/04、数据类型 BOOLEAN、寄存器数量为 1 的点位 |
 
 ### 4.3 删除设备 Modbus 点位配置
 - **路径**: DELETE /iot/device-modbus-point/delete
@@ -722,6 +727,7 @@ Excel 行 (IotDeviceImportExcelVO):
 | functionCode | Integer | Modbus 功能码 |
 | registerAddress | Integer | 寄存器起始地址 |
 | registerCount | Integer | 寄存器数量 |
+| bitIndex | Integer | 位索引（0-15，0 为最低位；为空表示整个寄存器） |
 | byteOrder | String | 字节序 |
 | rawDataType | String | 原始数据类型 |
 | scale | BigDecimal | 缩放因子 |
@@ -780,7 +786,7 @@ Excel 行 (IotDeviceImportExcelVO):
 ### 5.2 获取设备属性历史数据列表
 - **路径**: GET /iot/device/property/history-list
 - **权限**: iot:device:property-query
-- **说明**: 从 TDengine 查询指定属性的历史数据列表。
+- **说明**: 从时序库（TDengine / IoTDB，由 `yudao.iot.storage.type` 决定）查询指定属性的历史数据列表。
 
 **请求参数 (IotDevicePropertyHistoryListReqVO)**:
 
@@ -799,7 +805,7 @@ Excel 行 (IotDeviceImportExcelVO):
 | updateTime | Long | 更新时间（毫秒时间戳） |
 
 **业务逻辑**:
-1. 从 TDengine 按设备分表查询指定属性在时间范围内的历史数据。
+1. 从时序库按设备分表查询指定属性在时间范围内的历史数据。
 2. 若对应表不存在（Table does not exist），返回空列表。
 
 ---
@@ -809,7 +815,7 @@ Excel 行 (IotDeviceImportExcelVO):
 ### 6.1 获得设备消息分页
 - **路径**: GET /iot/device/message/page
 - **权限**: iot:device:message-query
-- **说明**: 从 TDengine 分页查询设备上下行消息日志。
+- **说明**: 从时序库（TDengine / IoTDB）分页查询设备上下行消息日志。
 
 **请求参数 (IotDeviceMessagePageReqVO)**:
 
@@ -822,6 +828,7 @@ Excel 行 (IotDeviceImportExcelVO):
 | upstream | Boolean | 否 | - | 是否上行 |
 | reply | Boolean | 否 | - | 是否回复 |
 | identifier | String | 否 | - | 标识符 |
+| raw | Boolean | 否 | - | 是否有原始帧：true 只看 raw 非空的消息，false 只看没有原始帧的消息 |
 | times | LocalDateTime[] | 否 | @Size(min=2, max=2)、@DateTimeFormat(yyyy-MM-dd HH:mm:ss) | 时间范围 |
 
 **响应**: CommonResult&lt;PageResult&lt;IotDeviceMessageRespVO&gt;&gt;
@@ -842,10 +849,12 @@ Excel 行 (IotDeviceImportExcelVO):
 | data | Object | 响应结果 |
 | code | Integer | 响应错误码 |
 | msg | String | 响应提示 |
+| raw | String | 与设备实际收发的原始字节（Base64）；为空表示没有原始帧 |
 
 **业务逻辑**:
-1. 从 TDengine 超级表按条件分页查询消息。
-2. 表不存在（Table does not exist）时返回空分页。
+1. 校验设备存在（MySQL 租户插件生效，先确认设备属于当前租户；时序库查询本身只按 deviceId 限定）。
+2. 从时序库超级表按条件分页查询消息（raw 过滤按 raw 是否为 NULL 处理）。
+3. 表不存在（Table does not exist）时返回空分页。
 
 ### 6.2 获得设备消息对分页
 - **路径**: GET /iot/device/message/pair-page
@@ -868,24 +877,25 @@ Excel 行 (IotDeviceImportExcelVO):
 
 ### 6.3 发送消息
 - **路径**: POST /iot/device/message/send
-- **权限**: iot:device:message-send
-- **说明**: 向设备发送消息（可用于设备模拟，如属性上报、事件上报、状态变更）。
+- **权限**: iot:device:message-send；透传下发（thing.raw.push）额外要求 iot:device:message-raw-send
+- **说明**: 向设备发送消息（可用于设备模拟，如属性上报、事件上报、状态变更）；也支持原始字节透传下发。
 
 **请求参数 (IotDeviceMessageSendReqVO)**:
 
 | 字段 | 类型 | 必填 | 校验规则 | 说明 |
 |-----|------|------|---------|------|
 | method | String | 是 | @NotEmpty、@InEnum(IotDeviceMessageMethodEnum) | 请求方法 |
-| params | Object | 否 | - | 请求参数（如属性上报的 properties） |
+| params | Object | 否 | - | 请求参数（如属性上报的 properties；透传下发时为 {"payload": Base64}） |
 | deviceId | Long | 是 | @NotNull | 设备编号 |
 
 **响应**: CommonResult&lt;Boolean&gt;
 
 **业务逻辑**:
 1. 校验设备存在。
-2. 补充消息字段：生成 messageId、reportTime、绑定 deviceId/tenantId，requestId 缺省取 messageId。
-3. 上行消息：直接发送到 MQ（由消费者处理并记录日志）。
-4. 下行消息：需要 serverId 路由（从 Redis 获取设备当前连接的网关节点），不存在时抛 DEVICE_DOWNSTREAM_FAILED_SERVER_ID_NULL；存在则发送到对应网关，并异步记录消息日志。
+2. 透传校验：method 为 `thing.raw.post` 时直接抛 DEVICE_MESSAGE_RAW_METHOD_RESERVED（透传上报只能由网关创建）；method 为 `thing.raw.push` 时，校验产品协议类型（HTTP、CoAP 不支持透传下发），并按协议规则校验 params.payload（Base64，通用协议 1~4096 字节；Modbus 必须是合法的请求 PDU，5~253 字节）。
+3. 补充消息字段：生成 messageId、reportTime、绑定 deviceId/tenantId，requestId 缺省取 messageId；透传消息把 payload 写入 raw 并清空 params。
+4. 上行消息：直接发送到 MQ（由消费者处理并记录日志）。
+5. 下行消息：需要 serverId 路由（从 Redis 获取设备当前连接的网关节点），不存在时抛 DEVICE_DOWNSTREAM_FAILED_SERVER_ID_NULL；存在则发送到对应网关，并异步记录消息日志。
 
 **错误码**:
 
@@ -893,3 +903,7 @@ Excel 行 (IotDeviceImportExcelVO):
 |-------|------|
 | 1_050_003_000 | 设备不存在 |
 | 1_050_003_007 | 下行设备消息失败，原因：设备未连接网关 |
+| 1_050_003_400 | 透传载荷不合法（含 Base64 非法、长度越界、Modbus PDU 不合法） |
+| 1_050_003_401 | 协议（HTTP/CoAP）不支持透传下发 |
+| 1_050_003_402 | 透传上报只能由网关创建 |
+| 403 | 无 iot:device:message-raw-send 权限时，透传下发被拒绝 |

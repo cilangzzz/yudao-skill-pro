@@ -36,13 +36,13 @@ Serializable + TransPojo（Easy-Trans 数据翻译接口）
 
 - ai1 模块所有 DO 均继承 TenantBaseDO，11 张业务表 100% 带 `tenant_id` 字段，全部走多租户隔离（与旧 ai 模块全部继承 BaseDO、平台级共享的设计相反）。
 - 配置类数据（Provider / Model / MCP / SKILL）与用户数据（Agent / 知识库 / 会话 / 记忆）均在租户内隔离；用户归属类数据（会话、记忆）另通过 `userId` 字段关联到管理后台用户。
-- BaseDO 的四个审计字段由 MyBatis-Plus 的 `MetaObjectHandler` 自动填充，业务代码不要手工赋值；`deleted` 走逻辑删除，统计 SQL（如 `Ai1HomeMapper`）中显式使用 `deleted = FALSE` 过滤。
+- BaseDO 的四个审计字段由 MyBatis-Plus 的 `MetaObjectHandler` 自动填充，业务代码不要手工赋值；`deleted` 走逻辑删除，统计 SQL（如 `Ai1HomeMapper`）中显式使用 `deleted = 0` 过滤（用 0/1 而非布尔字面量，兼容 Oracle / SQL Server）。
 - 所有 DO 均标注 `@KeySequence`（如 `ai1_agent_seq`），供 Oracle / PostgreSQL / Kingbase / DB2 / H2 主键自增使用，MySQL 不受影响。
 - Redis 侧的任务队列 / 结果流 KEY 不带 tenantId，由任务字段 tenantId 或调用前按租户、用户校验归属来还原上下文（见「其他持久化结构」一节）。
 
 ## 2. 核心 DO 实体
 
-> 索引说明（本节通用）：仓库 `sql/` 目录没有任何 ai1 模块的建表语句，模块自身也没有 `src/main/resources` 目录与 Mapper XML，下文表结构与列名由 DO 源码（MyBatis-Plus 驼峰转下划线映射）反推。DO 代码中只显式声明了主键 `@TableId`（非 MySQL 数据库通过 `@KeySequence` 走对应序列，如 `ai1_agent_seq`），因此「索引」一栏仅列出代码中可确认的约束，不编造数据库二级索引。
+> 索引说明（本节通用）：仓库 `sql/` 目录没有任何 ai1 模块的建表语句，模块自身也没有 `src/main/resources` 目录与 Mapper XML，下文表结构与列名由 DO 源码（MyBatis-Plus 驼峰转下划线映射）反推（测试模块另有 `src/test/resources/sql/create_tables.sql` 的 H2 建表脚本，仅用于单元测试，非生产 DDL）。DO 代码中只显式声明了主键 `@TableId`（非 MySQL 数据库通过 `@KeySequence` 走对应序列，如 `ai1_agent_seq`），因此「索引」一栏仅列出代码中可确认的约束，不编造数据库二级索引。
 
 ### 2.1 模型配置聚合（模型接入的基石）
 
@@ -106,7 +106,7 @@ AI1 Agent（智能体）：名称 / 介绍 + 对话模型（providerId + modelId
 
 #### Ai1KnowledgeBaseDO (ai1_knowledge_base)
 
-AI1 知识库：分片参数（chunkSize / chunkOverlap）+ 检索参数（topK）+ 嵌入模型配置（embeddingProviderId + embeddingModelId）。向量本身存储在 Milvus 集合 `{collectionPrefix}{id}`（`yudao.ai1.milvus.collection-prefix`，默认 `knowledge_base_{id}`），按知识库隔离，不落 MySQL。
+AI1 知识库：分片参数（chunkSize / chunkOverlap）+ 检索参数（topK）+ 嵌入模型配置（embeddingProviderId + embeddingModelId）。向量本身存储在 Milvus 集合 `{collectionPrefix}{id}`（`yudao.ai1.milvus.collection-prefix`，默认前缀 `knowledge_base_`，即默认集合名 `knowledge_base_{id}`），按知识库隔离，不落 MySQL。
 
 | 字段 | 类型 | 数据库列 | 说明 |
 |------|------|---------|------|
@@ -298,7 +298,7 @@ ai1_skill ──1:N(skillId)──> ai1_skill_file ──parentId 表内自关�
 | ai1_skill | Ai1SkillDO | AI1 SKILL（技能定义，name 兼作物化目录名） |
 | ai1_skill_file | Ai1SkillFileDO | AI1 SKILL 内容文件（parentId 目录树，物化到本地技能目录） |
 
-> 补充：`Ai1HomeMapper`（`dal/mysql/home`）是唯一无 DO 对应表的 Mapper，用 `@Select` 聚合统计 ai1_agent / ai1_skill / ai1_mcp / ai1_model 四表 count、ai1_session_message 按天与按 Agent（INNER JOIN ai1_session，已删除会话不计入）统计；`CAST(create_time AS DATE)` 兼容 MySQL 与 H2。
+> 补充：`Ai1HomeMapper`（`dal/mysql/home`）是唯一无 DO 对应表的 Mapper，用 `@Select` 聚合统计 ai1_agent / ai1_skill / ai1_mcp / ai1_model 四表 count、ai1_session_message 按天与按 Agent（INNER JOIN ai1_session，已删除会话不计入）统计；逻辑删除条件写 `deleted = 0`，按天统计的日期表达式经 `SqlDialectUtils.castDateText` 按方言生成（MySQL / H2 为 `CAST(create_time AS DATE)`，PostgreSQL / Oracle 为 `TO_CHAR(...)`，SQL Server 为 `CONVERT(...)`），汇总查询用 `SqlDialectUtils.fromDual()` 为 Oracle 补 `FROM DUAL`。
 
 ## 5. 其他持久化结构
 

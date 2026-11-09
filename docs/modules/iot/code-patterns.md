@@ -148,6 +148,24 @@ public void updateDeviceProperty(String productKey, String deviceName, String id
 }
 ```
 
+#### 框架能力：事务内数据访问异常重抛（`JdbcUtils.throwIfDataAccessExceptionInTransaction`）
+
+数据流转/场景联动的规则执行是「逐条规则 try-catch、失败记日志继续」的模式，但当规则执行发生在设备状态更新的事务内（见 `IotDeviceMessageServiceImpl#handleStateUpdateMessage`）时，数据访问异常不能被吞掉，否则事务不会回滚、状态与落库不一致。框架新增 `JdbcUtils.throwIfDataAccessExceptionInTransaction(Throwable)`：当异常是 Spring 的 `DataAccessException` 且当前存在实际事务时重新抛出，交给事务回滚；不在事务中或不是数据访问异常时不做处理，由调用方按原逻辑记日志。
+
+```java
+// IotDataRuleServiceImpl#executeDataRule —— 状态事务内的规则执行入口
+} catch (Exception e) {
+    // 状态事务内，数据访问异常不吞掉，交给事务回滚
+    JdbcUtils.throwIfDataAccessExceptionInTransaction(e);
+    log.error("[executeDataRule][消息({}) 执行数据流转规则异常]", message, e);
+}
+```
+
+适用场景与注意：
+- 所有「catch 后记日志继续」的规则/动作执行代码（`IotDataRuleServiceImpl`、`IotSceneRuleServiceImpl`、`IotAlertTriggerSceneRuleAction` 等场景联动动作实现）都要在 catch 块**第一行**调用该方法，再做日志兜底
+- 只针对 `DataAccessException`（JDBC 等数据访问失败）；业务异常仍按原逻辑处理，不要用它替代业务异常传播
+- 非事务上下文调用它是空操作，不会误抛
+
 ### 协议扩展模式
 
 网关所有协议实现统一实现 `IotProtocol` 接口，接口定义协议实例 ID、服务器 ID、协议类型与生命周期：
@@ -213,15 +231,30 @@ IoT 模块错误码使用 `1_050_XXX_XXX` 前缀（[yudao-module-iot-biz/.../Err
 | `1_050_003_003` | 设备标识已存在 |
 | `1_050_003_100` | 拓扑管理参数无效 |
 | `1_050_003_201` | 产品不是网关子设备类型 |
+| `1_050_003_400` | 透传载荷不合法（Base64 非法、长度越界、Modbus PDU 不合法） |
+| `1_050_003_401` | 协议（HTTP / CoAP）不支持透传下发 |
+| `1_050_003_402` | 透传上报只能由网关创建 |
 | `1_050_004_000` | 产品分类不存在 |
 | `1_050_005_000` | 设备分组不存在 |
 | `1_050_006_000` | 设备 Modbus 连接配置不存在 |
+| `1_050_007_002` | 位索引仅支持功能码 03/04、数据类型 BOOLEAN、寄存器数量为 1 的点位 |
+| `1_050_007_100` | 设备影子未启用 |
+| `1_050_007_101` | 设备影子版本冲突 |
+| `1_050_007_102` | 设备影子属性数超过限制 |
 | `1_050_008_000` | OTA 固件信息不存在 |
+| `1_050_009_000` | 数据解析脚本不能超过 32KB |
+| `1_050_009_001` | 数据解析脚本语法错误 |
+| `1_050_009_002` | 启用数据解析脚本时，脚本内容不能为空 |
+| `1_050_009_003` | 脚本调试繁忙或已熔断 |
 | `1_050_010_000` | IoT 数据流转规则不存在 |
 | `1_050_011_000` | IoT 数据流转目的不存在 |
 | `1_050_012_000` | 场景联动不存在 |
 | `1_050_013_000` | IoT 告警配置不存在 |
 | `1_050_014_000` | IoT 告警记录不存在 |
+
+网关侧错误码位于 `1_051_XXX_XXX` 段（`yudao-module-iot-gateway/.../enums/ErrorCodeConstants.java`），其中 `1_051_003_XXX` 为设备透传与数据解析脚本：`000` 透传方法只能由网关 raw 入口使用、`100` 脚本执行失败、`101` 脚本超时、`102` 脚本繁忙或已熔断、`103` 脚本输出不合法、`105` 当前连接不支持透传下发、`106` 设备不在线或写入失败、`110`~`115` Modbus 超时/异常/PDU 不合法/队列已满/响应不合法/连接断开。
+
+> 设备影子协议（`thing.shadow.update`）回复中使用的业务 code 另见 core 的 `IotDeviceShadowErrorCodeEnum`（400/401/402/404/405/406/408/409/500），与管理后台接口的系统错误码不是同一套。
 
 ### 统一响应
 
@@ -266,12 +299,41 @@ IoT 模块错误码使用 `1_050_XXX_XXX` 前缀（[yudao-module-iot-biz/.../Err
    实现 `IotSceneRuleAction` 接口，定义动作执行逻辑。
 3. **注册动作执行器** — 在 Spring 容器中注册为 Bean，自动被规则引擎发现和调用。
 
+### 扩展时序存储后端
+
+设备消息与设备属性历史统一通过 `dal/storage` 下的 DAO 接口访问，TDengine 与 IoTDB 是同一接口的两套实现：
+
+1. **实现 DAO 接口** — 文件：`yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/storage/IotDeviceMessageDAO.java`、`IotDevicePropertyDAO.java`
+2. **编写后端实现** — 目录：`dal/tdengine`（`IotDeviceMessageTDengineDAO`、`IotDevicePropertyTDengineDAO`）或 `dal/iotdb`（`IotDeviceMessageIoTDBDAO`、`IotDevicePropertyIoTDBDAO`），并用 `@ConditionalOnProperty(prefix = "yudao.iot.storage", name = "type", havingValue = "tdengine" | "iotdb")` 装配
+3. **实现初始化** — `initialize()` 由 `framework/storage/config/IotStorageInitRunner` 在启动时调用；初始化失败直接终止进程，避免带着半成品表结构运行
+4. **复用字段校验** — `framework/storage/core/util/IotStorageFieldUtils`（属性标识符归一化、保留字段冲突与重复校验），保证两种后端的列名语义一致
+
+### 扩展设备影子
+
+设备影子是内置能力，扩展点集中在四处：
+
+1. **影子记录** — 文件：`dal/dataobject/device/IotDeviceShadowDO.java`（JSON 字段用 `JacksonTypeHandler`，`@KeySequence("iot_device_shadow_seq")`）
+2. **影子读写** — 文件：`service/device/shadow/IotDeviceShadowServiceImpl.java`：DB 为准、Redis 仅读缓存（TTL 60s）、乐观锁重试 3 次、desired/reported 各上限 128 属性、version=-1 表示清空
+3. **管理后台接口** — 文件：`controller/admin/device/IotDeviceShadowController.java`，权限标识 `iot:device:shadow-query` / `iot:device:shadow-update`
+4. **设备端协议** — core 的 `topic/shadow/IotDeviceShadowUpdateReqDTO.java` 与 `IotDeviceMessageMethodEnum.SHADOW_UPDATE`，回复 Topic 为 `thing/shadow/update_reply`
+
+### 产品数据解析脚本（decode / encode）
+
+1. **脚本约定** — 文件：`yudao-module-iot-core/.../core/script/IotScriptUtils.java`：上下文构建（decode/encode）与输出校验（与网关同一份规则，biz 调试与网关行为一致）
+2. **脚本引擎** — 文件：`core/script/IotScriptExecutor.java`（接口）、`core/script/rhino/IotRhinoScriptExecutor.java`（Rhino 实现）、`core/script/rhino/IotScriptBudget.java`（指令与时间预算）、`core/script/rhino/IotScriptRuntime.java`（超时与熔断）
+3. **产品配置** — `iot_product.script_content` / `iot_product.script_enabled`（`IotProductDO`），脚本 UTF-8 不超过 32KB，启用时内容不能为空
+4. **管理后台接口** — `/iot/product/update-script`（只编译校验，不执行用户代码）、`/iot/product/debug-script`（`debug-device` 假设备上下文，同步等待，截止 2000ms）
+5. **网关运行时开关** — `yudao.iot.gateway.script.*`：`enabled`（默认关闭）、`deadline`（2000ms）、`execBudget`（500ms）、`maxInstructions`（1,000,000）、`maxPendingCommandsPerDevice`（256）
+
 ### 最佳实践
 
 - 设备密钥安全性：设备密钥应使用强随机数生成，避免硬编码或简单规则
 - 协议扩展：新协议应继承 `AbstractIotProtocolDownstreamSubscriber`，复用下行消息处理逻辑
-- 消息存储：设备消息使用 TDengine 时序数据库存储，支持高效查询和聚合
-- 设备缓存：频繁访问的设备信息使用 Redis 缓存，减少数据库压力
+- 消息存储：设备消息与属性历史使用时序库（`yudao.iot.storage.type` 选择 TDengine 或 IoTDB），支持高效查询和聚合
+- 设备缓存：频繁访问的设备信息使用 Redis 缓存，减少数据库压力；设备影子的 Redis 只作读缓存，写操作以 DB 为准
+- 设备影子：影子状态变更走乐观锁并保留版本号，重置只清空状态不删除记录，便于设备重新同步
+- 数据解析脚本：脚本视为不可信代码，仅在受控线程池中执行，配合指令预算、超时与熔断；不要把脚本当成安全沙箱
+- 透传下发：透传可直接驱动 Modbus 写操作，必须使用独立权限（`iot:device:message-raw-send`）并在服务端二次校验字节格式
 - 规则引擎：场景规则应设置合理的触发条件，避免频繁触发导致性能问题
 - OTA 升级：大规模升级应分批进行，避免网络拥塞和服务器压力
 - 租户隔离：所有设备操作都应考虑租户隔离，防止越权访问
@@ -282,17 +344,21 @@ IoT 模块错误码使用 `1_050_XXX_XXX` 前缀（[yudao-module-iot-biz/.../Err
 
 | 模块 | API | 用途 |
 |-----|-----|------|
-| yudao-module-system | AdminUserApi | 获取告警接收用户信息 |
+| yudao-module-system | AdminUserApi | 获取告警接收用户信息（告警配置校验、接收人昵称翻译） |
+| yudao-module-system | SmsSendApi | 告警短信通知 |
+| yudao-module-system | MailSendApi | 告警邮件通知 |
+| yudao-module-system | NotifyMessageSendApi | 告警站内信通知 |
 
-外部依赖（第三方库）：
+外部依赖（第三方库，版本以 `yudao-dependencies/pom.xml` 的版本属性为准）：
 
 | 依赖 | 版本 | 用途 |
 |-----|------|------|
-| vertx-mqtt | 4.x | MQTT 服务器实现 |
-| californium | 3.x | CoAP 服务器实现 |
-| jmodbus | 1.x | Modbus 协议实现 |
-| netty | 4.x | TCP/UDP/WebSocket 网络框架 |
-| tdengine-jdbc | 3.x | TDengine 时序数据库驱动 |
+| vertx-web / vertx-mqtt | 4.5.26 | Vert.x 网络框架（网关 TCP/UDP/WebSocket/HTTP 服务端）与 MQTT 服务器实现（底层基于 Netty） |
+| californium-core | 3.14.0 | Eclipse Californium，CoAP 服务器实现 |
+| j2mod | 3.4.0 | Modbus 协议实现（`com.ghgande:j2mod`） |
+| taos-jdbcdriver | 3.10.0 | TDengine 时序数据库驱动 |
+| iotdb-jdbc | 2.0.8 | Apache IoTDB 时序数据库驱动（`yudao.iot.storage.type=iotdb`） |
+| org.mozilla:rhino | 1.7.15.1 | Mozilla Rhino，产品数据解析脚本 JS 引擎 |
 
 > 完整依赖关系（framework starter、消息总线可选实现、下游 yudao-server / yudao-module-iot-gateway 的关系）见 [README.md](README.md) 的「依赖关系」一节。
 
@@ -305,12 +371,19 @@ IoT 模块错误码使用 `1_050_XXX_XXX` 前缀（[yudao-module-iot-biz/.../Err
 | yudao-module-iot/yudao-module-iot-gateway/src/main/java/cn/iocoder/yudao/module/iot/gateway/protocol/mqtt/IotMqttProtocol.java | MQTT 协议实现，最常用的设备接入协议 |
 | yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/device/IotDeviceService.java | 设备管理服务接口 |
 | yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/device/message/IotDeviceMessageService.java | 设备消息服务接口 |
+| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/device/shadow/IotDeviceShadowServiceImpl.java | 设备影子服务实现（DB 为准 + Redis 读缓存 + 乐观锁） |
+| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/controller/admin/device/IotDeviceShadowController.java | 设备影子管理后台 Controller |
 | yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/service/rule/scene/IotSceneRuleService.java | 场景联动规则服务 |
 | yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/device/IotDeviceDO.java | 设备实体类定义 |
-| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/product/IotProductDO.java | 产品实体类定义 |
+| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/device/IotDeviceShadowDO.java | 设备影子实体类定义 |
+| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/product/IotProductDO.java | 产品实体类定义（含数据解析脚本字段） |
 | yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/dataobject/thingmodel/IotThingModelDO.java | 物模型实体类定义 |
+| yudao-module-iot/yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/script/IotScriptUtils.java | 数据解析脚本的上下文构建与输出校验 |
+| yudao-module-iot/yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/script/rhino/IotRhinoScriptExecutor.java | 基于 Rhino 的脚本执行器 |
+| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/dal/storage/IotDeviceMessageDAO.java | 设备消息存储 DAO 接口（TDengine / IoTDB 双实现） |
+| yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/framework/storage/config/IotStorageConfiguration.java | 时序存储后端配置（`yudao.iot.storage.type`） |
 | yudao-module-iot/yudao-module-iot-biz/src/main/java/cn/iocoder/yudao/module/iot/controller/admin/device/IotDeviceController.java | 设备管理 Controller |
-| yudao-module-iot/yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/biz/IotDeviceCommonApi.java | 设备通用 API 接口 |
+| yudao-module-iot/yudao-module-iot-core/src/main/java/cn/iocoder/yudao/module/iot/core/biz/IotDeviceCommonApi.java | 设备通用 API 接口（含 keepAliveGatewayServers） |
 
 ## 领域模型
 
@@ -318,7 +391,7 @@ IoT 模块错误码使用 `1_050_XXX_XXX` 前缀（[yudao-module-iot-biz/.../Err
 
 | 聚合根 | 包含实体 | 说明 |
 |-------|---------|------|
-| 设备聚合 | IotDeviceDO、IotDeviceGroupDO、IotDevicePropertyDO、IotDeviceMessageDO | 设备是 IoT 平台的核心实体，包含设备基本信息、状态、属性、消息等 |
+| 设备聚合 | IotDeviceDO、IotDeviceGroupDO、IotDeviceShadowDO、IotDevicePropertyDO、IotDeviceMessageDO | 设备是 IoT 平台的核心实体，包含设备基本信息、状态、影子、属性、消息等 |
 | 产品聚合 | IotProductDO、IotProductCategoryDO、IotThingModelDO | 产品是设备的模板，定义物模型（属性、事件、服务）和协议配置 |
 | 规则引擎聚合 | IotSceneRuleDO、IotDataRuleDO、IotDataSinkDO、IotAlertConfigDO、IotAlertRecordDO | 规则引擎处理设备数据流转、场景联动、告警触发 |
 | OTA 升级聚合 | IotOtaFirmwareDO、IotOtaTaskDO、IotOtaTaskRecordDO | OTA 升级管理固件版本、升级任务和升级记录 |
@@ -337,7 +410,9 @@ IoT 模块错误码使用 `1_050_XXX_XXX` 前缀（[yudao-module-iot-biz/.../Err
 | 领域服务 | 说明 |
 |---------|------|
 | IotDeviceService | 设备管理服务，处理设备 CRUD、认证、状态更新 |
-| IotDeviceMessageService | 设备消息服务，处理消息收发、记录存储 |
+| IotDeviceShadowService | 设备影子服务，处理影子读取/期望状态更新/开关/重置 |
+| IotDeviceMessageService | 设备消息服务，处理消息收发、记录存储、透传校验 |
+| IotProductService | 产品管理服务，含数据解析脚本的保存与调试 |
 | IotSceneRuleService | 场景联动服务，执行场景联动逻辑 |
 | IotProtocol | 协议接口，定义协议生命周期（启动、停止、运行状态） |
 
@@ -363,7 +438,7 @@ README「设计模式」一节已覆盖策略、模板方法、观察者/发布�
 三子模块（biz/core/gateway）的职责划分见 README「模块概述」，各层内部组件补充如下：
 
 - **gateway 网关层**：协议实现按 `protocol/{协议}` 包组织（MQTT/CoAP/HTTP/TCP/UDP/WebSocket/Modbus TCP 客户端与服务端/EMQX 桥接）；上行消息处理器统一放在 `handler/upstream`，下行消息处理器统一放在 `handler/downstream`。
-- **core 核心层**：`enums`（协议类型、设备状态、消息方法等枚举）、`mq/message`（设备消息模型）、`biz/dto`（业务 DTO）、`topic`（Topic 定义和工具）。
+- **core 核心层**：`enums`（协议类型、设备状态、消息方法、设备影子错误码等枚举）、`mq/message`（设备消息模型，含 raw 原始字节）、`biz/dto`（业务 DTO）、`topic`（Topic 定义和工具，含 `topic/shadow` 影子协议）、`script`（JS 数据解析脚本引擎：接口、Rhino 实现、预算与熔断）、`util`（`IotDeviceMessageUtils` 透传校验等）。
 
 ### 内部消息总线
 
@@ -378,6 +453,7 @@ gateway 与 biz 之间通过内部消息总线 IotMessageBus 传递设备消息�
 |---|-------|------|------|------|
 | iot_device | iot_product | N:1 | product_id | 设备属于某个产品 |
 | iot_device | iot_device | N:1 | gateway_id | 子设备关联网关设备 |
+| iot_device_shadow | iot_device | N:1 | device_id | 设备影子归属于设备（每设备一条） |
 | iot_product | iot_product_category | N:1 | category_id | 产品属于某个分类 |
 | iot_thing_model | iot_product | N:1 | product_id | 物模型属于某个产品 |
 | iot_ota_firmware | iot_product | N:1 | product_id | 固件属于某个产品 |

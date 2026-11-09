@@ -40,7 +40,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | 支付渠道配置、跨租户回调通知任务 | `TenantBaseDO` | PayChannelDO、PayNotifyTaskDO（渠道密钥与通知必须按租户隔离，避免 A 租户拿到 B 租户的商户号发起支付） |
 | 交易单据（订单/退款/转账）、钱包账务、示例业务 | `BaseDO` | 其余 12 个 DO（交易记录属平台级数据，金额流水不随租户自动过滤，由业务层 appId 隔离） |
 
-> 金额字段单位统一为「分」（Integer/Long），费率为「百分比」（Double），数据库不使用 decimal，避免四舍五入误差。
+> 金额字段单位统一为「分」：DO 中均为 `Integer`，部分 VO（如 `PayOrderBaseVO`、`PayRefundBaseVO`）为 `Long`；费率为「百分比」（Double），数据库不使用 decimal，避免四舍五入误差。
 
 ## 2. 核心 DO 实体
 
@@ -99,16 +99,16 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | subject | String | subject | 商品标题 |
 | body | String | body | 商品描述信息 |
 | notifyUrl | String | notify_url | 异步通知地址 |
-| price | Long | price | 支付金额，单位：分 |
+| price | Integer | price | 支付金额，单位：分 |
 | channelFeeRate | Double | channel_fee_rate | 渠道手续费率，单位：百分比，冗余 PayChannelDO#feeRate |
-| channelFeePrice | Long | channel_fee_price | 渠道手续金额，单位：分 |
-| status | Integer | status | 支付状态，枚举 PayOrderStatusEnum（0 待支付 / 1 成功 / 2 已退款 / 3 已关闭） |
+| channelFeePrice | Integer | channel_fee_price | 渠道手续金额，单位：分 |
+| status | Integer | status | 支付状态，枚举 PayOrderStatusEnum（0 未支付 / 10 支付成功 / 20 已退款 / 30 支付关闭） |
 | userIp | String | user_ip | 用户 IP |
 | expireTime | LocalDateTime | expire_time | 订单失效时间（PayOrderExpireJob 按该字段扫描关单） |
 | successTime | LocalDateTime | success_time | 订单支付成功时间 |
 | extensionId | Long | extension_id | 支付成功的订单拓展单编号，关联 PayOrderExtensionDO#id |
 | no | String | no | 支付成功的外部订单号，冗余 PayOrderExtensionDO#no（渠道 out_trade_no） |
-| refundPrice | Long | refund_price | 退款总金额，单位：分（可多次部分退款累加） |
+| refundPrice | Integer | refund_price | 退款总金额，单位：分（可多次部分退款累加） |
 | channelUserId | String | channel_user_id | 渠道用户编号（微信 openid、支付宝 buyerOpenId） |
 | channelOrderNo | String | channel_order_no | 渠道订单号（微信/支付宝侧交易号） |
 
@@ -127,7 +127,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | channelId | Long | channel_id | 渠道编号，关联 PayChannelDO#id |
 | channelCode | String | channel_code | 渠道编码，枚举 PayChannelEnum |
 | userIp | String | user_ip | 用户 IP |
-| status | Integer | status | 支付状态，枚举 PayOrderStatusEnum（0 等待 / 1 成功 / 2 失败 / 3 关闭） |
+| status | Integer | status | 支付状态，枚举 PayOrderStatusEnum（0 未支付 / 10 支付成功 / 20 已退款 / 30 支付关闭；拓展单实际只会流转到 0 / 10 / 30） |
 | channelExtras | Map&lt;String, String&gt; | channel_extras | 支付渠道的额外参数，JSON TypeHandler（JacksonTypeHandler，autoResultMap = true）存储 |
 | channelErrorCode | String | channel_error_code | 调用渠道的错误码 |
 | channelErrorMsg | String | channel_error_msg | 调用渠道报错时的错误信息 |
@@ -156,9 +156,9 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | merchantOrderId | String | merchant_order_id | 商户订单编号 |
 | merchantRefundId | String | merchant_refund_id | 商户退款订单号，需保证每个 PayAppDO 内唯一 |
 | notifyUrl | String | notify_url | 异步通知地址 |
-| status | Integer | status | 退款状态，枚举 PayRefundStatusEnum（0 生成 / 1 成功 / 2 失败 / 3 关闭） |
-| payPrice | Long | pay_price | 支付金额，单位：分 |
-| refundPrice | Long | refund_price | 退款金额，单位：分 |
+| status | Integer | status | 退款状态，枚举 PayRefundStatusEnum（0 未退款 / 10 退款成功 / 20 退款失败） |
+| payPrice | Integer | pay_price | 支付金额，单位：分 |
+| refundPrice | Integer | refund_price | 退款金额，单位：分 |
 | reason | String | reason | 退款原因 |
 | userIp | String | user_ip | 用户 IP |
 | channelOrderNo | String | channel_order_no | 渠道订单号，冗余 PayOrderDO#channelOrderNo |
@@ -188,10 +188,10 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | userType | Integer | user_type | 用户类型 |
 | merchantTransferId | String | merchant_transfer_id | 商户转账单编号，需保证每个 PayAppDO 内唯一 |
 | subject | String | subject | 转账标题 |
-| price | Long | price | 转账金额，单位：分 |
+| price | Integer | price | 转账金额，单位：分 |
 | userAccount | String | user_account | 收款人账号 |
 | userName | String | user_name | 收款人姓名 |
-| status | Integer | status | 转账状态，枚举 PayTransferStatusEnum（0 等待 / 1 成功 / 2 失败，含待收款中间态） |
+| status | Integer | status | 转账状态，枚举 PayTransferStatusEnum（0 等待转账 / 5 转账进行中 / 10 转账成功 / 20 转账关闭） |
 | successTime | LocalDateTime | success_time | 转账成功时间 |
 | notifyUrl | String | notify_url | 异步通知地址 |
 | userIp | String | user_ip | 用户 IP |
@@ -220,7 +220,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | merchantOrderId | String | merchant_order_id | 商户订单编号 |
 | merchantRefundId | String | merchant_refund_id | 商户退款编号（type=REFUND 时有值） |
 | merchantTransferId | String | merchant_transfer_id | 商户转账编号（type=TRANSFER 时有值） |
-| status | Integer | status | 通知状态，枚举 PayNotifyStatusEnum（等待/成功/失败/请求成功但处理失败等） |
+| status | Integer | status | 通知状态，枚举 PayNotifyStatusEnum（0 等待通知 / 10 通知成功 / 20 通知失败 / 21 请求成功但结果失败 / 22 请求失败） |
 | nextNotifyTime | LocalDateTime | next_notify_time | 下一次通知时间（PayNotifyJob 按该字段扫描到期任务） |
 | lastExecuteTime | LocalDateTime | last_execute_time | 最后一次执行时间 |
 | notifyTimes | Integer | notify_times | 当前通知次数，对应日志表 notify_times |
@@ -314,7 +314,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | id | Long | id | 编号，自增（@TableId） |
 | no | String | no | 流水号 |
 | walletId | Long | wallet_id | 钱包编号，关联 PayWalletDO#id |
-| bizType | Integer | biz_type | 关联业务分类，枚举 PayWalletBizTypeEnum（1 交易 / 2 充值 / 3 支付 / 4 退款等） |
+| bizType | Integer | biz_type | 关联业务分类，枚举 PayWalletBizTypeEnum（1 充值 / 2 充值退款 / 3 支付 / 4 支付退款 / 5 更新余额 / 6 转账） |
 | bizId | String | biz_id | 关联业务编号（按 bizType 指向支付订单/充值单等，String 兼容不同单号） |
 | title | String | title | 流水说明 |
 | price | Integer | price | 交易金额，单位：分（正值余额增加，负值余额减少） |
@@ -327,7 +327,7 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 
 #### PayDemoOrderDO (pay_demo_order)
 
-示例订单。演示业务系统如何接入 pay 模块完成支付与退款（PayDemoOrderController + AppPayDemoOrderController）。
+示例订单。演示业务系统如何接入 pay 模块完成支付与退款（PayDemoOrderController）。
 
 | 字段 | 类型 | 数据库列 | 说明 |
 |-----|------|---------|------|
@@ -358,8 +358,8 @@ BaseDO（cn.iocoder.yudao.framework.mybatis.core.dataobject）
 | price | Integer | price | 提现金额，单位：分 |
 | userAccount | String | user_account | 收款人账号 |
 | userName | String | user_name | 收款人姓名 |
-| type | Integer | type | 提现方式，枚举 PayDemoWithdrawTypeEnum（钱包余额 / 银行卡等） |
-| status | Integer | status | 提现状态，枚举 PayDemoWithdrawStatusEnum |
+| type | Integer | type | 提现方式，枚举 PayDemoWithdrawTypeEnum（1 支付宝 / 2 微信 / 3 钱包） |
+| status | Integer | status | 提现状态，枚举 PayDemoWithdrawStatusEnum（0 等待提现 / 10 提现成功 / 20 提现关闭） |
 | payTransferId | Long | pay_transfer_id | 转账单编号，关联 PayTransferDO#id |
 | transferChannelCode | String | transfer_channel_code | 转账渠道，枚举 PayChannelEnum |
 | transferTime | LocalDateTime | transfer_time | 转账成功时间 |

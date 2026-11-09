@@ -77,7 +77,7 @@ public class PermissionServiceImpl implements PermissionService {
 
 - Mapper 接口继承 `BaseMapperX<DO类>`
 - 使用 `@Mapper` 注解
-- 复杂查询使用 MPJLambdaWrapperWrapper 或 XML
+- 复杂查询使用 MyBatis XML 编写；简单动态条件使用 `LambdaQueryWrapperX`
 
 **示例**：
 
@@ -95,6 +95,74 @@ public interface UserMapper extends BaseMapperX<AdminUserDO> {
     }
 }
 ```
+
+### 框架能力
+
+system 模块用到的框架新能力，二次开发沿用以下写法：
+
+**1. Boolean 字段映射整数列：`IntegerBooleanTypeHandler`**
+
+数据库列是整数（tinyint 等）而 Java 字段是 `Boolean` 时使用，写入 true 存 1、false 存 0，读取非 0 为 true、NULL 为 null。避免 PostgreSQL 等数据库不允许 boolean 与整数隐式转换的问题：
+
+```java
+// SmsCodeDO
+@TableName(value = "system_sms_code", autoResultMap = true) // 查询结果也要生效，必须开启 autoResultMap
+public class SmsCodeDO extends BaseDO {
+
+    @TableField(typeHandler = IntegerBooleanTypeHandler.class)
+    private Boolean used;
+}
+```
+
+- 必须同时配置 `@TableField(typeHandler = ...)` 与 `@TableName(autoResultMap = true)`，只配前者时查询结果不走该转换器
+- 仅按字段使用，不要注册为全局 Boolean 转换器，否则会影响真正的 boolean / bit 列
+- 自定义 SQL 或 Wrapper 里的独立参数需显式指定该转换器
+
+**2. 限量查询：`BaseMapperX#selectListLimitN(wrapper, limit)`**
+
+取「前 N 条」时使用，替代 `.last("LIMIT " + n)`（仅 MySQL 可用）。走 MyBatis-Plus 分页插件按执行时数据库生成 `LIMIT` / `ROWNUM` / `OFFSET ... FETCH`，不执行 COUNT 查询：
+
+```java
+// NotifyMessageMapper
+default List<NotifyMessageDO> selectUnreadListByUserIdAndUserType(Long userId, Integer userType, Integer size) {
+    return selectListLimitN(new LambdaQueryWrapperX<NotifyMessageDO>()
+            .eq(NotifyMessageDO::getUserId, userId)
+            .eq(NotifyMessageDO::getUserType, userType)
+            .eq(NotifyMessageDO::getReadStatus, false)
+            .orderByDesc(NotifyMessageDO::getId), size);
+}
+```
+
+- `limit = 0` 直接返回空列表，`limit < 0` 抛 `IllegalArgumentException`（否则分页插件视为不分页会查全表）
+- SQL Server 的分页语句要求 `ORDER BY`，wrapper 需设置排序
+- 不能再通过 `last` 追加行数限制；取第 1 条可配合 `selectFirstOne(wrapper)`
+
+**3. 方言 SQL 片段：`SqlDialectUtils`**
+
+手写 SQL 里的 MySQL 专有语法改用方言工具生成。OAuth2 令牌的过期批量删除已由 `DELETE ... LIMIT` 改为 `deleteBatchByLessThan`：
+
+```java
+// OAuth2AccessTokenMapper
+@Delete("${@cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils@deleteBatchByLessThan('system_oauth2_access_token', 'expires_time', 'expiresTime', 'limit')}")
+Integer deleteByExpiresTimeLt(@Param("expiresTime") LocalDateTime expiresTime, @Param("limit") Integer limit);
+```
+
+- 它按当前执行时路由到的数据源动态判定方言（同一应用多数据源可能得到不同片段），MySQL/H2/OceanBase 等保持原片段，PostgreSQL/Oracle/SQL Server 2012+ 输出对应写法
+- 片段中的列名是代码固定值、经白名单校验；业务值必须继续用 `#{}` 绑定，不要拼进 `${}`
+
+**4. 数据权限上下文读取：`DataPermissionContextHolder`**
+
+需要在代码里读取当前数据权限注解（如 `@DataPermission` 的 enable 状态）时使用。框架已调整其 ThreadLocal 语义：直接创建的子线程不再继承上下文（使用空列表，避免线程池线程永久保留创建时的配置）；TTL 传递时父子线程各自持有独立副本，子线程的入栈/出栈不影响父线程：
+
+```java
+// DeptServiceImpl#validateDeptListDataScope —— 与数据权限插件保持一致的短路判断
+DataPermission dataPermission = DataPermissionContextHolder.get();
+if (dataPermission != null && !dataPermission.enable()) {
+    return;
+}
+```
+
+- 嵌套调用场景下 `push` / `pop` 仍然成对出现在同一方法内；异步线程里不要依赖从父线程继承的数据权限配置，需要时在任务内显式 `push`
 
 ### 异常处理
 
@@ -166,10 +234,15 @@ throw exception(USER_NOT_EXISTS);
 | 3. 代码中使用 | 通过 `DictDataApi` 获取与解析字典数据（见下方示例） |
 
 ```java
-// 获取字典数据列表
+// 获取字典数据列表（DictDataApi 继承 DictDataCommonApi）
 List<DictDataRespDTO> dictList = dictDataApi.getDictDataList("system_user_sex");
-// 解析字典值
-String label = dictDataApi.parseDictData("system_user_sex", "1");
+// 解析字典值：按 value 匹配后取 label
+String label = dictList.stream()
+        .filter(item -> Objects.equals(item.getValue(), "1"))
+        .map(DictDataRespDTO::getLabel)
+        .findFirst().orElse(null);
+// 校验字典值是否合法（DictDataApi 自身提供）
+dictDataApi.validateDictDataList("system_user_sex", Collections.singletonList("1"));
 ```
 
 ### 最佳实践
@@ -181,7 +254,7 @@ String label = dictDataApi.parseDictData("system_user_sex", "1");
 | 缓存使用 | 权限相关数据使用 `@Cacheable` 缓存，修改时使用 `@CacheEvict` 清除 |
 | 多租户注意 | 不需要租户隔离的表使用 `@TenantIgnore` 注解，如字典表、菜单表 |
 | 事务处理 | 跨数据源操作使用 `@DSTransactional`，单数据源使用 `@Transactional` |
-| 日志记录 | 使用 `@OperateLog` 注解记录操作日志，使用 Lombok 的 `@Slf4j` 记录调试日志 |
+| 日志记录 | 使用 mzt-biz-log 的 `@LogRecord` 记录业务操作日志（日志模板定义在 `enums/LogRecordConstants`），使用 `@ApiAccessLog(operateType = ...)` 记录 API 访问日志，使用 Lombok 的 `@Slf4j` 记录调试日志 |
 | 参数校验 | VO 类使用 `@Valid`、`@NotNull`、`@NotBlank` 等注解进行参数校验 |
 | API 设计 | 跨模块调用通过 API 层，不要直接调用 Service 层 |
 
@@ -196,7 +269,7 @@ String label = dictDataApi.parseDictData("system_user_sex", "1");
 | yudao-framework-tenant | TenantBaseDO, @TenantIgnore | 多租户支持 |
 | yudao-framework-mybatis | BaseMapperX, BaseDO | MyBatis 增强 |
 | yudao-framework-redis | @Cacheable, RedisKeyConstants | Redis 缓存 |
-| yudao-module-infra | FileApi | 文件上传 |
+| yudao-module-infra | FileApi、WebSocketSenderApi | 文件上传、WebSocket 推送 |
 
 ### 外部依赖（第三方库）
 
@@ -207,10 +280,10 @@ String label = dictDataApi.parseDictData("system_user_sex", "1");
 | spring-boot-starter-security | 2.7.x | 安全框架 |
 | spring-boot-starter-validation | 2.7.x | 参数校验 |
 | spring-boot-starter-cache | 2.7.x | 缓存支持 |
-| mapstruct | 1.5.x | 对象转换 |
-| lombok | 1.18.x | 代码简化 |
+| mapstruct | 1.7.0.Beta2 | 对象转换 |
+| lombok | 1.18.48 | 代码简化 |
 | hutool-all | 5.8.x | 工具类库 |
-| knife4j-spring-boot-starter | 3.0.x | API 文档 |
+| knife4j-openapi3-spring-boot-starter | 4.5.0 | API 文档 |
 
 ## 关键文件
 

@@ -206,3 +206,7 @@
 1. 将 `exportReqVO.pageSize` 置为 `PageParam.PAGE_SIZE_NONE`，即不分页查询全量数据。
 2. 复用 `getApiErrorLogPage` 按筛选条件查询列表。
 3. 通过 `ExcelUtils.write` 按 `ApiErrorLogRespVO` 的 `@ExcelProperty` 注解写出 Excel 文件到响应流。
+
+## 3. 日志清理（内部 Job，无 HTTP 端点）
+
+访问日志与错误日志由 `AccessLogCleanJob` / `ErrorLogCleanJob`（`@TenantIgnore`）定期清理，默认保留 14 天、每批 100 条，循环删除直至不足一批。删除方法 `ApiAccessLogMapper.deleteByCreateTimeLt` / `ApiErrorLogMapper.deleteByCreateTimeLt`（以及定时任务日志的 `JobLogMapper`）通过注解中的 SpEL 调用 `SqlDialectUtils.deleteBatchByLessThan`，按当前执行数据源的方言生成限量删除 SQL：MySQL/OceanBase/达梦/神通/人大金仓/openGauss 等保持 `DELETE ... LIMIT`，PostgreSQL 用 `id IN (SELECT ... LIMIT)` 子查询，Oracle 用 `ROWNUM`，SQL Server 2012+ 用 `TOP`。方言未登记的数据库产品会在执行时抛「SQL 方言不支持的数据库产品」异常。

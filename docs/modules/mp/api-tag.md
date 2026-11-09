@@ -141,7 +141,7 @@
 | createTime | LocalDateTime | 创建时间 |
 
 **业务逻辑**:
-1. 按分页参数（accountId、name 模糊匹配）查询数据库，返回分页结果。
+1. 按分页条件查询数据库：accountId 精确匹配（eqIfPresent）、name 模糊匹配（likeIfPresent），返回分页结果。
 2. 通过 MpTagConvert 将 MpTagDO 分页结果转换为 MpTagRespVO 分页结果。
 
 ## 2. 精简列表与同步

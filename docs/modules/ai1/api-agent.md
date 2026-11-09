@@ -24,7 +24,7 @@
 | providerId | Long | 是 | @NotNull | 模型所属 Provider 编号 |
 | modelId | Long | 是 | @NotNull | 对话模型编号，必须为 CHAT 类型 |
 | systemPrompt | String | 否 | - | 系统指令；为空时会话生成时用 defaultSystemPrompt 替换 `{agentName}` 占位符 |
-| knowledgeBaseIds | List\<Long\> | 否 | - | 知识库编号集合（`LongListTypeHandler` 存 JSON 数组列） |
+| knowledgeBaseIds | List\<Long\> | 否 | - | 知识库编号集合（`LongListTypeHandler` 存逗号分隔字符串，如 `"1,2,3"`） |
 | mcpIds | List\<Long\> | 否 | - | MCP 编号集合 |
 | skillIds | List\<Long\> | 否 | - | SKILL 编号集合 |
 | memoryEnabled | Boolean | 否 | - | 是否开启长期记忆；开启后对话时注入记忆，并由 Job 归档已完成消息 |
@@ -53,7 +53,7 @@
 
 **响应**: CommonResult\<Boolean\> — 固定 true
 
-**业务逻辑**: 1. `validateAgentExists` 校验存在（不存在抛 AGENT_NOT_EXISTS）；2. `validateChatModel` 校验对话模型（同创建）；3. `agentMapper.updateById` 全量更新。`Ai1AgentSaveReqVO` 无 status 字段，**状态只能走 update-status 接口单独修改**；`knowledgeBaseIds` / `mcpIds` / `skillIds` 三个 JSON 数组列经 `LongListTypeHandler` 随 updateById 一并写入。
+**业务逻辑**: 1. `validateAgentExists` 校验存在（不存在抛 AGENT_NOT_EXISTS）；2. `validateChatModel` 校验对话模型（同创建）；3. `agentMapper.updateById` 全量更新。`Ai1AgentSaveReqVO` 无 status 字段，**状态只能走 update-status 接口单独修改**；`knowledgeBaseIds` / `mcpIds` / `skillIds` 三个逗号分隔字符串列经 `LongListTypeHandler` 随 updateById 一并写入。
 
 **错误码**:
 
@@ -210,7 +210,7 @@ Agent 管理端只落库配置，七项配置在**每次会话生成链路**中�
 | skillIds | ENABLE SKILL 文件树物化为本地沙箱 `{skill.root}/agent_{agentId}/`（按「编号：更新时间」指纹检测变更），装配 `SkillsTool` 与 Shell/FileSystem/Glob/Grep/ListDirectory 工具 | `Ai1SkillToolFactory`、`Ai1SkillShellTracker` |
 | status | 仅开启（0）的 Agent 可用于会话：发送消息时 `validateAgentEnabled` 校验 | `Ai1AgentService#validateAgentEnabled` |
 
-Agent 与被绑定资源是**反向引用**关系：模型、知识库、SKILL 删除前分别经 `getAgentCountByModelIds`（普通列 IN）、`getAgentCountByKnowledgeBaseIds` / `getAgentCountBySkillIds`（`MyBatisUtils.findInSet` 查 JSON 数组列）计数防误删；而 MCP 与 SKILL 文件删除**不做**该防护，删除后 Agent 的 `mcpIds` / `skillIds` 残留悬空编号，会话装配时按 selectByIds 只返回存在的行而静默跳过。
+Agent 与被绑定资源是**反向引用**关系：模型、知识库、SKILL 删除前分别经 `getAgentCountByModelIds`（普通列 IN）、`getAgentCountByKnowledgeBaseIds` / `getAgentCountBySkillIds`（`MyBatisUtils.findInSet` 查逗号分隔字符串列）计数防误删；而 MCP 与 SKILL 文件删除**不做**该防护，删除后 Agent 的 `mcpIds` / `skillIds` 残留悬空编号，会话装配时按 selectByIds 只返回存在的行而静默跳过。
 
 ---
 
@@ -260,8 +260,8 @@ flowchart TD
     E --> F["memoryService.deleteMemoryListByAgentIds<br/>删除长期记忆"]
     F --> G["逐个 skillToolFactory.evict<br/>摘除 SKILL 快照缓存 + 删除本地 agent_{agentId} 沙箱目录"]
     H["反向引用计数防误删（删除被绑定资源前）"] --> I["模型域：getAgentCountByModelIds（普通列 IN）"]
-    H --> J["知识库域：getAgentCountByKnowledgeBaseIds<br/>MyBatisUtils.findInSet 查 JSON 列"]
-    H --> K["SKILL 域：getAgentCountBySkillIds（findInSet 查 JSON 列）"]
+    H --> J["知识库域：getAgentCountByKnowledgeBaseIds<br/>MyBatisUtils.findInSet 查逗号分隔字符串列"]
+    H --> K["SKILL 域：getAgentCountBySkillIds（findInSet 查逗号分隔字符串列）"]
     I --> L["计数 > 0 抛 MODEL_USED_BY_AGENT（1_041_001_003）"]
     J --> M["计数 > 0 抛 KNOWLEDGE_BASE_USED_BY_AGENT（1_041_002_003）"]
     K --> N["计数 > 0 抛 SKILL_USED_BY_AGENT（1_041_005_001）"]
@@ -279,8 +279,8 @@ flowchart TD
 | 1_041_000_000 / 1_041_000_001（共用） | 供应商不存在 / 供应商({}) 已禁用 | `getModelRespBO`（validateChatModel 内） |
 | 1_041_001_000 / 1_041_001_001 / 1_041_001_004（共用） | 模型不存在 / 已禁用 / 不属于该供应商 | 同上 |
 | 1_041_001_003（反向防护） | 模型已被 Agent 使用，禁止删除 | 模型删除前 `getAgentCountByModelIds` |
-| 1_041_002_003（反向防护） | 知识库已被 Agent 使用，禁止删除 | 知识库删除前 `getAgentCountByKnowledgeBaseIds`（FIND_IN_SET 查 JSON 列） |
-| 1_041_005_001（反向防护） | SKILL 已被 Agent 使用，禁止删除 | SKILL 删除前 `getAgentCountBySkillIds`（FIND_IN_SET 查 JSON 列） |
+| 1_041_002_003（反向防护） | 知识库已被 Agent 使用，禁止删除 | 知识库删除前 `getAgentCountByKnowledgeBaseIds`（FIND_IN_SET 查逗号分隔字符串列） |
+| 1_041_005_001（反向防护） | SKILL 已被 Agent 使用，禁止删除 | SKILL 删除前 `getAgentCountBySkillIds`（FIND_IN_SET 查逗号分隔字符串列） |
 | 1_041_008_000 / 1_041_009_000 / 1_041_010_000（共用） | 会话 / 会话消息 / 长期记忆不存在 | 编排链路（会话校验、断线续传、记忆归档） |
 
 ## 相关文档

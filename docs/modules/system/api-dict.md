@@ -384,6 +384,37 @@
 
 ---
 
+## 3. 用户 App 字典数据（AppDictDataController，前缀 /app-api/system/dict-data）
+
+> 该 Controller 位于 `controller.app` 包，按 `WebProperties.appApi` 的包路径规则（`/app-api` + `**.controller.app.**`）暴露在 `/app-api` 前缀下，与管理后台的 `/admin-api/system/dict-data/**` 不冲突。
+
+### 3.1 根据字典类型查询字典数据
+
+- **路径**: GET /app-api/system/dict-data/type
+- **权限**: @PermitAll（匿名可访问）
+- **说明**: 按字典类型查询**启用状态**的字典数据，供 App 端渲染下拉选项。
+
+**请求参数**: Query 参数
+
+| 字段 | 类型 | 必填 | 校验规则 | 说明 |
+|-----|------|------|---------|------|
+| type | String | 是 | @RequestParam(required) | 字典类型，如 `common_status` |
+
+**响应**: CommonResult&lt;List&lt;AppDictDataRespVO&gt;&gt;
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| id | Long | 字典数据编号 |
+| label | String | 字典标签 |
+| value | String | 字典值 |
+| dictType | String | 字典类型 |
+
+**业务逻辑**:
+1. 调用 DictDataService.getDictDataList，传入状态 `CommonStatusEnum.ENABLE` 与字典类型，只返回启用状态的数据。
+2. 转换为 AppDictDataRespVO 列表返回。
+
+---
+
 ## 附：本域相关错误码汇总（ErrorCodeConstants，前缀 1_002_006 / 1_002_007）
 
 | 错误码 | 常量名 | 说明 |

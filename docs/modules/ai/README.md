@@ -5,15 +5,17 @@
 ## 模块概述
 
 - **模块路径**: `yudao-module-ai`（单模块布局，无子模块拆分）
-- **业务定位**: 基于 Spring AI 构建的企业级 AI 中台，向上为管理后台提供聊天助手、知识库问答、多平台绘画/音乐/写作/思维导图生成与 AI 工作流编排能力；向下通过统一的模型工厂对接 21 个 AI 平台（Chat / Image / Embedding / VectorStore 四类模型），并内置 MCP Server/Client 与 Function Calling 工具扩展机制。
-- **技术栈**: Spring Boot 3.x + Spring AI 1.1.8（BOM）+ Spring AI Alibaba 1.1.2.2（通义千问 DashScope）+ MyBatis-Plus + Reactor（SSE 流式）+ 向量库（Qdrant / Redis / Milvus）+ Tika 文档解析 + MCP Server(WebMVC)/Client + TinyFlow 1.2.6 工作流引擎 + Midjourney Proxy / Suno 私有 API
+- **业务定位**: 基于 Spring AI 构建的企业级 AI 中台，向上为管理后台提供聊天助手、知识库问答、多平台绘画/音乐/写作/思维导图生成与 AI 工作流编排能力；向下通过统一的模型工厂对接 22 个 AI 平台（Chat / Image / Embedding / VectorStore 四类模型），并内置 MCP Server/Client 与 Function Calling 工具扩展机制。新增「模型思考档位」「Token 用量与 AI 请求日志」两项平台能力。
+- **技术栈**: Spring Boot 3.x + Spring AI 1.1.8（BOM）+ Spring AI Alibaba 1.1.2.2（通义千问 DashScope）+ MyBatis-Plus + Reactor（SSE 流式）+ 向量库（当前默认 SimpleVectorStore，Qdrant / Redis / Milvus 为可切换实现）+ Tika 文档解析 + MCP Server(WebMVC)/Client + TinyFlow 1.2.6 工作流引擎 + Midjourney Proxy / Suno 私有 API
 
 ## 设计原则
 
 | 原则 | 说明 |
 |-----|------|
 | 统一模型接入层 | `framework/ai/core/model/AiModelFactory` 按 platform 动态创建并缓存 ChatModel / ImageModel / EmbeddingModel / VectorStore / MidjourneyApi / SunoApi，业务 Service 不直接感知具体平台 SDK |
-| 平台枚举驱动 | `AiPlatformEnum` 收录 21 个平台，业务表统一冗余 `platform` + `model` 字段，支撑多平台多模型并存 |
+| 平台枚举驱动 | `AiPlatformEnum` 收录 22 个平台（新增小米 MiMo），业务表统一冗余 `platform` + `model` 字段，支撑多平台多模型并存 |
+| 思考档位可配置 | 模型可配置 `input_modalities`（text/image/video）与 `reasoning_config`（档位数组 + 默认档位）；发送时按「平台一致 → 生效档位 → 平台路由 → 参数深拷贝」解析，并按平台路由落到 HTTP 请求体补丁（DeepSeek 族）或 ChatOptions（OpenAI 兼容/通义） |
+| 用量可观测 | 聊天、写作、思维导图统一记录 `ai_request_log`（请求编号、耗时、状态、Token 用量、响应元数据快照），业务表回填 `request_id` 与 input/output/total Tokens |
 | 流式优先 | 聊天消息、写作、思维导图的生成端点均提供 SSE 流式版本（`TEXT_EVENT_STREAM` + Reactor `Flux<CommonResult<T>>`），同时保留段式接口 |
 | 个人与管理双视角 | 对话、角色、绘画、音乐等功能同时提供「我的」端点（仅登录校验、按 userId 隔离）与管理端点（`@PreAuthorize` 权限控制） |
 | 异步任务同步 | Midjourney 绘画、Suno 音乐为异步任务：Proxy 回调（`@PermitAll` + `@TenantIgnore`）+ 定时 Job（`AiMidjourneySyncJob` / `AiSunoSyncJob`）双通道同步进展 |
@@ -23,9 +25,10 @@
 
 | 功能域 | 说明 | 关键实体 |
 |-------|------|---------|
-| 聊天对话 | 对话/消息管理，段式与流式发送，支持角色设定、上下文数、温度等参数，消息可携带知识库段落引用、联网搜索结果与附件 | `AiChatConversationDO`、`AiChatMessageDO` |
+| 聊天对话 | 对话/消息管理，段式与流式发送，支持角色设定、上下文数、温度等参数，消息可携带知识库段落引用、联网搜索结果与附件；支持模型思考档位（reasoningLevel）与图片多模态输入，回复记录 Token 用量与请求编号 | `AiChatConversationDO`、`AiChatMessageDO` |
 | 知识库 | 知识库/文档/段落三级管理，基于 Tika 下载解析文档，按 Token/语义/Markdown QA 策略切片，向量化后支持相似度检索与召回计数 | `AiKnowledgeDO`、`AiKnowledgeDocumentDO`、`AiKnowledgeSegmentDO` |
-| 模型管理 | API 密钥、模型（含默认模型机制）、聊天角色（公开/私有、可挂知识库/工具/MCP Client）、工具（Function Calling Bean）四类配置 | `AiApiKeyDO`、`AiModelDO`、`AiChatRoleDO`、`AiToolDO` |
+| 模型管理 | API 密钥、模型（含默认模型机制、输入模态、思考档位配置）、聊天角色（公开/私有、可挂知识库/工具/MCP Client）、工具（Function Calling Bean）四类配置 | `AiApiKeyDO`、`AiModelDO`、`AiChatRoleDO`、`AiToolDO` |
+| AI 请求日志 | 记录聊天/写作/思维导图每次生成尝试的平台、模型、耗时、状态与 Token 用量，提供分页与统计接口，日志独立事务写入、业务回滚仍保留 | `AiRequestLogDO` |
 | AI 绘画 | 多平台文生图（OpenAI、Stability 等），Midjourney 专属 imagine/action/notify 回调链路，公开图库与绘画管理 | `AiImageDO` |
 | AI 音乐 | Suno 音乐生成（描述模式/歌词模式），异步任务回传音频/视频/封面，支持我的音乐与管理 | `AiMusicDO` |
 | AI 写作 | 撰写（含原文润色）与回复两种类型，流式生成，支持长度/格式/语气/语言提示词 | `AiWriteDO` |
@@ -119,7 +122,7 @@
 | /ai/api-key/delete | DELETE | 删除 API 密钥 | ai:api-key:delete |
 | /ai/api-key/get | GET | 获得 API 密钥 | ai:api-key:query |
 | /ai/api-key/page | GET | 获得 API 密钥分页 | ai:api-key:query |
-| /ai/api-key/simple-list | GET | 获得 API 密钥分页列表 | 已认证 |
+| /ai/api-key/simple-list | GET | 获得 API 密钥精简列表（仅 id、name） | 已认证 |
 
 ### AI 模型 (AiModelController)
 
@@ -132,7 +135,17 @@
 | /ai/model/delete | DELETE | 删除模型 | ai:model:delete |
 | /ai/model/get | GET | 获得模型 | ai:model:query |
 | /ai/model/page | GET | 获得模型分页 | ai:model:query |
-| /ai/model/simple-list | GET | 获得模型列表（按类型 + 平台过滤） | 已认证 |
+| /ai/model/simple-list | GET | 获得模型列表（按类型 + 平台过滤，返回 id/name/model/platform/inputModalities） | 已认证 |
+
+### AI 请求日志 (AiRequestLogController)
+
+前缀 `/ai/request-log`。
+
+| 接口路径 | HTTP方法 | 说明 | 权限标识 |
+|---------|---------|------|---------|
+| /ai/request-log/get | GET | 获得单条 AI 请求日志（补齐用户昵称） | ai:request-log:query |
+| /ai/request-log/page | GET | 获得请求日志分页（按 requestId/userId/bizType/platform/modelId/model/status/beginTime 筛选） | ai:request-log:query |
+| /ai/request-log/statistics | GET | 获得请求日志统计（总数/成功/失败/取消/Token 合计） | ai:request-log:query |
 
 ### AI 工具 (AiToolController)
 
@@ -241,26 +254,28 @@
 | 表名 | 说明 | 继承基类 | 关键字段 |
 |-----|------|---------|---------|
 | ai_chat_conversation | AI 聊天对话 | BaseDO | userId、title、pinned、roleId、modelId、model、systemMessage、temperature、maxTokens、maxContexts |
-| ai_chat_message | AI 聊天消息 | BaseDO | conversationId、replyId、type、userId、roleId、modelId、model、content、reasoningContent、useContext、segmentIds、webSearchPages、attachmentUrls |
+| ai_chat_message | AI 聊天消息 | BaseDO | conversationId、replyId、type、userId、roleId、modelId、model、content、reasoningContent、useContext、segmentIds、webSearchPages、attachmentUrls、requestId、inputTokens、outputTokens、totalTokens |
 | ai_knowledge | AI 知识库 | BaseDO | name、description、embeddingModelId、embeddingModel、topK、similarityThreshold、status |
 | ai_knowledge_document | AI 知识库文档 | BaseDO | knowledgeId、name、url、content、contentLength、tokens、segmentMaxTokens、retrievalCount、status |
 | ai_knowledge_segment | AI 知识库文档分段 | BaseDO | knowledgeId、documentId、content、contentLength、vectorId、tokens、retrievalCount、status |
 | ai_api_key | AI API 密钥 | BaseDO | name、apiKey、platform、url、status |
-| ai_model | AI 模型 | BaseDO | keyId、name、model、platform、type、sort、status、temperature、maxTokens、maxContexts |
+| ai_model | AI 模型 | BaseDO | keyId、name、model、platform、type、sort、status、temperature、maxTokens、maxContexts、inputModalities、reasoningConfig |
 | ai_chat_role | AI 聊天角色 | BaseDO | name、avatar、category、description、systemMessage、userId、modelId、knowledgeIds、toolIds、mcpClientNames、publicStatus、sort、status |
 | ai_tool | AI 工具 | BaseDO | name（对应 Bean 名）、description、status |
 | ai_image | AI 绘画 | BaseDO | userId、prompt、platform、modelId、model、width、height、status、finishTime、errorMessage、picUrl、publicStatus、options、buttons、taskId |
 | ai_music | AI 音乐 | BaseDO | userId、title、lyric、imageUrl、audioUrl、videoUrl、status、generateMode、description、platform、model、tags、duration、publicStatus、taskId、errorMessage |
-| ai_mind_map | AI 思维导图 | BaseDO | userId、platform、modelId、model、prompt、generatedContent、errorMessage |
-| ai_write | AI 写作 | BaseDO | userId、type、platform、modelId、model、prompt、generatedContent、originalContent、length、format、tone、language、errorMessage |
+| ai_mind_map | AI 思维导图 | BaseDO | userId、platform、modelId、model、prompt、generatedContent、errorMessage、requestId、inputTokens、outputTokens、totalTokens |
+| ai_write | AI 写作 | BaseDO | userId、type、platform、modelId、model、prompt、generatedContent、originalContent、length、format、tone、language、errorMessage、requestId、inputTokens、outputTokens、totalTokens |
+| ai_request_log | AI 请求日志 | BaseDO | requestId、userId、bizType、bizId、platform、modelId、model、status、errorMessage、beginTime、endTime、duration、inputTokens、outputTokens、totalTokens、responseMetadata |
 | ai_workflow | AI 工作流 | BaseDO | name、code、graph（TinyFlow JSON）、remark、status |
 
 ## 设计模式
 
 | 模式 | 应用位置 | 用途 |
 |-----|---------|------|
-| 工厂模式 | `framework/ai/core/model/AiModelFactory` + `AiModelFactoryImpl` | 按 platform + apiKey + url 惰性创建并缓存各平台 ChatModel / ImageModel / EmbeddingModel / VectorStore / MidjourneyApi / SunoApi，屏蔽 21 个平台 SDK 差异 |
+| 工厂模式 | `framework/ai/core/model/AiModelFactory` + `AiModelFactoryImpl` | 按 platform + apiKey + url（HTTP 思考路由再追加思考参数哈希）惰性创建并缓存各平台 ChatModel / ImageModel / EmbeddingModel / VectorStore / MidjourneyApi / SunoApi，屏蔽 22 个平台 SDK 差异 |
 | 策略模式 | `service/knowledge/splitter`（`SemanticTextSplitter`、`MarkdownQaSplitter` 继承 Spring AI `TextSplitter`）+ `AiDocumentSplitStrategyEnum` | 文档切片支持 Token / 语义 / Markdown QA 多种策略，`AiKnowledgeSegmentServiceImpl.splitContentByStrategy` 按策略（支持 AUTO 自动检测）路由 |
+| 请求体改写（策略路由） | `util/AiReasoningUtils.ReasoningRoute` + `framework/ai/core/reasoning/AiRequestBodyPatcher` | 思考参数按平台路由落地：HTTP（DeepSeek 族，RFC 7396 合并请求体 JSON）/ OPENAI（reasoning_effort 强类型 + extraBody）/ TONG_YI（enable_thinking、thinking_budget）/ UNSUPPORTED |
 | 工具回调（Function Calling） | `tool/function` 包：`DirectoryListToolFunction`、`WeatherQueryToolFunction`、`UserProfileQueryToolFunction` | 将 Spring Bean 注册为 LLM 可调用的工具函数，`AiToolDO.name` 与 Bean 名对应 |
 | 工作流引擎模式 | `service/workflow/AiWorkflowServiceImpl`（TinyFlow `Tinyflow` 链式执行） | 解析 graph JSON 构建 TinyFlow 执行链，`AiModelService.getLLmProvider4Tinyflow` 注入 LLM Provider |
 | 异步回调 + 定时补偿 | Midjourney（`/midjourney/notify` 回调 + `AiMidjourneySyncJob`）、Suno（`AiSunoSyncJob`） | 异步生成任务进展的可靠同步 |
@@ -270,7 +285,7 @@
 - **上游**（本模块依赖）
   - framework starter: `yudao-spring-boot-starter-security`、`yudao-spring-boot-starter-mybatis`、`yudao-spring-boot-starter-redis`、`yudao-spring-boot-starter-biz-tenant`、`yudao-spring-boot-starter-job`、`yudao-spring-boot-starter-excel`、`yudao-spring-boot-starter-test`
   - 业务模块: `yudao-module-system`（AdminUserApi 查询用户资料）、`yudao-module-infra`（FileApi 上传绘画图片/音乐文件）
-  - 三方 AI: Spring AI（openai/azure-openai/anthropic/deepseek/ollama/stability-ai）、Spring AI Alibaba（DashScope）、Qdrant/Redis/Milvus 向量库、Tika、MCP Server(WebMVC)/Client、TinyFlow
+  - 三方 AI: Spring AI（openai/azure-openai/anthropic/deepseek/ollama/stability-ai）、Spring AI Alibaba（DashScope）、向量库（默认 SimpleVectorStore，可切换 Qdrant/Redis/Milvus）、Tika、MCP Server(WebMVC)/Client、TinyFlow
 - **下游**（依赖本模块）
   - 无（`yudao-server` 聚合打包引用，无其他业务模块依赖 ai 模块）
 
@@ -283,6 +298,7 @@
 - [api-chat.md](api-chat.md) - AI 聊天对话与消息
 - [api-knowledge.md](api-knowledge.md) - AI 知识库（文档/段落/切片/检索）
 - [api-model.md](api-model.md) - API 密钥、模型、聊天角色与工具
+- [api-requestlog.md](api-requestlog.md) - AI 请求日志（分页/统计/Token 用量）
 - [api-image.md](api-image.md) - AI 绘画与 Midjourney
 - [api-music.md](api-music.md) - AI 音乐（Suno）
 - [api-write.md](api-write.md) - AI 写作

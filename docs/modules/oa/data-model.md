@@ -519,7 +519,7 @@ cn.iocoder.yudao.framework.tenant.core.db.TenantBaseDO extends BaseDO
 | moderatorUserId | Long | moderator_user_id | 主持人用户编号，关联 system AdminUser |
 | attendeeUserIds | List\<Long\> | attendee_user_ids | 参会用户编号列表，JSON 存储 |
 | reminderType | Integer | reminder_type | 会议提醒类型，枚举 OaMeetingRoomReminderTypeEnum |
-| reminded | Boolean | reminded | 是否已发送会议开始提醒（OaMeetingRoomBookingReminderJob 扫描；该 Job 同时取消过期预定） |
+| reminded | Boolean | reminded | 是否已发送会议开始提醒（由 OaMeetingRoomBookingSendReminderJob 扫描并标记；过期预定取消由 OaMeetingRoomBookingCancelExpiredJob 处理，二者相互独立） |
 | description | String | description | 会议说明 |
 | deptId | Long | dept_id | 申请部门编号，关联 system Dept |
 | status | Integer | status | 审批状态，枚举 BpmProcessInstanceStatusEnum；无需审批时提交后直接通过 |

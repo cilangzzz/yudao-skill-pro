@@ -124,7 +124,7 @@
 | 字段 | 类型 | 必填 | 校验规则 | 说明 |
 |-----|------|------|---------|------|
 | pageNo | Integer | 是 | @NotNull、@Min(1) | 页码，从 1 开始，默认 1 |
-| pageSize | Integer | 是 | @NotNull、@Min(1)、@Max(200) | 每页条数，默认 10；传 -1 时不分页（PAGE_SIZE_NONE） |
+| pageSize | Integer | 是 | @NotNull、@Min(1)、@Max(200) | 每页条数，默认 10，最大 200；框架常量 `PAGE_SIZE_NONE = -1` 仅用于 Service 内部不分页查询，经本接口 `@Valid` 校验时 -1 会被拒绝 |
 
 **响应**: CommonResult&lt;PageResult&lt;GoViewProjectRespVO&gt;&gt;，其中 GoViewProjectRespVO 字段见 1.4
 

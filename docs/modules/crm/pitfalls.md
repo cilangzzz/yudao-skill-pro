@@ -27,21 +27,42 @@ CRM 模块没有使用 Spring Security 的 `@PreAuthorize` 做数据级权限，
 - 系统内部调用链中不要依赖 `@CrmPermission` 做防线，也不要在该链路上新加 `@CrmPermission` 后以为它生效了（它只会被静默跳过）；
 - 公海数据"人人可读"是设计行为，若业务要求公海也对部分人隐藏，需要在 Mapper 查询层（`CrmPermissionUtils#appendPermissionCondition`）另行处理。
 
-### 1.3 transferPermission 在管理员转移时存在 NPE 风险
+### 1.3 负责人转移：管理员可转移，老负责人按「数据实际负责人」处理
 
-**问题**: CRM 管理员（拥有 `crm_admin` 角色但本人不是数据负责人）调用任意 transfer 接口并传入 `oldOwnerPermissionLevel` 时，接口抛 NullPointerException。
+**问题**: 过去 CRM 管理员（拥有 `crm_admin` 角色但本人不是数据负责人）调用任意 transfer 接口并传入 `oldOwnerPermissionLevel` 会抛 NullPointerException。该问题已修复（基线 4e3f8938bb 之后）。
 
-**原因**: `CrmPermissionServiceImpl#transferPermission` 的校验逻辑是"是负责人 **或** 是管理员"即可通过（`oldPermission == null || !isOwner(...)` 且非管理员才拒绝）；但第 3 步回退老负责人权限时 `oldPermission.getId()` 未判空——管理员本人没有权限记录时 `oldPermission` 为 null。
+**原因与现状**: `CrmPermissionServiceImpl#transferPermission` 已重写为：先按 `(bizType, bizId)` 取全量权限记录，再判定操作人——只有「该数据的 OWNER」或「CRM 管理员」放行，否则抛 `1_020_007_001`。定位老负责人时：操作人是负责人则取操作人自己的权限记录；操作人是 CRM 管理员则取数据实际 OWNER 级别的记录（而非管理员自己的团队权限）。因此管理员转移不再 NPE。
 
-**解决**: 前端只在当前用户是负责人时传 `oldOwnerPermissionLevel`（`CrmCustomerTransferReqVO` 中该字段本身可空，null 表示直接移除）；二开修复时给第 3 步加 `ObjUtil.equal` 判空。
+**解决**:
+- 前端无需再限制「只有负责人才能传 `oldOwnerPermissionLevel`」，管理员同样可以传；
+- 若数据在 `crm_permission` 中没有 OWNER 记录（数据异常或权限被误删），则抛 `1_020_007_000`「数据权限不存在」，且该失败发生在写入任何权限之前，不会产生部分写入；
+- 二开的转移入口应复用 `transferPermission`，不要自行拼接权限更新逻辑。
 
-### 1.4 更新接口锁定了归属字段，改负责人/归属必须走专用接口
+### 1.4 转移时 oldOwnerPermissionLevel 只能是 null / 只读 / 读写
+
+**问题**: 转移接口传 `oldOwnerPermissionLevel=1`（OWNER）或其它非法值，接口报 `1_020_007_010`「老负责人的权限级别只能是只读或读写」。
+
+**原因**: `transferPermission` 新增运行时校验：老负责人保留的权限级别只能是 null（移除）、只读(2)、读写(3)，传负责人(1) 会破坏「一条数据只有一个负责人」的约束，故直接拒绝。该校验在写入任何权限前执行。
+
+**解决**:
+- 前端若沿用「老负责人继续当负责人」的旧数据（level=1）会直接失败，需要改为传 null 或 2/3；
+- 排查转移失败时，先确认该 `(bizType, bizId)` 是否真的存在 OWNER 权限记录（缺失会报 `1_020_007_000`）。
+
+### 1.5 更新接口锁定了归属字段，改负责人/归属必须走专用接口
 
 **问题**: 通过 update 接口传 `ownerUserId` 想直接换负责人，结果静默不生效：客户负责人没变、操作日志里也没体现。
 
 **原因**: 更新方法在入口处强制清空归属字段——`CrmCustomerServiceImpl#updateCustomer` 第 135 行 `updateReqVO.setOwnerUserId(null)`，`CrmBusinessServiceImpl#updateBusiness` 第 131 行 `setOwnerUserId(null).setStatusTypeId(null)`，`CrmReceivablePlanServiceImpl#updateReceivablePlan` 第 89 行 `setOwnerUserId(null).setCustomerId(null).setContractId(null)`。
 
 **解决**: 负责人变更一律走 `transferCustomer` / `transferBusiness` / `transferContact` / `transferContract`（内部会同步 `CrmPermissionDO`、`ownerTime`，客户还支持级联转移联系人/商机/合同 `toBizTypes`）；新增实体时保持同样约定，避免 update 通道绕过数据权限体系。
+
+### 1.6 合同/回款提交审批新增 WRITE 数据权限校验（行为收紧）
+
+**问题**: 只读团队成员、非团队成员，或「只读成员的下属」调用 `PUT /crm/contract/submit`、`PUT /crm/receivable/submit` 提交审批，接口报 `1_020_007_001`「操作失败，原因：没有权限」，且不会创建 BPM 流程实例。
+
+**原因**: `CrmContractServiceImpl#submitContract` 与 `CrmReceivableServiceImpl#submitReceivable` 新增了 Service 层 `@CrmPermission(level = WRITE)` 校验。此前这些方法没有行级校验，只读成员也能提交；现在仅「本人具备读写(3)/负责人(1)级权限、或其下属具备同等权限、或 CRM 管理员」可通过。
+
+**解决**: 前端或自动化流程若以只读身份触发提交，需要先把该用户升级为读写成员；新增审批类提交入口时，同样补齐 `@CrmPermission(level = WRITE)`。
 
 ## 2. 多租户相关
 
@@ -83,6 +104,14 @@ CRM 模块没有使用 Spring Security 的 `@PreAuthorize` 做数据级权限，
 **原因**: `enums/ErrorCodeConstants.java` 中回款计划段（1_020_005_000）只定义了 `RECEIVABLE_PLAN_NOT_EXISTS` 就越界占用了客户管理段的 `1_020_006_000/001`；商机状态组两个错误码复制粘贴漏改尾号。
 
 **解决**: 新增错误码前先在 `ErrorCodeConstants` 内 grep 目标段位是否已占用；二开项目建议把 `RECEIVABLE_PLAN_UPDATE_FAIL/EXISTS_RECEIVABLE` 迁回 1_020_005_000 段并核对前端引用（注意 `CUSTOMER_NAME_EXISTS` 等带 `{}` 占位符的错误码需 `StrUtil.format` 手工填充，参考 `importCustomerList` 的用法）。
+
+### 4.2 权限段错误码 1_020_007_xxx 与权限级别编码
+
+**问题**: 转移/提交审批报错时容易混淆权限段的几个错误码；同时 `level` 数字含义易记反。
+
+**原因**: 权限管理段（1_020_007_000）现有：`1_020_007_000` 数据权限不存在、`1_020_007_001` 没有权限、`1_020_007_003` 转移对象已经是该负责人、`1_020_007_010` 老负责人的权限级别只能是只读或读写（本次新增）。权限级别 `CrmPermissionLevelEnum` 为 OWNER=1 负责人、READ=2 只读、WRITE=3 读写（强弱 OWNER > WRITE > READ）。
+
+**解决**: 报「老负责人的权限级别」时检查 `oldOwnerPermissionLevel` 是否传了 1；报「没有权限」时先确认操作人是否为负责人/CRM 管理员、提交审批时是否具备 WRITE 级权限。
 
 ## 5. 状态机相关
 
@@ -128,8 +157,32 @@ CRM 模块没有使用 Spring Security 的 `@PreAuthorize` 做数据级权限，
 
 **解决**: 扩展 `CrmCustomerMapper` 时统一引用 `CrmCustomerDO` 的列；客户名强唯一场景加 DB 唯一索引，或把判重改为 `selectList` + 取第一条的容错写法。
 
+### 6.3 单条配置查询改用 selectFirstOne，多行脏数据不再抛异常
+
+**问题**: `crm_contract_config`、`crm_customer_pool_config` 若因历史脏数据存在多行，按旧逻辑读配置可能抛 `TooManyResultsException`（或分页插件相关问题）。
+
+**原因**: `CrmContractConfigMapper#selectOne`、`CrmCustomerPoolConfigMapper#selectOne` 已由 `selectOne(+LIMIT 1)` 改为 `selectFirstOne(+orderByAsc(id))`；`CrmReceivablePlanMapper#selectMaxPeriodByContractId` 同样改用 `selectFirstOne(orderByDesc(period))`。前者确定性返回 id 最小的一条，后者返回期数最大的一条；`selectFirstOne` 走 MyBatis-Plus 分页插件生成方言化行数限制（SQL Server 要求 ORDER BY，故必须显式排序）。
+
+**解决**: 排查「配置改了不生效」时，先确认表中是否有多行；新增同类「只取一条」查询时，使用 `selectFirstOne` 并显式排序，不要用 `selectOne` 硬扛。
+
+### 6.4 @LogRecord 成功模板引用的变量必须放入 LogRecordContext
+
+**问题**: 删除产品/产品分类时，接口报错（`EL1007E`）但数据已删除、审计日志缺失。
+
+**原因**: `@LogRecord` 的 success 模板 `{{#product.name}}`、`{{#productCategory.name}}` 引用的变量从未放入 `LogRecordContext`；日志求值发生在方法执行之后，求值失败导致接口抛错但数据库删除已生效。
+
+**解决**: 删除类操作在方法内 `LogRecordContext.putVariable("product", product)`（`CrmProductServiceImpl.java`）与 `LogRecordContext.putVariable("productCategory", productCategory)`（`CrmProductCategoryServiceImpl.java`）补齐；二开新增 `@LogRecord` 方法时，逐项核对其模板里用到的每个变量都在方法里 put 过。
+
+### 6.5 统计 SQL 必须走 SqlDialectUtils，禁止手写 MySQL 专有函数
+
+**问题**: 新增/修改统计 SQL 时继续手写 `DATE_FORMAT`、`IFNULL`、`FIND_IN_SET`、`TIMESTAMPDIFF`、`LIMIT`、`SUM(IF())`、`MONTH()/YEAR()` 等 MySQL 专有写法，会在 PostgreSQL/Oracle/SQL Server 或 `ONLY_FULL_GROUP_BY` 严格模式下失败。
+
+**原因**: crm 的统计 SQL（`resources/mapper/statistics/*.xml` 与 `resources/mapper/permission/CrmOwnerRecordMapper.xml`）已全面改用框架 `cn.iocoder.yudao.framework.mybatis.core.util.SqlDialectUtils` 生成方言片段：`formatDate/formatYearMonth`、`month/year`、`customerDealCycle`、`findInSetColumn`，`IFNULL`→`COALESCE`、`SUM(IF())`→`SUM(CASE WHEN)`，并去掉表别名的 `AS` 关键字、`GROUP BY` 改用真实列名（不能用 SELECT 别名）且覆盖所有非聚合列。
+
+**解决**: 新增统计 SQL 时按上述方式使用 `SqlDialectUtils`；客户画像等布尔列聚合使用 `SUM(CASE WHEN deal_status = #{trueValue} THEN 1 WHEN deal_status IS NULL THEN NULL ELSE 0 END)`，兼容 PostgreSQL 原生 boolean 列；`GROUP BY` 必须与 SELECT 的非聚合列一致（如按产品分组用 `GROUP BY product.id, product.name`）。
+
 ## 附：排查提示
 
-- **"没有权限"类报错**: 先查 `crm_permission` 表该 bizType/bizId 的记录（`CrmBizTypeEnum` 定义了 20+ 业务类型，跟进记录、数据权限、操作日志共用），再确认操作人是否负责人或 `crm_admin` 角色（`CrmPermissionUtils#isCrmAdmin`）。
-- **统计数据不准**: 统计 SQL 全部手写在 `resources/mapper/statistics/*.xml`，合同相关统计统一过滤 `audit_status = APPROVE`（`${@CrmAuditStatusEnum@APPROVE.status}` OGNL 常量写法，非 SQL 注入入口）；数据不对先核对合同审批状态。
-- **操作日志缺失**: 日志由 `mzt-biz-log` 的 `@LogRecord` 打点（各 Service 方法上），同类内部调用必须走 `getSelf()` 代理，否则日志静默丢失（参考 `importCustomerLog`、`receiveCustomerLog` 的调用方式）。
+- **"没有权限"类报错**: 先查 `crm_permission` 表该 bizType/bizId 的记录（`CrmBizTypeEnum` 定义了 8 种业务类型，跟进记录、数据权限、操作日志共用），再确认操作人是否负责人或 `crm_admin` 角色（`CrmPermissionUtils#isCrmAdmin`）。
+- **统计数据不准**: 统计 SQL 全部手写在 `resources/mapper/statistics/*.xml`（已通过 `SqlDialectUtils` 方言化，详见 6.5），合同相关统计统一过滤 `audit_status = APPROVE`（`${@cn.iocoder.yudao.module.crm.enums.common.CrmAuditStatusEnum@APPROVE.status}` OGNL 常量写法，非 SQL 注入入口）；数据不对先核对合同审批状态。
+- **操作日志缺失**: 日志由 `mzt-biz-log` 的 `@LogRecord` 打点（各 Service 方法上），同类内部调用必须走 `getSelf()` 代理，否则日志静默丢失（参考 `importCustomerLog`、`receiveCustomerLog` 的调用方式）；若模板变量未放入 `LogRecordContext` 还会抛 `EL1007E`（详见 6.4）。

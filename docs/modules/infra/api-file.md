@@ -29,7 +29,7 @@
 **业务逻辑**:
 1. Controller 读取 MultipartFile 的字节内容，以原文件名、directory、contentType 调用 Service。
 2. `FilePathUtils.validateFileName` 校验文件名合法性，禁止携带目录路径（非法抛 FILE_PATH_INVALID）。
-3. 校验文件内容非空（FILE_IS_EMPTY）；通过文件内容探测真实 MIME 类型（不信任客户端传入的 type），校验其在 ALLOWED_FILE_TYPES 白名单内；图片类型还要求与文件名后缀推断的类型一致，否则抛 FILE_TYPE_NOT_ALLOWED。
+3. 校验文件内容非空（FILE_IS_EMPTY）；通过文件内容探测真实 MIME 类型（不信任客户端传入的 type），校验其命中 ALLOWED_FILE_TYPES 白名单，或命中 `.bin` 二进制通道（见下方规则表）；图片类型与 `.bin` 二进制文件还要求内容嗅探类型与文件名后缀推断的类型一致，否则抛 FILE_TYPE_NOT_ALLOWED。
 4. 文件名为空时以内容 SHA-256 作为文件名；文件名无后缀时按 MIME 类型补充后缀。
 5. `generateUploadPath` 生成唯一存储路径：校验 path/directory 合法性，默认启用日期前缀（yyyyMMdd 分目录），时间戳后缀默认关闭（可静态开关调整）。
 6. 获取 Master 文件配置对应的 FileClient（无则断言失败），上传内容并得到访问 URL。
@@ -43,11 +43,21 @@
 | 1_001_003_003 | 文件路径不正确 |
 | 1_001_003_004 | 不支持的文件类型 |
 
+**文件类型校验规则（后端上传，FileServiceImpl.isAllowedFileType / isAllowedBinaryFile）**:
+
+| 文件 | 放行条件 | 说明 |
+|------|---------|------|
+| 白名单类型 | 内容嗅探类型命中 `ALLOWED_FILE_TYPES` | 图片（`image/*`）额外要求内容类型与后缀推断类型一致 |
+| `.bin` 二进制 | 内容嗅探类型为 `application/octet-stream` 且文件名后缀为 `bin`（大小写不敏感） | 用于 IoT OTA 固件；内容还必须与后缀推断类型一致，即内容不能被识别为 ELF/PE、脚本、HTML、SVG、图片等 |
+| 其它未知后缀 | 一律拒绝 | 如 `.so`、`.dump`、`.unknown`、无后缀，即便内容也是 `application/octet-stream` 也不放行 |
+
+> 注意：`application/octet-stream` 本身不是白名单类型——它是所有未知后缀、未知内容的识别结果。因此只放行「后缀为 `.bin` 且内容确为不可识别二进制」的文件，`ALLOWED_BINARY_EXTENSIONS` 当前仅含 `bin`；需要支持 `.hex`/`.ota` 等固件后缀时需同时修改该常量与校验逻辑。
+
 ### 1.2 获取文件预签名地址（前端直传模式）
 
 - **路径**: GET /infra/file/presigned-url
 - **权限**: 已认证（未配置 @PreAuthorize）
-- **说明**: 模式二：前端直传七牛、阿里云 OSS 等 S3 协议存储器，先获取预签名上传地址与访问地址。
+- **说明**: 模式二：前端直传七牛、阿里云 OSS、MinIO、RustFS 等 S3 协议存储器，先获取预签名上传地址与访问地址。
 
 **请求参数**（Query）:
 
@@ -67,7 +77,7 @@
 
 **业务逻辑**:
 1. `generateUploadPath` 生成唯一存储路径（同 1.1 的路径生成规则）。
-2. 前端直传无法读取文件内容，仅按文件名推断 MIME 类型并校验白名单，不合法抛 FILE_TYPE_NOT_ALLOWED。
+2. 前端直传无法读取文件内容，仅按文件名推断 MIME 类型并校验白名单（`.bin` 后缀按 `application/octet-stream` 放行），不合法抛 FILE_TYPE_NOT_ALLOWED。
 3. 获取 Master FileClient，调用 presignPutUrl 生成预签名上传 URL，presignGetUrl 生成预签名访问 URL。
 4. 返回 configId、path、uploadUrl、url。
 
@@ -92,14 +102,14 @@
 | path | String | 是 | @NotNull | 文件路径（存储路径） |
 | name | String | 是 | @NotNull | 原文件名 |
 | url | String | 是 | @NotNull | 文件 URL |
-| type | String | 否 | 无 | 文件 MIME 类型 |
+| type | String | 否 | 无 | 文件 MIME 类型（客户端传入值不被信任，服务端按文件名推断后覆盖） |
 | size | Long | 否 | 无（Schema 标记 REQUIRED） | 文件大小 |
 
 **响应**: CommonResult&lt;Long&gt; —— 文件编号
 
 **业务逻辑**:
 1. `validatePath` 校验存储路径合法性（禁止绝对路径/目录穿越），`validateFileName` 校验并规范化原文件名。
-2. 分别按原文件名与存储路径推断 MIME 类型并校验白名单，二者不一致时抛 FILE_TYPE_NOT_ALLOWED（前端直传不校验文件内容）。
+2. 分别按原文件名与存储路径推断 MIME 类型并校验白名单（`.bin` 后缀放行），二者推断类型必须一致，否则抛 FILE_TYPE_NOT_ALLOWED（前端直传不校验文件内容）。校验通过后以推断结果覆盖 `type` 落库，客户端传入的 `type` 不被信任（`.bin` 落库为 `application/octet-stream`）。
 3. 处理 URL：移除 URL 中的查询参数（如私有桶的签名参数），保证 URL 唯一性。
 4. VO 转换为 FileDO 插入数据库，返回文件编号。
 
@@ -169,7 +179,7 @@
 
 - **路径**: GET /infra/file/{configId}/get/**（path 为文件路径）
 - **权限**: @PermitAll（匿名可访问，且标注 @TenantIgnore 忽略租户）
-- **说明**: 从指定配置的存储器读取文件内容，以附件形式输出。
+- **说明**: 从指定配置的存储器读取文件内容并回写响应：非脚本类图片以 inline 方式直接显示，其余类型以附件（attachment）方式下载，SVG/HTML/XML 等可携带脚本的类型额外追加 `Content-Security-Policy: sandbox`。
 
 **请求参数**（Path）:
 
@@ -178,13 +188,14 @@
 | configId | Long | 是 | @PathVariable | 配置编号 |
 | path | String | 是 | 无（URL 通配段） | 文件路径，取 /get/ 之后的部分 |
 
-**响应**: 文件二进制流（attachment）；文件不存在时返回 HTTP 404。
+**响应**: 文件二进制流。非脚本类图片（`image/*` 且非 svg/html/xml）以 `Content-Disposition: inline` 直接显示，其余类型为 `attachment` 附件下载；可携带脚本的类型（svg/html/xml）追加 `Content-Security-Policy: sandbox` 头并强制附件下载；响应统一带 `X-Content-Type-Options: nosniff`。文件不存在时返回 HTTP 404。
 
 **业务逻辑**:
 1. 从请求 URI 截取 /get/ 之后的路径，为空抛出 IllegalArgumentException；对路径做 URL 解码，解决中文、%、+ 等特殊字符问题。
 2. `validatePath` 校验路径合法性，按 configId 获取 FileClient（经 10 秒异步刷新的本地缓存）读取文件内容。
 3. 内容为 null 时记录 warn 日志并返回 HTTP 404。
-4. 按 configId + path 查询最新文件记录，取其原文件名（无记录则取路径末段）作为下载文件名，写出附件内容。
+4. 按 configId + path 查询最新文件记录，取其原文件名（无记录则取路径末段）作为下载文件名。
+5. 通过 `FileTypeUtils.writeAttachment` 写出响应：先按内容嗅探修正 MIME 类型（文件名伪装为 svg/html/xml 时以内容为准），图片且非可携带脚本类型时用 `inline` 回显，其余用 `attachment` 下载，可携带脚本类型追加 `Content-Security-Policy: sandbox`；视频类型额外补 `Accept-Ranges: bytes` 与 `Content-Length`。
 
 **错误码**:
 
@@ -248,7 +259,21 @@
 
 ## 2. 文件配置管理（FileConfigController）
 
-存储器 storage 取值参见 FileStorageEnum：DB=1、LOCAL=10（本地磁盘）、FTP=11、SFTP=12、S3=20（兼容七牛/阿里云/腾讯云等 S3 协议）。FileClient 通过 Guava LoadingCache 缓存（10 秒异步刷新），Master 配置使用固定缓存键 0。
+存储器 storage 取值参见 FileStorageEnum：DB=1、LOCAL=10（本地磁盘）、FTP=11、SFTP=12、S3=20（兼容 MinIO、RustFS、七牛、阿里云、腾讯云、华为云等 S3 协议）。FileClient 通过 Guava LoadingCache 缓存（10 秒异步刷新），Master 配置使用固定缓存键 0。
+
+**S3 存储器（storage=20）配置要点（S3FileClientConfig）**:
+
+| 字段 | 说明 |
+|------|------|
+| endpoint | S3 API 地址（必填）。RustFS 用 S3 API 端口 9000（不是 9001 控制台端口），如 `http://127.0.0.1:9000` |
+| domain | 访问域名；留空时取 `endpoint/bucket`。PathStyle 访问需带上 `/bucket` 且前端可访问，如 `http://127.0.0.1:9000/ruoyi-vue-pro` |
+| bucket | 存储桶名，如 `ruoyi-vue-pro` |
+| accessKey / accessSecret | 访问密钥；RustFS 取服务端启动时配置的 `RUSTFS_ACCESS_KEY` / 密钥 |
+| enablePathStyleAccess | 是否启用 PathStyle；MinIO、RustFS 建议 `true`（RustFS 默认使用 PathStyle，虚拟主机风格需服务端额外配置 `RUSTFS_SERVER_DOMAINS`） |
+| enablePublicAccess | 是否公共桶；私有桶需通过 `presignGetUrl` 生成带签名的临时访问地址 |
+| region | 区域；RustFS 需与服务端 `RUSTFS_REGION` 一致，不填写时默认 `us-east-1` |
+
+> 初始化脚本 `sql/mysql/ruoyi-vue-pro.sql` 已内置示例配置 `id=36`「RustFS 存储（示例）」（endpoint/domain 指向本机 9000 端口、PathStyle=true、region=us-east-1），需替换为自己的地址与密钥后使用。
 
 ### 2.1 创建文件配置
 
@@ -441,3 +466,18 @@
 | 错误码 | 说明 |
 |-------|------|
 | 1_001_006_001 | 该文件配置不允许删除，原因：它是主配置，删除会导致无法上传文件 |
+
+---
+
+## 3. 用户 App 端文件接口（AppFileController）
+
+- **前缀**: `/app-api/infra/file`（框架按 `**.controller.app.**` 包自动补 `/app-api` 前缀，与 Admin 端 `/admin-api/infra/file` 区分）
+- **权限**: 三个端点均未配置 @PreAuthorize，仅需登录
+
+| 路径 | 方法 | 说明 | 对应 Admin 端点 |
+|-----|------|------|----------------|
+| /app-api/infra/file/upload | POST | 上传文件（后端上传模式），请求参数 AppFileUploadReqVO（file + directory），响应 CommonResult&lt;String&gt; | 同 1.1 |
+| /app-api/infra/file/presigned-url | GET | 获取预签名上传地址（name + directory），响应 CommonResult&lt;FilePresignedUrlRespVO&gt; | 同 1.2 |
+| /app-api/infra/file/create | POST | 前端直传完成后登记文件（FileCreateReqVO），响应 CommonResult&lt;Long&gt; | 同 1.3 |
+
+> App 端直接复用 `FileService` 的 `createFile(byte[], name, directory, type)` / `presignPutUrl` / `createFile(FileCreateReqVO)`，文件类型校验、路径校验、错误码与上传结果均与 Admin 端（1.1~1.3）一致；下载接口（1.6，@PermitAll）不区分 Admin/App 端。

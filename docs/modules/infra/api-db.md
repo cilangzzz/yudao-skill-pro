@@ -148,4 +148,4 @@
 
 - **master 主数据源**: id 固定为 0，来源于 application 配置文件中 dynamic-datasource 的 primary 数据源，仅支持查询展示，不支持增删改。
 - **密码加密存储**: DataSourceConfigDO 的 password 字段使用 EncryptTypeHandler 加密存储，且该表通过 @TenantIgnore 忽略租户隔离。
-- **内部服务 DatabaseTableService**: 本域还包含 DatabaseTableServiceImpl（getTableList / getTable），无 HTTP 端点，供代码生成器（CodegenServiceImpl）使用：基于数据源配置通过 MyBatis-Plus Generator 解析目标库的表结构，解析时忽略视图、排除 ACT_/QRTZ_/FLW_ 等工作流与定时任务前缀表、Oracle 系统表及含 $ 的系统表，并按表名排序。
+- **内部服务 DatabaseTableService**: 本域还包含 DatabaseTableServiceImpl（getTableList / getTable），无 HTTP 端点，供代码生成器（CodegenServiceImpl）使用：基于数据源配置通过 MyBatis-Plus Generator 解析目标库的表结构，解析时忽略视图、排除 ACT_/QRTZ_/FLW_ 等工作流与定时任务前缀表、Oracle 系统表及含 $ 的系统表，并按表名排序。当数据源 URL 解析出的 `DbType` 为神通 OSCAR 时，会注入自定义 `ITypeConvertHandler`，把 JDBC 类型为 OTHER 的 TEXT 字段按 String（`DbColumnType.STRING`）处理，其它类型沿用 Generator 默认转换，避免 TEXT 列生成 Object 类型。

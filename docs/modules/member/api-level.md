@@ -26,7 +26,7 @@
 | discountPercent | Integer | 是 | @NotNull、@Range(min=0, max=100) | 享受折扣（0-100） |
 | icon | String | 否 | @URL | 等级图标（URL 格式） |
 | backgroundUrl | String | 否 | @URL | 等级背景图（URL 格式） |
-| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态（1 开启 / 0 禁用） |
+| status | Integer | 是 | @NotNull、@InEnum(CommonStatusEnum) | 状态（0 开启 / 1 禁用） |
 
 **响应**: CommonResult<Long>
 
@@ -173,7 +173,7 @@
 | 字段 | 类型 | 必填 | 校验规则 | 说明 |
 |-----|------|------|---------|------|
 | name | String | 否 | - | 等级名称（模糊匹配） |
-| status | Integer | 否 | - | 状态（1 开启 / 0 禁用） |
+| status | Integer | 否 | - | 状态（0 开启 / 1 禁用） |
 
 **响应**: CommonResult&lt;List&lt;MemberLevelRespVO&gt;&gt;，字段同 1.4 的 MemberLevelRespVO。
 
@@ -284,7 +284,7 @@
 1. 按用户编号、业务编号、业务类型、标题、创建时间区间构建条件，分页查询经验记录
 2. 转换为 MemberExperienceRecordRespVO 分页结果返回
 
-## 附：等级与经验域相关错误码（1-004-011-XXX 段）
+## 附：等级与经验域相关错误码（1_004_011_XXX 段）
 
 | 错误码 | 说明 |
 |-------|------|

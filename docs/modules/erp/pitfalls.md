@@ -71,19 +71,19 @@ warehouseMapper.updateDefaultStatusAtomically(id);
 
 ## 4. 数据一致性相关
 
-### 4.1 产品删除校验不完整：漏掉库存/其它出入库/调拨/盘点，删后异常分支 NPE
+### 4.1 产品删除校验仍有缺口：漏掉调拨明细/库存余量/库存流水，删后异常分支 NPE
 
-**问题**: 只做过"其它入库/其它出库/调拨/盘点"的产品可以被删除，`erp_stock`、`erp_stock_record` 及这些单据明细悬空；后续相关操作在抛业务异常时先抛 `NullPointerException`（500），掩盖真实错误。
+**问题**: 仅出现在库存调拨单（`erp_stock_move_item`）中、或已有 `erp_stock`/`erp_stock_record` 记录的产品仍可被删除，相关记录悬空；后续相关操作在抛业务异常时先抛 `NullPointerException`（500），掩盖真实错误。
 
-**原因**: `ErpProductServiceImpl#deleteProduct` 只校验采购订单/采购入库/采购退货/销售订单/销售出库/销售退货六类明细引用，未校验 `erp_stock_in_item`、`erp_stock_out_item`、`erp_stock_move_item`、`erp_stock_check_item`、`erp_stock`、`erp_stock_record`；而 `ErpStockServiceImpl#updateStockCountIncrement` 的库存不足提示 `productService.getProduct(productId).getName()`、`ErpPurchaseOrderServiceImpl#updatePurchaseOrderInCount` 的超量提示同理，产品被逻辑删除后 `selectById` 返回 null 直接 `.getName()` NPE。
+**原因**: `ErpProductServiceImpl#deleteProduct` 依次校验采购订单/采购入库/采购退货/销售订单/销售出库/销售退货/其它入库/其它出库/库存盘点**九类**明细引用（对应错误码 1_030_500_002~010），但未校验 `erp_stock_move_item`、`erp_stock`、`erp_stock_record` 三类库存域数据；而 `ErpStockServiceImpl#updateStockCountIncrement` 的库存不足提示 `productService.getProduct(productId).getName()`、`ErpPurchaseOrderServiceImpl#updatePurchaseOrderInCount` 的超量提示同理，产品被逻辑删除后 `selectById` 返回 null 直接 `.getName()` NPE。
 
-**解决**: `deleteProduct` 补齐对库存域六张表的 `selectCount` 校验（参照已有的采购/销售域写法）；错误消息拼接处改为判空或统一走 `validProductList`。
+**解决**: `deleteProduct` 补齐对调拨明细、`erp_stock`、`erp_stock_record` 的 `selectCount` 校验（参照已有的九类写法，并新增错误码）；错误消息拼接处改为判空或统一走 `validProductList`。
 
 ### 4.2 仓库/客户/供应商/结算账户删除无任何引用校验
 
 **问题**: 有库存、有单据的仓库，有销售订单的客户，有采购订单的供应商，有付款单的结算账户，都能直接删除，单据展示与统计悬空。
 
-**原因**: `ErpWarehouseServiceImpl#deleteWarehouse`、`ErpCustomerServiceImpl#deleteCustomer`、`ErpSupplierServiceImpl#deleteSupplier`、`ErpAccountServiceImpl#deleteAccount` 全部只做 `validateXxxExists` 后直接 `deleteById`，无任何引用检查（对比 `deleteProduct` 至少校验了六类单据）。
+**原因**: `ErpWarehouseServiceImpl#deleteWarehouse`、`ErpCustomerServiceImpl#deleteCustomer`、`ErpSupplierServiceImpl#deleteSupplier`、`ErpAccountServiceImpl#deleteAccount` 全部只做 `validateXxxExists` 后直接 `deleteById`，无任何引用检查（对比 `deleteProduct` 至少校验了九类单据）。
 
 **解决**: 参照 `ErpProductServiceImpl#deleteProduct` 模式，删除前逐域 `selectCount` 校验引用；仓库至少校验 `erp_stock` 与未完成单据，账户至少校验付款/收款单引用。
 
@@ -132,10 +132,28 @@ warehouseMapper.updateDefaultStatusAtomically(id);
 
 **解决**: 统一改用 `ServiceExceptionUtil.exception(ErrorCode)`，为"供应商不一致""业务类型非法"新增错误码；不要用 hutool Assert 做对外接口的业务校验。
 
-### 8.2 采购入库单 accountId 可空却强制校验，报"结算账户不存在"误导
+### 8.2 采购入库单 accountId、其它入库/出库单的 supplierId/customerId 可空却强制校验，报"不存在"误导
 
-**问题**: 采购入库单不填结算账户时保存直接报"结算账户不存在"，与采购订单、付款单（账户均可空）行为不一致。
+**问题**: 采购入库单不填结算账户、其它入库单不填供应商、其它出库单不填客户时，保存直接报"结算账户/供应商/客户不存在"，与采购订单、付款单（账户均可空）等行为不一致。
 
-**原因**: `ErpPurchaseInSaveReqVO.accountId` 无 `@NotNull`（VO 层允许为空），但 `ErpPurchaseInServiceImpl#createPurchaseIn` / `updatePurchaseIn` 无条件调用 `accountService.validateAccount(createReqVO.getAccountId())`，`ErpAccountServiceImpl#validateAccount` 对 null 查不到即抛 `ACCOUNT_NOT_EXISTS`；对比 `ErpPurchaseOrderServiceImpl`、`ErpFinancePaymentServiceImpl` 均有 `if (accountId != null)` 判空。
+**原因**: `ErpPurchaseInSaveReqVO.accountId`、`ErpStockInSaveReqVO.supplierId`、`ErpStockOutSaveReqVO.customerId` 均无 `@NotNull`（VO 层允许为空），但 `ErpPurchaseInServiceImpl#createPurchaseIn/updatePurchaseIn` 无条件调用 `accountService.validateAccount(...)`，`ErpStockInServiceImpl#createStockIn/updateStockIn` 无条件调用 `supplierService.validateSupplier(...)`，`ErpStockOutServiceImpl#createStockOut/updateStockOut` 无条件调用 `customerService.validateCustomer(...)`；三个 validate 方法对 null 查不到即抛 `ACCOUNT_NOT_EXISTS` / `SUPPLIER_NOT_EXISTS` / `CUSTOMER_NOT_EXISTS`。对比 `ErpPurchaseOrderServiceImpl`、`ErpFinancePaymentServiceImpl` 均有 `if (accountId != null)` 判空。
 
-**解决**: 二选一对齐：VO 加 `@NotNull` 明确必填；或与订单/付款单一致加 null 判断（账户可空）。
+**解决**: 二选一对齐：VO 加 `@NotNull` 明确必填；或与订单/付款单一致加 null 判断（关联方可空）。
+
+## 9. 统计口径与多数据库 SQL 相关
+
+### 9.1 统计接口仅统计已审核（status = 20）单据，升级后金额会变小
+
+**问题**: 升级后采购/销售统计（`summary` 与 `time-summary`）金额比旧版本小；单据审核后再反审核会从统计中消失；需要"全部单据"口径的看板/对账与接口对不上。
+
+**原因**: `ErpPurchaseStatisticsMapper.xml` 的 `getPurchasePrice` 与 `ErpSaleStatisticsMapper.xml` 的 `getSalePrice` 中，入库（出库）子查询与退货子查询均新增 `AND status = 20`（`ErpAuditStatus.APPROVE`，已审核）。未审核（10）单据不再计入，反审核回到 10 后从统计中剔除；四个统计端点（含逐月趋势）复用同一 SQL，故金额均随审批状态口径变化。
+
+**解决**: 使用统计接口时按"仅已审核"理解口径，前端看板数字跳变属预期；需要包含未审核单据的全量统计时，另写查询，不能只看该接口。
+
+### 9.2 无顶层 FROM 的统计 SQL 依赖 fromDual()，且不能使用 MySQL 专属函数
+
+**问题**: 手工删掉 `${...SqlDialectUtils@fromDual()}` 后 Oracle 报 `ORA-00923`（缺 FROM）；反过来在 MySQL/PostgreSQL/SQLServer 上出现 `FROM DUAL` 会语法错误。新增原生 SQL 若用 `IFNULL`，在非 MySQL 数据库执行失败。
+
+**原因**: 统计 XML 顶层 SELECT 无 FROM，Oracle 要求 `FROM DUAL`；`SqlDialectUtils.fromDual()` 按运行时数据库方言返回 `FROM DUAL`（Oracle）或空串（其它），因此不能硬编码。原 MySQL 专属 `IFNULL` 已改为标准 `COALESCE(SUM(total_price), 0)`。
+
+**解决**: 不要手工删除该占位；新增原生 Mapper SQL 统一使用 `COALESCE` 等标准函数，避免 `IFNULL`、`DATE_FORMAT`、`LIMIT` 等 MySQL 专属写法，必要时改用 `SqlDialectUtils` 提供的方言片段。

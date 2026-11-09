@@ -6,7 +6,7 @@
 
 - **模块路径**: `yudao-module-hrm`（单模块，非多子模块布局）
 - **业务定位**: 覆盖 HR 全流程 —— 员工建档与异动（入职/转正/调岗/晋升/离职）、招聘职位与候选人管理、考勤组与打卡/请假、薪资组与月度工资核算、社保方案与月度社保表、绩效考核计划与阶段流转。同时提供 HR 工作台统计与员工自助门户（手机打卡、查工资条、查社保、办理请假等）。
-- **技术栈**: Spring Boot 2.7.18（仓库 2026.09-jdk8 分支，Java 8）/ MyBatis-Plus（`yudao-spring-boot-starter-mybatis`）/ Quartz（`yudao-spring-boot-starter-job`）/ EasyExcel（`yudao-spring-boot-starter-excel`）/ Spring Security 权限注解 / mzt-biz-log `@LogRecord` 操作日志
+- **技术栈**: Spring Boot 2.7.18（仓库 revision `2026.10-jdk8-SNAPSHOT`，Java 8）/ MyBatis-Plus（`yudao-spring-boot-starter-mybatis`）/ Quartz（`yudao-spring-boot-starter-job`）/ EasyExcel（`yudao-spring-boot-starter-excel`）/ Spring Security 权限注解 / mzt-biz-log `@LogRecord` 操作日志
 
 > 注意：本模块在根 `pom.xml` 与 `yudao-server/pom.xml` 中默认被注释禁用，使用时需手动开启依赖并导入表结构。
 
@@ -29,7 +29,7 @@
 | 招聘管理 | 招聘职位与职位类型、招聘渠道、候选人（状态流转/淘汰/转员工）、面试安排与结果、淘汰原因配置 | HrmRecruitPostDO、HrmRecruitCandidateDO、HrmRecruitInterviewDO |
 | 考勤管理 | 考勤组（班次/打卡点/WiFi/扣罚规则）、节假日、打卡记录（GPS/WiFi 校验）、请假审批（对接 BPM）、月度考勤统计与导出 | HrmAttendanceGroupDO、HrmAttendanceClockDO、HrmAttendanceLeaveDO |
 | 薪资管理 | 薪资配置/薪资组/薪资项/计税规则/调薪模板、员工薪资档案与定薪调薪、月度工资表核算与导入、工资条发放与阅读状态 | HrmSalaryEmployeeInfoDO、HrmSalaryMonthRecordDO、HrmSalarySlipDO |
-| 社保管理 | 社保方案与参保项目、员工参保信息、月度社保表（首月/次月创建）、员工月度参保项目调整与停缴 | HrmInsuranceSchemeDO、HrmInsuranceMonthRecordDO |
+| 社保管理 | 社保方案与参保项目、员工参保信息、月度社保表（首月/次月创建，三个写操作共用全局 Redisson 分布式锁跨租户互斥）、员工月度参保项目调整与停缴 | HrmInsuranceSchemeDO、HrmInsuranceMonthRecordDO |
 | 绩效管理 | 考核模板/结果模板、绩效计划（启动/评分/面谈/归档/终止）、员工绩效考核与多阶段评分、申诉、绩效归档，结果可同步薪资系数 | HrmPerformancePlanDO、HrmPerformanceAssessmentDO |
 | 工作台 | HR 工作台与团队工作台的统计摘要和日历 | 无独立 DO（聚合查询） |
 | 员工自助门户 | 员工端（portal）自助：档案查看/更新、打卡、请假、查工资条/社保、绩效任务处理与申诉 | 复用各域 DO |
@@ -88,7 +88,7 @@
 | /hrm/recruit/candidate/eliminate | PUT | 淘汰招聘候选人 | `hrm:recruit:candidate:update` |
 | /hrm/recruit/interview/update-result | PUT | 更新招聘面试结果 | `hrm:recruit:interview:update` |
 | /hrm/recruit/post/page | GET | 获得招聘职位分页 | `hrm:recruit:post:query` |
-| /hrm/recruit/channel/simple-list | GET | 招聘渠道精简列表 | `hrm:recruit:channel:query` |
+| /hrm/recruit/channel/simple-list | GET | 招聘渠道精简列表 | 已认证（无 @PreAuthorize） |
 
 ### 考勤管理（attendance）— 5 个 Controller，30 端点，详见 [api-attendance.md](api-attendance.md)
 
@@ -105,7 +105,7 @@
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |---------|---------|------|---------|
 | /hrm/attendance/clock/get-shift | GET | 获得员工实际班次和允许打卡时间 | `hrm:attendance:clock:create` 或 `hrm:attendance:clock:update` |
-| /hrm/attendance/leave/get | GET | 获得请假 | `hrm:attendance:leave:query` 或 `hrm:attendance:clock:query` |
+| /hrm/attendance/leave/get | GET | 获得请假 | `hrm:attendance:leave:query` 或 `bpm:process-instance:query` 或 `bpm:task:query` |
 | /hrm/attendance/statistics/month-record-page | GET | 查询员工月度考勤汇总 | `hrm:attendance:statistics:query` |
 | /hrm/attendance/group/my | GET | 获得员工所在考勤组 | `hrm:attendance:group:query` |
 
@@ -131,8 +131,8 @@
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |---------|---------|------|---------|
 | /hrm/salary/employee-info/update-list | PUT | 批量调薪 | `hrm:salary:employee-info:update` |
-| /hrm/salary/month-record/compute | POST | 核算工资表 | `hrm:salary:month-record:update` |
-| /hrm/salary/month-record/compute-import | POST | 带导入文件核算工资表 | `hrm:salary:month-record:update` |
+| /hrm/salary/month-record/compute | POST | 核算工资表 | `hrm:salary:month-record:compute` |
+| /hrm/salary/month-record/compute-import | POST | 带导入文件核算工资表 | `hrm:salary:month-record:compute` |
 | /hrm/salary/slip-send-record/create | POST | 发放工资条 | `hrm:salary:slip:create` |
 | /hrm/salary/option/sync | PUT | 同步标准薪资项 | `hrm:salary:option:update` |
 
@@ -143,15 +143,16 @@
 | HrmInsuranceSchemeController | 社保方案 CRUD/列表/精简列表 | 6 |
 | HrmInsuranceStandardController | 标准参保类型/项目列表 | 2 |
 | HrmInsuranceEmployeeInfoController | 员工参保信息查询/保存/换方案 | 3 |
-| HrmInsuranceMonthRecordController | 月度社保表首月/次月创建/删除/查询 | 6 |
+| HrmInsuranceMonthRecordController | 月度社保表首月/次月创建、删除、查询（三个写操作共用全局分布式锁，跨租户互斥） | 6 |
 | HrmInsuranceMonthEmployeeRecordController | 员工月度社保分页/调项/停缴/添加参保 | 6 |
 
 代表性端点：
 
 | 接口路径 | HTTP方法 | 说明 | 权限标识 |
 |---------|---------|------|---------|
-| /hrm/insurance/month-record/create-next | POST | 创建下月社保表 | `hrm:insurance:month-record:create` |
-| /hrm/insurance/month-employee-record/stop-list | PUT | 批量停止员工参保 | `hrm:insurance:month-employee-record:delete` |
+| /hrm/insurance/month-record/create-first | POST | 创建首月社保表（抢全局变更锁，超时返回 423） | `hrm:insurance:month-record:create` |
+| /hrm/insurance/month-record/create-next | POST | 创建下月社保表（抢全局变更锁，超时返回 423） | `hrm:insurance:month-record:create` |
+| /hrm/insurance/month-employee-record/stop-list | PUT | 批量停止员工参保 | `hrm:insurance:month-record:update` |
 | /hrm/insurance/employee-info/update-scheme | PUT | 更新员工参保方案 | `hrm:insurance:employee-info:update` |
 | /hrm/insurance/scheme/simple-list | GET | 社保方案精简列表 | `hrm:insurance:scheme:query` |
 
@@ -170,8 +171,8 @@
 |---------|---------|------|---------|
 | /hrm/performance/plan/start | POST | 启动绩效计划 | `hrm:performance:plan:update` |
 | /hrm/performance/plan/archive | POST | 归档绩效计划 | `hrm:performance:plan:update` |
-| /hrm/performance/assessment/create-list | POST | 添加员工绩效考核 | `hrm:performance:assessment:create` |
-| /hrm/performance/assessment/archive-page | GET | 获得绩效归档分页 | `hrm:performance:assessment:query` |
+| /hrm/performance/assessment/create-list | POST | 添加员工绩效考核 | `hrm:performance:plan:update` |
+| /hrm/performance/assessment/archive-page | GET | 获得绩效归档分页 | `hrm:performance:archive:query` |
 
 ### 员工自助门户（portal）— 15 个 Controller，44 端点，详见 [api-portal.md](api-portal.md)
 
@@ -218,7 +219,7 @@
 
 ## 数据模型
 
-共 **50** 张表，全部继承 `BaseDO`（无 TenantBaseDO）。未标注 @TableName 的表由 MyBatis-Plus 按驼峰转下划线推导。
+共 **50** 张表，其中 49 个 DO 继承 `BaseDO`、仅工资条模板 `HrmSalarySlipTemplateDO` 继承 `TenantBaseDO`（tenant_id=0 为平台级默认模板）。未标注 @TableName 的表由 MyBatis-Plus 按驼峰转下划线推导。
 
 | 表名 | 说明 | 继承基类 | 关键字段 |
 |------|------|---------|---------|
@@ -253,7 +254,7 @@
 | hrm_salary_change_record | 定薪调薪记录 | BaseDO | employee_id、type、reason、effect_time、before_total、after_total、salary_options(JSON)、status |
 | hrm_salary_month_record | 月度工资表 | BaseDO | title、year、month、employee_count、expected_pay_salary、personal_tax、real_pay_salary、option_headers(JSON)、status |
 | hrm_salary_month_employee_record | 员工月度工资记录 | BaseDO | month_record_id、employee_id、year、month、need_work_day、actual_work_day、taxable_salary、personal_tax、option_values(JSON) |
-| hrm_salary_slip_template | 工资条模板 | BaseDO | name、hide_empty、default_status、options(JSON) |
+| hrm_salary_slip_template | 工资条模板 | TenantBaseDO | tenant_id（0 为平台级默认模板）、name、hide_empty、default_status、options(JSON) |
 | hrm_salary_slip_send_record | 工资条发放记录 | BaseDO | month_record_id、employee_count、send_employee_count、year、month |
 | hrm_salary_slip | 工资条 | BaseDO | send_record_id、month_employee_record_id、employee_id、year、month、read_status、real_pay_salary、options(JSON) |
 | hrm_insurance_scheme | 社保方案 | BaseDO | name、area_id、household_type、type |
@@ -285,7 +286,8 @@
 
 - **上游**（本模块依赖）:
   - framework：`yudao-spring-boot-starter-web`、`yudao-spring-boot-starter-security`、`yudao-spring-boot-starter-mybatis`、`yudao-spring-boot-starter-excel`、`yudao-spring-boot-starter-job`、`yudao-spring-boot-starter-test`（test）
-  - 业务模块：`yudao-module-system`（DeptApi、AdminUserApi、NotifyMessageSendApi、OperateLogApi）、`yudao-module-bpm`（BpmProcessInstanceApi、BpmProcessInstanceStatusEvent 事件监听）
+  - 业务模块：`yudao-module-system`（DeptApi、AdminUserApi、NotifyMessageSendApi、OperateLogApi）、`yudao-module-bpm`（BpmProcessInstanceApi、BpmProcessInstanceStatusEventListener 事件监听）
+  - 运行环境：**Redis / Redisson** —— 月度社保表的首月创建、次月创建、删除依赖 `RedissonClient` 实现全局互斥锁（`pom.xml` 未显式声明，经 system/bpm → tenant → redis starter 传递引入）；Redis 不可用时这三个写操作会直接失败
 - **下游**（依赖本模块）: 无 —— 本模块未提供 `api` 包，无其他模块调用；且当前在根 pom 与 yudao-server 中默认注释禁用
 
 ## 详细文档

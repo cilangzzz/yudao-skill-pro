@@ -214,7 +214,7 @@
 
 - **路径**: PUT /crm/clue/transfer
 - **权限**: crm:clue:update
-- **说明**: 将线索负责人转移给新用户，原负责人可按指定权限级别加入团队或被移除，要求负责人权限（@CrmPermission OWNER）。
+- **说明**: 将线索负责人转移给新用户，原负责人可按指定权限级别加入团队或被移除，要求负责人权限或 CRM 管理员（@CrmPermission OWNER）。
 
 **请求参数 (CrmClueTransferReqVO)**:
 
@@ -222,13 +222,13 @@
 |-----|------|-----|---------|------|
 | id | Long | 是 | @NotNull | 线索编号 |
 | newOwnerUserId | Long | 是 | @NotNull | 新负责人的用户编号 |
-| oldOwnerPermissionLevel | Integer | 否 | @InEnum(CrmPermissionLevelEnum) | 老负责人加入团队后的权限级别；为 null 表示移除 |
+| oldOwnerPermissionLevel | Integer | 否 | @InEnum(CrmPermissionLevelEnum) | 老负责人保留的权限级别；为 null 表示移除，只能传只读(2) 或读写(3)，传负责人(1) 报错 |
 
 **响应**: CommonResult&lt;Boolean&gt; —— 固定返回 true
 
 **业务逻辑**:
 1. 校验线索存在，不存在抛出 CLUE_NOT_EXISTS。
-2. 调用数据权限服务执行转移：新负责人获得 OWNER 权限，老负责人按 oldOwnerPermissionLevel 保留团队权限或移除。
+2. 调用数据权限服务执行转移（`transferPermission`，详见 [api-permission.md](api-permission.md) 第 2 节）：操作人须为负责人或 CRM 管理员；新负责人获得 OWNER 权限（已在团队时直接提升），老负责人按 oldOwnerPermissionLevel 保留只读/读写或移除。
 3. 更新线索的负责人为新用户编号。
 4. 记录转移操作日志。
 
@@ -237,8 +237,10 @@
 | 错误码 | 说明 |
 |-------|------|
 | 1_020_001_000 | 线索不存在 |
+| 1_020_007_000 | 数据权限不存在（该数据缺少负责人权限记录） |
 | 1_020_007_001 | 操作失败，原因：没有权限 |
 | 1_020_007_003 | 操作失败，原因：转移对象已经是该负责人 |
+| 1_020_007_010 | 操作失败，原因：老负责人的权限级别只能是只读或读写 |
 
 ### 2.2 线索转化为客户
 

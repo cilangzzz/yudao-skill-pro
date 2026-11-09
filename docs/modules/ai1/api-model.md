@@ -427,10 +427,10 @@ Service 层负责事务、存在性校验与占位符解析；harness 层只做�
 
 ### 3.3 模型实例缓存与失效
 
-- 双 Guava Cache：`chatModelCache`（key 含 sessionKey）与 `embeddingModelCache`，均 `maximumSize=128`、`expireAfterWrite=10 分钟`；
+- 双 Guava Cache：`chatModelCache`（key 含 sessionKey）与 `embeddingModelCache`，均 `maximumSize=500`、`expireAfterWrite=10 分钟`；
 - 缓存 key = `providerId:modelId:Objects.hash(配置指纹)[:sessionKey]`，配置指纹由 baseUrl / apiKey / model / modelType / headers 计算——配置变化后新请求自然命中新 key，并发下按旧快照构建的实例只会写入旧 key、不再被读取；仅当 Header 使用 `{session}` 占位符且传入了 sessionId 时才把会话编号纳入 key，否则同一模型跨会话共享实例；
 - 显式失效：`updateModel` / `deleteModelListByIds` 调 `evictByModelId`（按缓存 key 第 2 段等于 modelId 匹配），`updateProvider` / `deleteProviderListByIds` 调 `evictByProviderId`（按 `providerId:` 前缀匹配），同时清 chat 与 embedding 两个 Cache；
-- **失效仅作用于本节点 JVM**。多节点部署时，其他节点最长 10 分钟内仍用旧配置发起请求，靠 `expireAfterWrite` 收敛——排查「改了配置不生效」先看这条。
+- **显式失效只作用于本节点 JVM，但跨节点没有生效延迟**：缓存 key 含配置指纹，其他节点下一次调用即按最新配置算出新 key 并重建模型，旧 key 只是不再命中；`expireAfterWrite=10 分钟` 仅用于回收这些旧 key。排查「改了配置不生效」时先确认配置是否真正变更（如 apiKey 被脱敏值回传覆盖）、请求是否落在同一节点，不要再按「等 10 分钟」处理。
 
 ### 3.4 引用互锁与删除顺序
 
@@ -533,10 +533,10 @@ flowchart LR
     A["消费方<br/>Ai1SessionStreamTool / Ai1MemoryTool<br/>Ai1RagTool / Ai1KnowledgeDocumentServiceImpl"] -->|"getModelRespBO(providerId, modelId)"| B["Ai1ModelServiceImpl<br/>校验 + 组装运行时快照<br/>ENV 占位符已解析"]
     B --> C["Ai1LlmModelFactory<br/>缓存 key = providerId:modelId:<br/>配置指纹[:sessionKey]"]
     C -->|命中| D["复用 OpenAiChatModel / OpenAiEmbeddingModel"]
-    C -->|未命中| E["buildOpenAiApi 构建并缓存<br/>Guava Cache 128 / 10 分钟过期"]
+    C -->|未命中| E["buildOpenAiApi 构建并缓存<br/>Guava Cache 500 / 10 分钟过期（TTL 回收旧 key）"]
     F["Ai1ModelServiceImpl<br/>updateModel / deleteModelListByIds"] -->|evictByModelId| C
     G["Ai1ProviderServiceImpl<br/>updateProvider / deleteProviderListByIds"] -->|evictByProviderId| C
-    C -.->|"失效仅本节点 JVM<br/>其他节点靠 10 分钟过期收敛"| H["多节点部署"]
+    C -.->|"失效仅本节点 JVM<br/>其他节点下次调用按新指纹重建<br/>10 分钟 TTL 仅回收旧 key"| H["多节点部署"]
 ```
 
 ---

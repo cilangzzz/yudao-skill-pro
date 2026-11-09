@@ -62,7 +62,7 @@
 | downstreamCount | Integer | 下行消息数量 |
 
 **业务逻辑**（IotDeviceMessageServiceImpl#getDeviceMessageSummaryByDate）:
-1. 将 times[0]、times[1] 转为毫秒时间戳，调用 TDengine Mapper（IotDeviceMessageMapper）的 selectDeviceMessageCountGroupByDate，对超级表 device_message 按 TIMETRUNCATE(ts, 1h) 逐小时分组，分别统计 upstream = true（上行）与 upstream = false（下行）的消息数。
+1. 将 times[0]、times[1] 转为毫秒时间戳，调用时序库 DAO 抽象层（IotDeviceMessageDAO，按 `yudao.iot.storage.type` 路由到 TDengine 的 IotDeviceMessageMapper 或 IoTDB 的 IotDeviceMessageIoTDBMapper）的 selectDeviceMessageCountGroupByDate，按小时分组分别统计 upstream = true（上行）与 upstream = false（下行）的消息数。
 2. 使用 LocalDateTimeUtils.getDateRangeList 按请求的 interval 将整个时间范围切分为若干个连续的时间区间。
 3. 遍历每个时间区间，从逐小时统计结果中筛选落在该区间内的记录，分别累加 upstream_count 与 downstream_count。
 4. 按区间格式化时间轴标签（LocalDateTimeUtils.formatDateRange），组装为 IotStatisticsDeviceMessageSummaryByDateRespVO 列表返回。

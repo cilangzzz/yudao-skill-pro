@@ -104,9 +104,9 @@ Mapper 继承 `BaseMapperX`，提供基础 CRUD 操作，使用 `@Mapper` 注解
 public interface BpmFormMapper extends BaseMapperX<BpmFormDO> {
 
     default PageResult<BpmFormDO> selectPage(BpmFormPageReqVO reqVO) {
-        return selectPage(reqVO, new LambdaQueryWrapperX<BpmFormDO>()
-            .likeIfPresent(BpmFormDO::getName, reqVO.getName())
-            .orderByDesc(BpmFormDO::getId));
+        return selectPage(reqVO, new QueryWrapperX<BpmFormDO>()
+            .likeIfPresent("name", reqVO.getName())
+            .orderByDesc("id"));
     }
 }
 ```
@@ -120,6 +120,7 @@ BPM 模块错误码前缀为 `1-009-XXX-XXX`，常量统一定义在 `ErrorCodeC
 | 1_009_002_000 | 已经存在流程标识为【{}】的流程 |
 | 1_009_003_002 | 流程定义不存在 |
 | 1_009_004_000 | 流程实例不存在 |
+| 1_009_004_006 | 流程 Http 请求调用失败（网络调用失败与黑白名单校验拒绝共用） |
 | 1_009_005_001 | 操作失败，原因：该任务的审批人不是你 |
 | 1_009_005_002 | 流程任务不存在 |
 
@@ -242,7 +243,7 @@ public class BpmExpenseStatusListener extends BpmProcessInstanceStatusEventListe
 
 **步骤 2：实现策略接口**
 
-实现 `BpmTaskCandidateStrategy` 接口。示例：
+实现 `BpmTaskCandidateStrategy` 接口（示例中的 `CUSTOM` 需先在枚举中新增）。可只重写 `calculateUsers(String param)`；若需按任务或流程活动上下文计算，可改为重写 `calculateUsersByTask(DelegateExecution, String)` / `calculateUsersByActivity(...)`。示例：
 
 ```java
 @Component
@@ -259,9 +260,9 @@ public class BpmTaskCandidateCustomStrategy implements BpmTaskCandidateStrategy 
     }
 
     @Override
-    public Set<Long> calculateUsersByTask(DelegateExecution execution, String param) {
+    public Set<Long> calculateUsers(String param) {
         // 计算审批人
-        return calculateUsers(param);
+        return parseUserIds(param);
     }
 }
 ```
@@ -322,6 +323,35 @@ public class CustomTaskListener implements TaskListener {
 - 流程版本：同一流程定义可以部署多个版本，已运行的实例使用旧版本
 - 权限控制：通过 managerUserIds 配置流程管理员，实现流程管理权限分离
 
+## 配置项
+
+### HTTP 请求黑白名单（yudao.bpm.http-request）
+
+`BpmHttpRequestUtils.executeBpmHttpRequest(ProcessInstance, ...)` 在发起请求前会调用私有方法 `validateHttpRequestUrl` 做域名 / IP 黑白名单校验，规则由 `BpmHttpRequestProperties`（前缀 `yudao.bpm.http-request`）控制：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|-----|------|-------|------|
+| enabled | Boolean | false | 关闭时不做任何校验（与旧版一致）；开启后校验 scheme、host 与黑白名单 |
+| allowHosts（allow-hosts） | Set\<String\> | 空集合 | 白名单，非空时只允许列表中的主机 |
+| denyHosts（deny-hosts） | Set\<String\> | 空集合 | 黑名单，优先于白名单，命中即拒绝 |
+
+校验覆盖的调用点：流程前置/后置通知（`BpmProcessInstanceServiceImpl`）、任务前置/后置通知（`BpmTaskServiceImpl`）、审批人监听器 HTTP（`BpmUserTaskListener`）、HTTP 回调触发器（`BpmHttpCallbackTrigger`）、HTTP 请求触发器（`BpmSyncHttpRequestTrigger`）。
+
+实现要点：
+
+- 主机用 `UriComponentsBuilder` 解析，要求 scheme 为 `http`/`https` 且 host 非空，否则拒绝；主机规范化：去首尾空白、转小写、IPv6 去方括号，再与名单精确匹配。
+- 校验失败统一抛 `PROCESS_INSTANCE_HTTP_CALL_ERROR`（1_009_004_006），不区分"地址非法 / 命中黑名单 / 未命中白名单"。
+- 另一个重载 `executeBpmHttpRequest(BpmProcessInstanceStatusEvent, String)` 不走 `validateHttpRequestUrl`，黑白名单对其不生效。
+
+### 数据库方言自动推断（国产数据库兼容）
+
+`BpmFlowableConfiguration.bpmProcessEngineConfigurationConfigurer` 末尾调用私有方法 `initDatabaseType(configuration)`，在 `databaseType == null && dataSource != null` 时读取 Flowable 数据源元数据：
+
+- `ProductName` 为 `GaussDB` 或 `openGauss`（含 MogDB）→ `DATABASE_TYPE_POSTGRES`。
+- `ProductName` 为 `OSCAR`（神通）→ `DATABASE_TYPE_ORACLE`。
+- 其它数据库不设置，仍由 Flowable 自动识别；ProductName 常量取自 `DbTypeEnum.GAUSS_DB` / `OPENGAUSS` / `OSCAR`，为大小写敏感的精确比较。
+- 元数据读取抛出 `SQLException` 时仅 `log.warn`，不设置方言。
+
 ## 模块依赖
 
 ### 内部依赖（其他模块）
@@ -331,7 +361,9 @@ public class CustomTaskListener implements TaskListener {
 | yudao-module-system | AdminUserApi | 获取用户信息，用于审批人计算和流程发起人信息 |
 | yudao-module-system | DeptApi | 获取部门信息，用于部门负责人审批策略 |
 | yudao-module-system | PermissionApi | 获取用户角色，用于角色审批策略 |
+| yudao-module-system | RoleApi | 校验角色是否存在，用于角色审批策略 |
 | yudao-module-system | PostApi | 获取岗位信息，用于岗位审批策略 |
+| yudao-module-system | SmsSendApi | 发送流程审批 / 超时提醒短信 |
 
 ### 外部依赖（三方库与框架 Starter）
 
@@ -355,6 +387,9 @@ public class CustomTaskListener implements TaskListener {
 | yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/core/candidate/BpmTaskCandidateStrategy.java | 审批人策略接口，定义审批人计算的标准 |
 | yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/core/enums/BpmTaskCandidateStrategyEnum.java | 审批人策略枚举，列出所有支持的审批人分配方式 |
 | yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/enums/ErrorCodeConstants.java | 错误码常量，定义 BPM 模块所有错误码 |
+| yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/config/BpmHttpRequestProperties.java | HTTP 请求黑白名单配置类（yudao.bpm.http-request） |
+| yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/config/BpmFlowableConfiguration.java | Flowable 配置类，注册监听器、ActivityBehaviorFactory 及国产数据库方言推断 |
+| yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/framework/flowable/core/util/BpmHttpRequestUtils.java | 工作流发起 HTTP 请求的工具类，含 URL 黑白名单校验 |
 | yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/enums/definition/BpmModelTypeEnum.java | 流程模型类型枚举，区分 BPMN 和 Simple 设计器 |
 | yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/enums/task/BpmProcessInstanceStatusEnum.java | 流程实例状态枚举，定义流程的所有状态 |
 | yudao-module-bpm/src/main/java/cn/iocoder/yudao/module/bpm/controller/admin/task/BpmTaskController.java | 任务管理 Controller，提供任务审批相关 API |
@@ -402,7 +437,7 @@ public class CustomTaskListener implements TaskListener {
 | controller | HTTP 接口，供前端调用 | BpmModelController（流程模型）、BpmProcessDefinitionController（流程定义）、BpmProcessInstanceController（流程实例）、BpmTaskController（流程任务）、BpmFormController（表单）、BpmCategoryController（分类）、BpmUserGroupController（用户组）、BpmOALeaveController（请假申请示例） |
 | service | 业务逻辑层，封装核心业务 | definition/（流程定义相关服务）、task/（流程任务相关服务）、message/（消息通知服务）、oa/（OA 业务示例，请假） |
 | dal | 数据访问层，与数据库交互 | dataobject/definition/（定义相关 DO）、dataobject/task/（任务相关 DO）、dataobject/oa/（OA 相关 DO）、mysql/（MyBatis Mapper）、redis/（Redis 缓存） |
-| framework/flowable | Flowable 框架集成层 | config/BpmFlowableConfiguration（Flowable 配置）、core/candidate/（审批人策略实现）、core/listener/（流程监听器）、core/behavior/（自定义行为）、core/util/（工具类） |
+| framework/flowable | Flowable 框架集成层 | config/BpmFlowableConfiguration（Flowable 配置、国产数据库方言推断）、config/BpmHttpRequestProperties（HTTP 请求黑白名单）、core/candidate/（审批人策略实现）、core/listener/（流程监听器）、core/behavior/（自定义行为）、core/util/（工具类，含 BpmHttpRequestUtils） |
 
 ### 表关系与 Flowable 原生表
 

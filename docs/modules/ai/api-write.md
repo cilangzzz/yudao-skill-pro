@@ -26,16 +26,25 @@
 | tone | Integer | 是 | @NotNull | 语气（字典 AI_WRITE_TONE） |
 | language | Integer | 是 | @NotNull | 语言（字典 AI_WRITE_LANGUAGE） |
 
-**响应**: Flux&lt;CommonResult&lt;String&gt;&gt;，每个流式分片为一段增量生成文本（data 为字符串片段，非 VO 对象）。
+**响应**: Flux&lt;CommonResult&lt;AiWriteGenerateRespVO&gt;&gt;，每个流式分片为一个 VO 对象（data 不再是裸字符串，属**破坏性变更**）。
+
+| 字段 | 类型 | 说明 |
+|-----|------|------|
+| id | Long | 写作记录编号 |
+| content | String | 本次生成的内容片段（增量） |
+| inputTokens | Long | 输入 Token 数（未知为空，取请求日志的最新快照） |
+| outputTokens | Long | 输出 Token 数（未知为空） |
+| totalTokens | Long | 合计 Token 数（输入、输出都已知时才有值） |
 
 **业务逻辑**:
 1. 尝试按名称获取「写作助手」聊天角色（AiChatRoleEnum.AI_WRITE_ROLE）；若角色配置了模型则使用该模型，否则回退到系统默认的 CHAT 类型模型；角色未设置 systemMessage 时使用枚举内置的角色设定。
 2. 校验模型平台（AiPlatformEnum.validatePlatform），并获取对应的流式 ChatModel；若模型不存在抛 MODEL_NOT_EXISTS，模型类型非 CHAT 抛 MODEL_USE_TYPE_ERROR。
-3. 将请求参数转换为 AiWriteDO（补充 userId、platform、modelId、model 字段）插入数据库，形成写作记录。
-4. 构建 Prompt：SystemMessage 为角色设定；UserMessage 按写作类型套用模板（撰写模板使用 prompt，回复模板使用 originalContent + prompt），并将 format/tone/language/length 字典值翻译为中文标签后填入模板。
-5. 通过 ChatOptions（平台、模型名、temperature、maxTokens）发起流式调用，逐片将增量文本以 CommonResult.success 返回。
-6. 流结束后（doOnComplete）忽略租户上下文，将累计的完整生成内容回写到写作记录的 generatedContent 字段。
-7. 流发生异常（doOnError）时记录错误日志，忽略租户上下文将异常信息回写到 errorMessage 字段，并向前端返回 WRITE_STREAM_ERROR 错误。
+3. 生成 `requestId`（本地 UUID），将请求参数转换为 AiWriteDO（补充 userId、platform、modelId、model、requestId 字段）插入数据库，形成写作记录。
+4. 构建请求日志快照（bizType=写作，bizId=写作记录 id），开始调用模型。
+5. 构建 Prompt：SystemMessage 为角色设定；UserMessage 按写作类型套用模板（撰写模板使用 prompt，回复模板使用 originalContent + prompt），并将 format/tone/language/length 字典值翻译为中文标签后填入模板。
+6. 通过 ChatOptions（平台、模型名、temperature、maxTokens）发起流式调用，逐片将增量文本与最新 Token 用量以 CommonResult.success 返回。
+7. 流结束（doOnComplete）后，按请求开始时捕获的 tenantId 回写累计的 generatedContent 与 Token 用量，并记录 SUCCESS 请求日志；doOnError 记录 FAIL 日志并回写 errorMessage；doOnCancel 记录 CANCEL 日志。
+8. 流发生异常时向前端返回 WRITE_STREAM_ERROR 错误。
 
 **错误码**:
 
@@ -92,6 +101,10 @@
 | tone | Integer | 语气提示词 |
 | language | Integer | 语言提示词 |
 | errorMessage | String | 错误信息 |
+| requestId | String | 请求编号（本地 UUID，关联 ai_request_log.request_id） |
+| inputTokens | Long | 输入 Token 数（未知为空） |
+| outputTokens | Long | 输出 Token 数（未知为空） |
+| totalTokens | Long | 合计 Token 数（输入、输出都已知时才有值） |
 | createTime | LocalDateTime | 创建时间 |
 
 **业务逻辑**:

@@ -12,7 +12,7 @@
 
 - **路径**: GET /mp/user/page
 - **权限**: mp:user:query
-- **说明**: 按公众号账号分页查询粉丝列表，支持 openid、unionId、昵称模糊匹配。
+- **说明**: 按公众号账号分页查询粉丝列表，支持 openid、昵称模糊匹配（unionId 在 ReqVO 中声明，但 Mapper 未参与查询）。
 
 **请求参数 (MpUserPageReqVO)**:
 
@@ -22,7 +22,7 @@
 | pageSize | Integer | 是 | 继承 PageParam | 每页条数 |
 | accountId | Long | 是 | @NotNull | 公众号账号的编号 |
 | openid | String | 否 | 无 | 公众号粉丝标识，模糊匹配 |
-| unionId | String | 否 | 无 | 微信生态唯一标识，模糊匹配 |
+| unionId | String | 否 | 无 | 微信生态唯一标识（ReqVO 标注模糊匹配，但 `MpUserMapper.selectPage` 未使用该条件，实际不生效） |
 | nickname | String | 否 | 无 | 公众号粉丝昵称，模糊匹配 |
 
 **响应**: `CommonResult<PageResult<MpUserRespVO>>`
@@ -48,7 +48,7 @@
 | createTime | LocalDateTime | 创建时间 |
 
 **业务逻辑**:
-1. 接收分页查询条件，账号编号为必填，openid / unionId / 昵称均为模糊匹配。
+1. 接收分页查询条件，账号编号为必填；`MpUserMapper.selectPage` 实际只对 openid、nickname 做模糊匹配、对 accountId 做精确匹配，ReqVO 中的 unionId 条件未参与查询（源码现状）。
 2. 调用 `MpUserMapper.selectPage` 按条件分页查询粉丝记录。
 3. 通过 `MpUserConvert.convertPage` 将 DO 分页结果转换为 RespVO 分页结果返回。
 

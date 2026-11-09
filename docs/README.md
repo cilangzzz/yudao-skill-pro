@@ -8,27 +8,27 @@
 - **README.md** — 模块概述、核心功能点、API 索引、数据模型概览、设计模式、依赖关系
 - **api-{domain}.md** — 按业务域拆分的 API 详情（接口路径、参数、返回值、业务逻辑）
 - **data-model.md** — 完整数据模型（表结构、字段定义、ER 关系）
-- **code-patterns.md** — 模块代码模式文档（仅 15 个核心模块）
-- **pitfalls.md** — 已知踩坑点和注意事项
+- **code-patterns.md** — 模块代码模式文档（16 个模块，fms/oa/hrm/pms 暂无）
+- **pitfalls.md** — 已知踩坑点和注意事项（全部 20 个模块均已具备）
 
 ## 模块索引
 
 | 模块 | 说明 | 核心功能 | API 域数 | 文件数 | 文档路径 |
 |-----|------|---------|---------|--------|---------|
-| **system** | 系统管理 | 用户、角色、权限、部门、租户、字典 | 14 | 17 | [docs/modules/system/](system/README.md) |
+| **system** | 系统管理 | 用户、角色、权限、部门、租户、字典 | 14 | 18 | [docs/modules/system/](system/README.md) |
 | **infra** | 基础设施 | 文件、配置、定时任务、日志、代码生成 | 8 | 12 | [docs/modules/infra/](infra/README.md) |
-| **pay** | 支付 | 订单、退款、钱包、转账、渠道、通知 | 8 | 12 | [docs/modules/pay/](pay/README.md) |
-| **member** | 会员 | 用户、等级、积分、签到、地址、标签 | 8 | 12 | [docs/modules/member/](member/README.md) |
-| **mall** | 商城 | 商品(SPU/SKU)、订单、促销、统计 | 27 | 31 | [docs/modules/mall/](mall/README.md) |
+| **pay** | 支付 | 订单、退款、钱包、转账、渠道、通知、APP 端支付 | 9 | 13 | [docs/modules/pay/](pay/README.md) |
+| **member** | 会员 | 用户、等级、积分、签到、地址、标签、APP 端接口 | 9 | 13 | [docs/modules/member/](member/README.md) |
+| **mall** | 商城 | 商品(SPU/SKU)、订单、促销、客服、装修、统计 | 28 | 32 | [docs/modules/mall/](mall/README.md) |
 | **crm** | CRM | 客户、线索、商机、合同、回款、统计 | 12 | 16 | [docs/modules/crm/](crm/README.md) |
 | **erp** | ERP | 采购、销售、库存、财务、产品 | 6 | 10 | [docs/modules/erp/](erp/README.md) |
-| **bpm** | 工作流 | 模型、流程定义、实例、任务、表单 | 4 | 8 | [docs/modules/bpm/](bpm/README.md) |
-| **ai** | AI | 对话、图像、模型、知识库、音乐、写作 | 8 | 12 | [docs/modules/ai/](ai/README.md) |
-| **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警 | 7 | 11 | [docs/modules/iot/](iot/README.md) |
+| **bpm** | 工作流 | 模型、流程定义、实例、任务、表单、HTTP 请求配置 | 4 | 8 | [docs/modules/bpm/](bpm/README.md) |
+| **ai** | AI | 对话、图像、模型、知识库、音乐、写作、请求日志、思考档位、Token 用量统计 | 9 | 13 | [docs/modules/ai/](ai/README.md) |
+| **iot** | 物联网 | 设备、产品、物模型、规则、OTA、告警、设备影子、产品脚本调试、IoTDB 时序存储、Modbus 接入 | 8 | 12 | [docs/modules/iot/](iot/README.md) |
 | **mp** | 公众号 | 账号、用户、消息、素材、菜单、自动回复 | 9 | 13 | [docs/modules/mp/](mp/README.md) |
-| **report** | 报表 | GoView 项目、数据查询、积木报表 | 3 | 7 | [docs/modules/report/](report/README.md) |
+| **report** | 报表 | GoView 项目、数据查询、积木报表、UReport2 中国式报表 | 4 | 8 | [docs/modules/report/](report/README.md) |
 | **im** | 即时通讯 | 单聊、群聊、消息收发、撤回、已读、RTC 通话、表情、频道 | 7 | 11 | [docs/modules/im/](im/README.md) |
-| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 3 | 5 | [docs/modules/mes/](mes/README.md) |
+| **mes** | 制造执行 | 主数据、排班、设备、工装、生产、质检、仓库 | 8 | 12 | [docs/modules/mes/](mes/README.md) |
 | **wms** | 仓储管理 | 仓库、物料、库存、入库、出库、调拨、盘点 | 4 | 8 | [docs/modules/wms/](wms/README.md) |
 | **fms** | 财务管理 | 账套、凭证、账簿、三大报表、期末结账 | 6 | 9 | [docs/modules/fms/](fms/README.md) |
 | **oa** | 办公自动化 | 日程、公告、考勤、公文、云盘、邮箱、审批流 | 22 | 25 | [docs/modules/oa/](oa/README.md) |
@@ -36,35 +36,35 @@
 | **pms** | 项目管理 | 项目、迭代、工作项、看板、工时、知识库 | 8 | 11 | [docs/modules/pms/](pms/README.md) |
 | **ai1** | AI Agent (Spring AI) | Agent 编排、流式会话、知识库 RAG、MCP、SKILL、长期记忆、工作台统计 | 8 | 12 | [docs/modules/ai1/](ai1/README.md) |
 
-**合计: 20 个模块 / 254 个文档文件**
+**合计: 20 个模块 / 268 个文档文件**
 
 ## 模块依赖关系
 
 ```
 system (系统管理) ← 几乎所有模块都依赖
   │
-  ├── infra (基础设施) ← 所有模块
+  ├── infra (基础设施) ← 大部分模块
   │
-  ├── pay (支付) ← mall, member
+  ├── pay (支付) ← mall
+  │   └── 依赖: system (用户/租户)
+  │
+  ├── member (会员) ← mall
   │   └── 依赖: system (用户), infra (文件)
   │
-  ├── member (会员) ← mall, crm
-  │   └── 依赖: system (用户), pay (钱包)
-  │
   ├── mall (商城)
-  │   └── 依赖: system, member, pay, product
+  │   └── 依赖: system, member, pay, infra + 内部子模块 (product/trade/promotion/statistics)
   │
   ├── crm (CRM)
-  │   └── 依赖: system (用户/部门)
+  │   └── 依赖: system (用户/部门), infra (文件), bpm (审批流)
   │
   ├── erp (ERP)
   │   └── 依赖: system (用户/部门)
   │
-  ├── bpm (工作流)
+  ├── bpm (工作流) ← crm, oa, hrm
   │   └── 依赖: system (用户/角色), Flowable 引擎
   │
   ├── ai (AI)
-  │   └── 依赖: system (用户), Spring AI
+  │   └── 依赖: system (用户), infra (文件), Spring AI
   │
   ├── iot (物联网)
   │   └── 依赖: system (租户)
@@ -97,7 +97,7 @@ system (系统管理) ← 几乎所有模块都依赖
   │   └── 依赖: system (用户), infra (文件), Spring AI (OpenAI 兼容) + Milvus + MCP SDK
   │
   └── report (报表)
-      └── 依赖: system (用户), infra (数据源)
+      └── 依赖: system (用户)（数据查询为 JdbcTemplate 直查，不经 infra）
 ```
 
 ## 数据模型统计
@@ -127,7 +127,7 @@ system (系统管理) ← 几乎所有模块都依赖
 
 ## 生成方式
 
-每个模块由独立子 agent 并行分析，遵循 `F:\work\flow\software-dev-ai-workflow\0.0-通用skill\author-build-project-docs` 的 phase-5-business 规范：
+每个模块由独立子 agent 并行分析，遵循 `F:\templates\software-dev-ai-workflow\0.0-通用skill\author-build-project-docs` 的 phase-5-business 规范：
 1. 读取 `docs/{module}/` 下的模块文档（含 `code-patterns.md` 代码模式文档）
 2. 提取模块概述、功能点、API、数据模型、设计模式
 3. 生成 README.md（索引）+ api-{domain}.md（详情）+ data-model.md + pitfalls.md

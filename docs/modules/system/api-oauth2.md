@@ -43,7 +43,7 @@
 | expires_in | Long | 过期时间，单位：秒 |
 | scope | String | 授权范围，多个使用空格分隔 |
 
-**业务逻辑**: 1. 校验 grant_type 为合法授权类型，且不允许 implicit 模式；2. 从 Basic 认证中解析 client_id / client_secret，校验客户端存在、启用、授权类型、scope 范围与 redirect_uri 合法；3. 按模式分发：authorization_code 消费授权码（校验 code 存在、未过期，且 clientId / redirect_uri / state 与授权码记录匹配）后创建令牌；password 模式先 authenticate 账号密码再创建令牌；client_credentials 模式以 userId=0 创建令牌；refresh_token 模式刷新令牌（旧访问令牌删除、刷新令牌过期则拒绝）；4. 创建令牌时生成刷新令牌与访问令牌（UUID），访问令牌有效期取客户端 accessTokenValiditySeconds，写入 MySQL 与 Redis；5. 转换为 OAuth2OpenAccessTokenRespVO 返回。
+**业务逻辑**: 1. 校验 grant_type 为合法授权类型，且不允许 implicit 模式；2. 从 Basic 认证中解析 client_id / client_secret，校验客户端存在、启用、授权类型、scope 范围与 redirect_uri 合法（**redirect_uri 必须与客户端已注册的 redirect_uris 完全相等**，采用精确匹配而非前缀匹配）；3. 按模式分发：authorization_code 消费授权码（校验 code 存在、未过期，且 clientId / redirect_uri / state 与授权码记录匹配）后创建令牌；password 模式先 authenticate 账号密码再创建令牌；client_credentials 模式以 userId=0 创建令牌；refresh_token 模式刷新令牌（**旧访问令牌保留不删除**，仅当刷新令牌本身已过期时才级联删除其名下访问令牌并返回 401）；4. 创建令牌时生成刷新令牌与访问令牌（UUID），访问令牌有效期取客户端 accessTokenValiditySeconds，写入 MySQL 与 Redis；5. 转换为 OAuth2OpenAccessTokenRespVO 返回。
 
 **错误码**:
 
@@ -53,8 +53,8 @@
 | 1_002_020_002 | OAuth2 客户端已禁用 |
 | 1_002_020_003 | 不支持该授权类型 |
 | 1_002_020_004 | 授权范围过大 |
-| 1_002_020_005 | 无效 redirect_uri |
-| 1_002_020_006 | 无效 client_secret |
+| 1_002_020_005 | 无效 redirect_uri: {}（须与客户端注册的 redirect_uris 完全一致） |
+| 1_002_020_006 | 无效 client_secret: {} |
 | 1_002_021_000 | client_id 不匹配 |
 | 1_002_021_001 | redirect_uri 不匹配 |
 | 1_002_021_002 | state 不匹配 |
@@ -80,7 +80,7 @@
 |-----|------|------|
 | data | Boolean | 是否删除成功（令牌不存在或不属于该客户端时返回 false） |
 
-**业务逻辑**: 1. 从 Basic 认证解析并校验客户端；2. 查询访问令牌，若不存在或 clientId 与当前客户端不匹配则返回 false；3. 匹配则删除访问令牌，并级联删除对应刷新令牌及 Redis 缓存。
+**业务逻辑**: 1. 从 Basic 认证解析并校验客户端；2. 查询访问令牌，若不存在或 clientId 与当前客户端不匹配则返回 false；3. 匹配则删除访问令牌：**级联删除同一 refresh_token 名下的其它访问令牌**（MySQL + Redis），并删除对应刷新令牌及 Redis 缓存；其它刷新令牌下的访问令牌不受影响。
 
 **错误码**:
 
@@ -88,7 +88,7 @@
 |-------|------|
 | 1_002_020_000 | OAuth2 客户端不存在 |
 | 1_002_020_002 | OAuth2 客户端已禁用 |
-| 1_002_020_006 | 无效 client_secret |
+| 1_002_020_006 | 无效 client_secret: {} |
 
 ### 1.3 校验访问令牌
 
@@ -123,7 +123,7 @@
 |-------|------|
 | 1_002_020_000 | OAuth2 客户端不存在 |
 | 1_002_020_002 | OAuth2 客户端已禁用 |
-| 1_002_020_006 | 无效 client_secret |
+| 1_002_020_006 | 无效 client_secret: {} |
 
 ### 1.4 获得授权信息
 
@@ -177,7 +177,7 @@
 |-----|------|------|
 | data | String | 重定向 URL；自动授权未通过时返回 null（前端不跳转），用户拒绝时返回携带 access_denied 错误的 URL |
 
-**业务逻辑**: 1. 校验 response_type 只允许 code 或 token；2. 校验客户端存在、启用、授权类型、scope 在客户端授权范围内、redirect_uri 匹配；3. auto_approve=true（场景一）：执行预授权检查——请求 scope 全部在客户端 autoApproveScopes 中则写入批准记录并通过，否则结合用户历史批准记录判断，不通过返回 null；4. auto_approve=false（场景二）：逐个保存 scope 批准记录（有效期 30 天，先更新后插入），至少一个 scope 被同意才通过，否则返回 access_denied 错误重定向 URL；5. code 模式生成授权码（UUID，有效期 5 分钟）并拼接重定向 URL；token 模式直接创建访问令牌并拼接重定向 URL。
+**业务逻辑**: 1. 校验 response_type 只允许 code 或 token；2. 校验客户端存在、启用、授权类型、scope 在客户端授权范围内、redirect_uri 与客户端注册的 redirect_uris **完全一致**（精确匹配）；3. auto_approve=true（场景一）：执行预授权检查——请求 scope 全部在客户端 autoApproveScopes 中则写入批准记录并通过，否则结合用户历史批准记录判断，不通过返回 null；4. auto_approve=false（场景二）：逐个保存 scope 批准记录（有效期 30 天，先更新后插入），至少一个 scope 被同意才通过，否则返回 access_denied 错误重定向 URL；5. code 模式生成授权码（UUID，有效期 5 分钟）并拼接重定向 URL；token 模式直接创建访问令牌并拼接重定向 URL。
 
 **错误码**:
 
@@ -187,7 +187,7 @@
 | 1_002_020_002 | OAuth2 客户端已禁用 |
 | 1_002_020_003 | 不支持该授权类型 |
 | 1_002_020_004 | 授权范围过大 |
-| 1_002_020_005 | 无效 redirect_uri |
+| 1_002_020_005 | 无效 redirect_uri: {}（须与客户端注册的 redirect_uris 完全一致） |
 
 ## 2. OAuth2 客户端管理（OAuth2ClientController）
 
@@ -411,7 +411,7 @@
 |-----|------|------|
 | data | Boolean | 删除成功返回 true |
 
-**业务逻辑**: 1. 调用 AdminAuthService.logout，登出类型为"管理员删除"（LOGOUT_DELETE）；2. 内部移除访问令牌（MySQL + Redis）及其刷新令牌，并记录登出日志。
+**业务逻辑**: 1. 调用 AdminAuthService.logout，登出类型为"管理员删除"（LOGOUT_DELETE）；2. 内部移除访问令牌（MySQL + Redis），**同时级联删除同一 refresh_token 名下的其它访问令牌**，并删除该刷新令牌，最后记录登出日志。
 
 ### 3.3 批量删除访问令牌
 

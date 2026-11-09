@@ -162,7 +162,7 @@
 
 `updateLeaveApplyStatus(id, status)` 由 BPM 流程监听器调用（非本 Controller 的 admin 端点）：校验申请存在后更新审批状态；当状态变更为「审批通过」时，调用 `OaAttendanceService.createApplyAttendance` 为申请人按请假开始时间生成「请假」类型考勤明细。
 
-## 附：错误码汇总（流程申请段 1-054-280-000）
+## 附：错误码汇总（流程申请段 1_054_280_000）
 
 | 错误码 | 说明 |
 |-------|------|

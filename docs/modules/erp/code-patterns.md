@@ -120,50 +120,51 @@ public class ErpPurchaseOrderServiceImpl implements ErpPurchaseOrderService {
 }
 ```
 
-审核/反审核的标准流程（以采购入库为例）：校验存在 → 校验前置状态 → 处理库存联动 → 更新状态。审核通过时按明细逐条创建库存记录，反审核时作废对应库存记录：
+审核/反审核的标准流程（以采购入库为例）：校验存在 → 校验状态与下游单据 → 乐观更新状态 → 变更库存 → 回写订单数量。审核通过时按明细逐条创建库存记录，反审核时以「作废」业务类型 + 负数数量冲销（`ErpStockRecordService` 只有 `createStockRecord`，没有删除/回滚接口）：
 
 ```java
-// 采购入库审核流程
+// 采购入库审核流程（ErpPurchaseInServiceImpl#updatePurchaseInStatus）
 @Override
 @Transactional(rollbackFor = Exception.class)
 public void updatePurchaseInStatus(Long id, Integer status) {
     boolean approve = ErpAuditStatus.APPROVE.getStatus().equals(status);
     // 1. 校验存在
     ErpPurchaseInDO purchaseIn = validatePurchaseInExists(id);
-    // 2. 校验状态
+    // 1.2 校验状态（不允许重复流转）
     if (purchaseIn.getStatus().equals(status)) {
         throw exception(approve ? PURCHASE_IN_APPROVE_FAIL : PURCHASE_IN_PROCESS_FAIL);
     }
-
-    // 3. 更新库存
-    if (approve) {
-        List<ErpPurchaseInItemDO> items = purchaseInItemMapper.selectListByInId(id);
-        items.forEach(item -> {
-                // 创建库存记录
-                ErpStockRecordCreateReqBO reqBO = new ErpStockRecordCreateReqBO();
-                reqBO.setProductId(item.getProductId());
-                reqBO.setWarehouseId(purchaseIn.getWarehouseId());
-                reqBO.setCount(item.getCount());
-                reqBO.setBizType(ErpStockRecordBizTypeEnum.PURCHASE_IN.getType());
-                reqBO.setBizId(id);
-                reqBO.setBizItemId(item.getId());
-                reqBO.setBizNo(purchaseIn.getNo());
-                // 更新库存
-                stockRecordService.createStockRecord(reqBO);
-            });
-    } else {
-        // 反审核，扣减库存
-        stockRecordService.deleteStockRecord(id, ErpStockRecordBizTypeEnum.PURCHASE_IN_CANCEL.getType());
+    // 1.3 校验已付款金额：已付款不允许反审核
+    if (!approve && purchaseIn.getPaymentPrice().compareTo(BigDecimal.ZERO) > 0) {
+        throw exception(PURCHASE_IN_PROCESS_FAIL_EXISTS_PAYMENT);
     }
 
-    // 4. 更新状态
-    purchaseInMapper.updateById(new ErpPurchaseInDO().setId(id).setStatus(status));
+    // 2. 乐观更新状态（updateByIdAndStatus 带原状态条件）
+    int updateCount = purchaseInMapper.updateByIdAndStatus(id, purchaseIn.getStatus(),
+            new ErpPurchaseInDO().setStatus(status));
+    if (updateCount == 0) {
+        throw exception(approve ? PURCHASE_IN_APPROVE_FAIL : PURCHASE_IN_PROCESS_FAIL);
+    }
+
+    // 3. 变更库存：仓库编号取明细行的 warehouseId（入库单主表没有仓库字段）
+    List<ErpPurchaseInItemDO> purchaseInItems = purchaseInItemMapper.selectListByInId(id);
+    Integer bizType = approve ? ErpStockRecordBizTypeEnum.PURCHASE_IN.getType()
+            : ErpStockRecordBizTypeEnum.PURCHASE_IN_CANCEL.getType();
+    purchaseInItems.forEach(item -> {
+        BigDecimal count = approve ? item.getCount() : item.getCount().negate();
+        stockRecordService.createStockRecord(new ErpStockRecordCreateReqBO(
+                item.getProductId(), item.getWarehouseId(), count,
+                bizType, item.getInId(), item.getId(), purchaseIn.getNo()));
+    });
+
+    // 4. 回写采购订单的入库数量
+    updatePurchaseOrderInCount(purchaseIn.getOrderId());
 }
 ```
 
 ### DAL 层
 
-Mapper 继承 `BaseMapperX<DO>`，用 `default` 方法封装常用查询：按单号查询、条件分页（`xxIfPresent` 系列方法在条件为空时自动跳过拼接）、带状态条件的更新（配合状态机做乐观并发控制）：
+Mapper 继承 `BaseMapperX<DO>`，用 `default` 方法封装常用查询：按单号查询、条件分页（`xxIfPresent` 系列方法在条件为空时自动跳过拼接）、带状态条件的更新（配合状态机做乐观并发控制）。单据分页若需按「入库/退货状态」「是否可入库」等聚合字段过滤，或按产品编号反查明细，使用 `MPJLambdaWrapperX` 联表分页（`selectJoinPage`）：
 
 ```java
 @Mapper
@@ -174,18 +175,32 @@ public interface ErpPurchaseOrderMapper extends BaseMapperX<ErpPurchaseOrderDO> 
     }
 
     default PageResult<ErpPurchaseOrderDO> selectPage(ErpPurchaseOrderPageReqVO reqVO) {
-        return selectPage(reqVO, new LambdaQueryWrapperX<ErpPurchaseOrderDO>()
+        MPJLambdaWrapperX<ErpPurchaseOrderDO> query = new MPJLambdaWrapperX<ErpPurchaseOrderDO>()
                 .likeIfPresent(ErpPurchaseOrderDO::getNo, reqVO.getNo())
                 .eqIfPresent(ErpPurchaseOrderDO::getStatus, reqVO.getStatus())
                 .eqIfPresent(ErpPurchaseOrderDO::getSupplierId, reqVO.getSupplierId())
                 .betweenIfPresent(ErpPurchaseOrderDO::getOrderTime, reqVO.getOrderTime())
-                .orderByDesc(ErpPurchaseOrderDO::getId));
+                .orderByDesc(ErpPurchaseOrderDO::getId);
+        // 入库状态：NONE/PART/ALL 三档，PART 需比较 in_count 与 total_count
+        if (Objects.equals(reqVO.getInStatus(), ErpPurchaseOrderPageReqVO.IN_STATUS_NONE)) {
+            query.eq(ErpPurchaseOrderDO::getInCount, 0);
+        } else if (Objects.equals(reqVO.getInStatus(), ErpPurchaseOrderPageReqVO.IN_STATUS_PART)) {
+            query.gt(ErpPurchaseOrderDO::getInCount, 0).apply("t.in_count < t.total_count");
+        } else if (Objects.equals(reqVO.getInStatus(), ErpPurchaseOrderPageReqVO.IN_STATUS_ALL)) {
+            query.apply("t.in_count = t.total_count");
+        }
+        // 按产品编号反查：联表明细并 groupBy 主表 id，避免 1 对多产生重复行
+        if (reqVO.getProductId() != null) {
+            query.leftJoin(ErpPurchaseOrderItemDO.class, ErpPurchaseOrderItemDO::getOrderId, ErpPurchaseOrderDO::getId)
+                    .eq(ErpPurchaseOrderItemDO::getProductId, reqVO.getProductId())
+                    .groupBy(ErpPurchaseOrderDO::getId);
+        }
+        return selectJoinPage(reqVO, ErpPurchaseOrderDO.class, query);
     }
 
-    default int updateByIdAndStatus(Long id, Integer status, ErpPurchaseOrderDO update) {
-        return update(update, new LambdaQueryWrapperX<ErpPurchaseOrderDO>()
-                .eq(ErpPurchaseOrderDO::getId, id)
-                .eq(ErpPurchaseOrderDO::getStatus, status));
+    default int updateByIdAndStatus(Long id, Integer status, ErpPurchaseOrderDO updateObj) {
+        return update(updateObj, new LambdaUpdateWrapper<ErpPurchaseOrderDO>()
+                .eq(ErpPurchaseOrderDO::getId, id).eq(ErpPurchaseOrderDO::getStatus, status));
     }
 }
 ```
@@ -197,20 +212,26 @@ public interface ErpPurchaseOrderMapper extends BaseMapperX<ErpPurchaseOrderDO> 
 @Mapper
 public interface ErpStockMapper extends BaseMapperX<ErpStockDO> {
 
-    default int updateCountIncrement(Long id, BigDecimal count, Boolean negativeEnable) {
-        // 如果不允许负库存，需要检查库存是否充足
-        if (!negativeEnable) {
-            return update(null, new LambdaUpdateWrapper<ErpStockDO>()
-                    .setSql("count = count + " + count)
-                    .eq(ErpStockDO::getId, id)
-                    .ge(count.compareTo(BigDecimal.ZERO) < 0, ErpStockDO::getCount, count.abs()));
+    default int updateCountIncrement(Long id, BigDecimal count, boolean negativeEnable) {
+        LambdaUpdateWrapper<ErpStockDO> updateWrapper = new LambdaUpdateWrapper<ErpStockDO>()
+                .eq(ErpStockDO::getId, id);
+        if (count.compareTo(BigDecimal.ZERO) > 0) {
+            updateWrapper.setSql("count = count + " + count);
+        } else if (count.compareTo(BigDecimal.ZERO) < 0) {
+            // 不允许负库存时，附加 count >= 扣减量 条件；更新行数为 0 即库存不足
+            if (!negativeEnable) {
+                updateWrapper.ge(ErpStockDO::getCount, count.abs());
+            }
+            updateWrapper.setSql("count = count - " + count.abs());
         }
-        return update(null, new LambdaUpdateWrapper<ErpStockDO>()
-                .setSql("count = count + " + count)
-                .eq(ErpStockDO::getId, id));
+        return update(null, updateWrapper);
     }
 }
 ```
+
+### 框架能力：统计 SQL 方言适配（`SqlDialectUtils`）
+
+采购/销售统计 XML 中的方言差异用框架 `SqlDialectUtils` 处理（`ErpPurchaseStatisticsMapper.xml`、`ErpSaleStatisticsMapper.xml`）：无 `FROM` 子句的顶层 `SELECT` 统一在末尾追加 `${@...SqlDialectUtils@fromDual()}`——Oracle 要求 `FROM DUAL`，MySQL/PostgreSQL/SQL Server 下返回空串，不能手工删除该占位（删掉后 Oracle 报 `ORA-00923`，反向硬编码则其它库语法错误）。它按当前执行时路由到的数据源动态判定方言；同时原生 SQL 统一用 `COALESCE` 等标准函数，避免 `IFNULL`、`DATE_FORMAT`、`LIMIT` 等 MySQL 专属写法。详见 pitfalls 9.2「无顶层 FROM 的统计 SQL 依赖 fromDual()，且不能使用 MySQL 专属函数」。
 
 ### 异常处理
 
@@ -253,7 +274,7 @@ NEW_TYPE_CANCEL(91, "新业务类型（作废）")
 ```
 
 2. **创建业务单据**：参考采购入库/销售出库创建对应的业务单据。
-3. **在业务审核时创建库存记录**：审核通过时调用 `stockRecordService.createStockRecord()`，反审核时调用 `stockRecordService.deleteStockRecord()`。
+3. **在业务审核时创建库存记录**：`ErpStockRecordService` 只提供 `createStockRecord()`（无删除/回滚方法）。审核通过时以正数数量 + 正向 bizType 创建记录；反审核时以负数数量 + 对应的「作废」bizType 再创建一条记录来冲销，二者都会经过 `ErpStockService#updateStockCountIncrement` 实际增减 `erp_stock`。
 
 ### 最佳实践
 
@@ -357,7 +378,11 @@ cn.iocoder.yudao.module.erp
 | 单据 | 前缀 |
 |-----|------|
 | 采购订单 | CGDD |
+| 采购入库单 | CGRK |
+| 采购退货单 | CGTH |
 | 销售订单 | XSDD |
+| 销售出库单 | XSCK |
+| 销售退货单 | XSTH |
 | 其它入库单 | QTRK |
 | 其它出库单 | QCKD |
 | 库存调拨单 | QCDB |
@@ -365,7 +390,7 @@ cn.iocoder.yudao.module.erp
 | 付款单 | FKD |
 | 收款单 | SKD |
 
-采购入库/退货、销售出库/退货等其余单据的前缀以 `ErpNoRedisDAO` 中的常量定义为准。
+以上 12 个前缀均定义在 `ErpNoRedisDAO` 中，格式为「前缀 + yyyyMMdd + 6 位序号」，各 Service 创建单据后会用 `selectByNo` 做唯一性兜底校验。
 
 ### 模块间通信
 
